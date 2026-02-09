@@ -1,0 +1,98 @@
+{
+  "name": "beautify-format",
+  "displayName": "Beautify Format",
+  "description": "Beautify and format JSON and XML files with keyboard shortcuts and context menu",
+  "version": "0.0.1",
+  "publisher": "DataBeautify",
+  "author": {
+    "name": "Your Name"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/your-username/beautify-format#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/beautify-format.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/beautify-format/issues"
+  },
+  "keywords": [
+    "beautify",
+    "format",
+    "formatter",
+    "json",
+    "xml",
+    "prettify",
+    "indent"
+  ],
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:json",
+    "onLanguage:xml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "beautify-format.formatJSON",
+        "title": "Beautify Format: Format JSON"
+      },
+      {
+        "command": "beautify-format.formatXML",
+        "title": "Beautify Format: Format XML"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "beautify-format.formatJSON",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j",
+        "when": "editorTextFocus && editorLangId == json"
+      },
+      {
+        "command": "beautify-format.formatXML",
+        "key": "ctrl+alt+x",
+        "mac": "cmd+alt+x",
+        "when": "editorTextFocus && editorLangId == xml"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "beautify-format.formatJSON",
+          "when": "editorLangId == json",
+          "group": "1_modification"
+        },
+        {
+          "command": "beautify-format.formatXML",
+          "when": "editorLangId == xml",
+          "group": "1_modification"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.3"
+  },
+  "dependencies": {
+    "xml-formatter": "^3.6.0"
+  }
+}
