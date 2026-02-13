@@ -1,12 +1,13 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON and XML files.
+A Visual Studio Code extension that beautifully formats JSON, XML and HTML files.
 
 ## Features
 
 - 🎨 Format JSON files with proper indentation
 - 🎨 Format XML files with proper indentation
-- 🔍 Automatic format detection (JSON or XML)
+- 🎨 Format HTML files with proper indentation
+- 🔍 Automatic format detection (JSON, XML or HTML)
 - 🛠️ Smart repair: Fixes minor errors in JSON/XML while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
@@ -22,7 +23,7 @@ A Visual Studio Code extension that beautifully formats JSON and XML files.
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"
    - Right-click in the editor and select "Beautify Format"
 
-The extension will automatically detect the format and beautify it. If the file has syntax errors, it will attempt to fix them and notify you of the error location.
+The extension will automatically detect the format and beautify it. If the file has syntax errors, it will attempt to fix them (for JSON/XML) or report them (for HTML) and notify you of the error location.
 
 ## Keyboard Shortcuts
 
