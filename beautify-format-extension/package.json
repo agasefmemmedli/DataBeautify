@@ -32,6 +32,7 @@
     "Formatters"
   ],
   "activationEvents": [
+    "onCommand:beautify-format.beautify",
     "onLanguage:json",
     "onLanguage:xml"
   ],
@@ -39,38 +40,23 @@
   "contributes": {
     "commands": [
       {
-        "command": "beautify-format.formatJSON",
-        "title": "Beautify Format: Format JSON"
-      },
-      {
-        "command": "beautify-format.formatXML",
-        "title": "Beautify Format: Format XML"
+        "command": "beautify-format.beautify",
+        "title": "Beautify Format"
       }
     ],
     "keybindings": [
       {
-        "command": "beautify-format.formatJSON",
-        "key": "ctrl+alt+j",
-        "mac": "cmd+alt+j",
-        "when": "editorTextFocus && editorLangId == json"
-      },
-      {
-        "command": "beautify-format.formatXML",
-        "key": "ctrl+alt+x",
-        "mac": "cmd+alt+x",
-        "when": "editorTextFocus && editorLangId == xml"
+        "command": "beautify-format.beautify",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "beautify-format.formatJSON",
-          "when": "editorLangId == json",
-          "group": "1_modification"
-        },
-        {
-          "command": "beautify-format.formatXML",
-          "when": "editorLangId == xml",
+          "command": "beautify-format.beautify",
+          "when": "editorLangId == json || editorLangId == xml",
           "group": "1_modification"
         }
       ]
@@ -85,14 +71,16 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.74.0",
     "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
     "eslint": "^8.28.0",
     "typescript": "^4.9.3"
   },
   "dependencies": {
+    "fast-xml-parser": "^5.3.5",
+    "jsonrepair": "^3.13.2",
     "xml-formatter": "^3.6.0"
   }
 }
