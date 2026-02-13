@@ -1,58 +1,54 @@
 # Beautify Format
 
-Расширение для Visual Studio Code, которое красиво форматирует JSON и XML файлы.
+A Visual Studio Code extension that beautifully formats JSON and XML files.
 
-## Возможности
+## Features
 
-- 🎨 Форматирование JSON файлов с правильными отступами
-- 🎨 Форматирование XML файлов с правильными отступами
-- ⌨️ Горячие клавиши для быстрого форматирования
-- 📝 Команды в контекстном меню редактора
+- 🎨 Format JSON files with proper indentation
+- 🎨 Format XML files with proper indentation
+- 🔍 Automatic format detection (JSON or XML)
+- 🛠️ Smart repair: Fixes minor errors in JSON/XML while beautifying
+- 📍 Error reporting: Highlights the line with syntax errors if found
+- ⌨️ Keyboard shortcuts for quick formatting
+- 📝 Context menu commands in the editor
 
-## Использование
+## Usage
 
-### Форматирование JSON
+### Formatting JSON or XML
 
-1. Откройте JSON файл
-2. Используйте один из способов:
-   - Нажмите `Ctrl+Alt+J` (Windows/Linux) или `Cmd+Alt+J` (Mac)
-   - Откройте палитру команд (`Ctrl+Shift+P`) и выберите "Beautify Format: Format JSON"
-   - Кликните правой кнопкой мыши в редакторе и выберите "Beautify Format: Format JSON"
+1. Open a JSON or XML file
+2. Use one of the following methods:
+   - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
+   - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"
+   - Right-click in the editor and select "Beautify Format"
 
-### Форматирование XML
+The extension will automatically detect the format and beautify it. If the file has syntax errors, it will attempt to fix them and notify you of the error location.
 
-1. Откройте XML файл
-2. Используйте один из способов:
-   - Нажмите `Ctrl+Alt+X` (Windows/Linux) или `Cmd+Alt+X` (Mac)
-   - Откройте палитру команд (`Ctrl+Shift+P`) и выберите "Beautify Format: Format XML"
-   - Кликните правой кнопкой мыши в редакторе и выберите "Beautify Format: Format XML"
+## Keyboard Shortcuts
 
-## Горячие клавиши
-
-| Команда | Windows/Linux | Mac |
+| Command | Windows/Linux | Mac |
 |---------|--------------|-----|
-| Format JSON | `Ctrl+Alt+J` | `Cmd+Alt+J` |
-| Format XML | `Ctrl+Alt+X` | `Cmd+Alt+X` |
+| Beautify Format | `Ctrl+Alt+B` | `Cmd+Alt+B` |
 
-## Требования
+## Requirements
 
-- Visual Studio Code версии 1.74.0 или выше
+- Visual Studio Code version 1.74.0 or higher
 
-## Установка для разработки
+## Development Installation
 
-1. Клонируйте репозиторий
-2. Установите зависимости: `npm install`
-3. Скомпилируйте проект: `npm run compile`
-4. Нажмите F5 для запуска Extension Development Host
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Compile the project: `npm run compile`
+4. Press `F5` to start the Extension Development Host
 
-## Публикация
+## Publication
 
-Для публикации расширения:
+To publish the extension:
 
-1. Установите vsce: `npm install -g @vscode/vsce`
-2. Создайте пакет: `vsce package`
-3. Опубликуйте: `vsce publish`
+1. Install vsce globally: `npm install -g @vscode/vsce`
+2. Create a package: `vsce package`
+3. Publish: `vsce publish`
 
-## Лицензия
+## License
 
 MIT

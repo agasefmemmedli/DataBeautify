@@ -1,98 +1,101 @@
-# Руководство по установке и использованию Beautify Format
+# Beautify Format Installation and Usage Guide
 
-## Установка зависимостей
+## Installing Dependencies
 
-1. Убедитесь, что у вас установлен Node.js (версия 16 или выше)
-2. Откройте терминал в папке проекта
-3. Выполните команду:
+1. Ensure you have Node.js installed (version 16 or higher)
+2. Open a terminal in the project folder
+3. Run the following command:
 ```bash
 npm install
 ```
 
-## Компиляция проекта
+## Compiling the Project
 
-После установки зависимостей скомпилируйте TypeScript код:
+After installing dependencies, compile the TypeScript code:
 
 ```bash
 npm run compile
 ```
 
-Или для автоматической перекомпиляции при изменениях:
+Or for automatic recompilation on changes:
 
 ```bash
 npm run watch
 ```
 
-## Запуск расширения для тестирования
+## Running the Extension for Testing
 
-1. Откройте папку проекта в Visual Studio Code
-2. Нажмите `F5` или выберите "Run > Start Debugging"
-3. Откроется новое окно VS Code с активированным расширением
-4. Создайте тестовый JSON или XML файл
-5. Попробуйте использовать команды форматирования
+1. Open the project folder in Visual Studio Code
+2. Press `F5` or select "Run > Start Debugging"
+3. A new VS Code window (Extension Development Host) will open with the extension active
+4. Create a test JSON or XML file
+5. Try using the formatting commands
 
-## Примеры файлов для тестирования
+## Test File Examples
 
-### Пример JSON (создайте test.json):
+### JSON Example (create test.json):
 ```json
 {"name":"John","age":30,"city":"New York","hobbies":["reading","gaming","coding"],"address":{"street":"Main St","number":123}}
 ```
 
-### Пример XML (создайте test.xml):
+### XML Example (create test.xml):
 ```xml
 <root><person><name>John</name><age>30</age><city>New York</city></person><hobbies><hobby>reading</hobby><hobby>gaming</hobby></hobbies></root>
 ```
 
-## Создание .vsix пакета для установки
+## Creating a .vsix Package for Installation
 
-Для создания установочного пакета:
+To create an installation package:
 
-1. Установите vsce глобально:
+1. Install vsce globally:
 ```bash
 npm install -g @vscode/vsce
 ```
 
-2. Создайте пакет:
+2. Create the package:
 ```bash
 vsce package
 ```
 
-3. Установите созданный .vsix файл:
-   - В VS Code: Extensions > ... > Install from VSIX
-   - Или из командной строки: `code --install-extension beautify-format-0.0.1.vsix`
+3. Install the created .vsix file:
+   - In VS Code: Extensions > ... > Install from VSIX
+   - Or from the command line: `code --install-extension beautify-format-0.0.1.vsix`
 
-## Структура проекта
+## Project Structure
 
 ```
 beautify-format-extension/
-├── .vscode/              # Настройки VS Code для разработки
-│   ├── launch.json       # Конфигурация отладки
-│   └── tasks.json        # Задачи сборки
-├── src/                  # Исходный код
-│   └── extension.ts      # Главный файл расширения
-├── out/                  # Скомпилированные файлы (создается автоматически)
-├── package.json          # Манифест расширения
-├── tsconfig.json         # Конфигурация TypeScript
-├── .eslintrc.js          # Конфигурация ESLint
-├── .gitignore           # Игнорируемые файлы
-├── .vscodeignore        # Файлы, исключаемые из пакета
-└── README.md            # Документация
+├── .vscode/              # VS Code settings for development
+│   ├── launch.json       # Debug configuration
+│   └── tasks.json        # Build tasks
+├── src/                  # Source code
+│   └── extension.ts      # Main extension file
+├── out/                  # Compiled files (generated automatically)
+├── package.json          # Extension manifest
+├── tsconfig.json         # TypeScript configuration
+├── .eslintrc.js          # ESLint configuration
+├── .gitignore           # Ignored files
+├── .vscodeignore        # Files excluded from the package
+└── README.md            # Documentation
 ```
 
-## Возможности расширения
+## Extension Features
 
-✅ Форматирование JSON файлов
-✅ Форматирование XML файлов
-✅ Горячие клавиши (Ctrl+Alt+J для JSON, Ctrl+Alt+X для XML)
-✅ Команды в палитре команд
-✅ Команды в контекстном меню редактора
-✅ Сообщения об успехе/ошибке
+✅ JSON file formatting
+✅ XML file formatting
+✅ Auto-detection of format
+✅ Smart repair of broken JSON/XML
+✅ Error reporting with line numbers
+✅ Keyboard shortcuts (Ctrl+Alt+B)
+✅ Command Palette integration
+✅ Context menu integration
+✅ Success/Error notifications
 
-## Дальнейшее развитие
+## Future Development
 
-Возможные улучшения:
-- Добавить настройки для размера отступов
-- Поддержка других форматов (HTML, CSS, YAML)
-- Форматирование выделенного фрагмента
-- Автоформатирование при сохранении
-- Настройка стиля форматирования
+Possible improvements:
+- Add settings for indentation size
+- Support for other formats (HTML, CSS, YAML)
+- Formatting of selected fragments
+- Auto-format on save
+- Customizable formatting styles
