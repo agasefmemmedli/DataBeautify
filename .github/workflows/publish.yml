@@ -1,10 +1,10 @@
-name: Bump Version and Publish
+name: Bump Version and Publish Extension
 
 on:
   workflow_dispatch:
     inputs:
       version_type:
-        description: 'Тип обновления (patch, minor, major)'
+        description: 'Тип обновления версии'
         required: true
         default: 'patch'
         type: choice
@@ -17,36 +17,124 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Нужно для пуша обновленного package.json
+      contents: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Нужно для корректной работы тегов
-
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install
-
+          cache-dependency-path: 'beautify-format-extension/package-lock.json'
+      
       - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump version and Publish
+      
+      - name: Install dependencies
+        working-directory: ./beautify-format-extension
+        run: |
+          echo "📦 Installing dependencies..."
+          npm install
+          
+          # Устанавливаем less и его типы (если не в package.json)
+          npm install less @types/less
+      
+      - name: Install VSCE
+        run: npm install -g @vscode/vsce
+      
+      - name: Compile TypeScript
+        working-directory: ./beautify-format-extension
+        run: |
+          echo "🔨 Compiling TypeScript..."
+          npm run compile
+      
+      - name: Bump version and create tag
+        id: version
+        working-directory: ./beautify-format-extension
+        run: |
+          echo "📈 Bumping ${{ github.event.inputs.version_type }} version..."
+          
+          # Получаем текущую версию
+          OLD_VERSION=$(node -p "require('./package.json').version")
+          echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
+          
+          # Обновляем версию в package.json
+          npm version ${{ github.event.inputs.version_type }} --no-git-tag-version
+          
+          # Получаем новую версию
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "✅ Version bumped: $OLD_VERSION → $NEW_VERSION"
+      
+      - name: Commit version change
+        working-directory: ./beautify-format-extension
+        run: |
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]" || echo "No changes to commit"
+      
+      - name: Create Git tag
+        run: |
+          git tag "v${{ steps.version.outputs.new_version }}"
+          echo "✅ Created tag: v${{ steps.version.outputs.new_version }}"
+      
+      - name: Publish to VS Code Marketplace
+        working-directory: ./beautify-format-extension
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          # 1. Поднимаем версию в package.json и создаем тег через vsce
-          # Параметр --commitMessage [skip ci] предотвращает бесконечный цикл пайплайнов
-          npx vsce publish ${{ github.event.inputs.version_type }} -p $VSCE_PAT
-          
+          echo "🚀 Publishing to VS Code Marketplace..."
+          vsce publish --no-git-tag-version -p $VSCE_PAT
+          echo "✅ Successfully published version ${{ steps.version.outputs.new_version }}"
+      
       - name: Push changes to GitHub
         run: |
-          # Пушим обновленный package.json и новый тег обратно в репозиторий
-          git push origin main --tags
+          echo "📤 Pushing changes to GitHub..."
+          git push origin main
+          git push origin --tags
+          echo "✅ Changes pushed to GitHub"
+      
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          release_name: Release v${{ steps.version.outputs.new_version }}
+          body: |
+            ## 🎉 Version ${{ steps.version.outputs.new_version }}
+            
+            **Тип обновления:** ${{ github.event.inputs.version_type }}
+            **Предыдущая версия:** ${{ steps.version.outputs.old_version }}
+            
+            ### Изменения
+            Автоматически опубликовано через GitHub Actions.
+            
+            ### Установка
+            Доступно в [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=YOUR-PUBLISHER.beautify-format)
+          draft: false
+          prerelease: false
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "### 📊 Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Type:** ${{ github.event.inputs.version_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Old Version:** ${{ steps.version.outputs.old_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "✅ **Extension successfully published to VS Code Marketplace!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Publication failed. Check logs above.**" >> $GITHUB_STEP_SUMMARY
+          fi
