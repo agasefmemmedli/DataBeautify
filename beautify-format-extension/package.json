@@ -5,16 +5,16 @@
   "version": "0.0.5",
   "publisher": "DataBeautify",
   "author": {
-    "name": "Your Name"
+    "name": "Aghasaf Mammadli"
   },
   "license": "MIT",
-  "homepage": "https://github.com/your-username/beautify-format#readme",
+  "homepage": "https://github.com/agasefmemmedli",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/beautify-format.git"
+    "url": "https://github.com/agasefmemmedli"
   },
   "bugs": {
-    "url": "https://github.com/your-username/beautify-format/issues"
+    "url": "https://github.com/agasefmemmedli"
   },
   "keywords": [
     "beautify",
