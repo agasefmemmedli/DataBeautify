@@ -31,3 +31,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Look for curly braces { combined with LESS-specific markers: variables (e.g., @variable:) or mixin definitions/calls (e.g., .mixin-name(). This distinguishes LESS from standard CSS and SCSS.
+
+## JavaScript Support (v0.0.9)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected the `acorn` package for validation. It is lightweight, fast, and provides detailed error locations (line/column).
+- **Recovery:** Used `js-beautify.js` for formatting. It is highly resilient and will attempt to format code even if it contains syntax errors, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Syntax errors from `acorn.parse` are caught, and the error message with line/column information is reported as a warning, allowing the user to fix the issue while still seeing a beautified version of the code.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('javascript', 'javascriptreact') with content-based heuristics. Looked for common JS keywords (`var`, `let`, `const`, `function`, `class`, `import`, etc.) and arrow function markers (`=>`). Added a fallback check for the presence of curly braces `{}` and semicolons `;` to catch simple JS snippets.

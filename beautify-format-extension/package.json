@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS and LESS files with keyboard shortcuts and context menu",
-  "version": "0.0.8",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS and JavaScript files with keyboard shortcuts and context menu",
+  "version": "0.0.9",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -44,7 +44,8 @@
     "onLanguage:css",
     "onLanguage:scss",
     "onLanguage:sass",
-    "onLanguage:less"
+    "onLanguage:less",
+    "onLanguage:javascript"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -64,6 +65,10 @@
       {
         "command": "beautify-format.formatLESS",
         "title": "Beautify LESS"
+      },
+      {
+        "command": "beautify-format.formatJS",
+        "title": "Beautify JavaScript"
       }
     ],
     "keybindings": [
@@ -78,7 +83,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript",
           "group": "1_modification"
         }
       ]
@@ -93,6 +98,7 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/acorn": "^4.0.6",
     "@types/css": "^0.0.38",
     "@types/htmlhint": "^1.1.5",
     "@types/js-beautify": "^1.14.3",
@@ -101,11 +107,12 @@
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
+    "@vscode/vsce": "^2.x.x",
     "eslint": "^8.28.0",
-    "typescript": "^4.9.3",
-    "@vscode/vsce": "^2.x.x"
+    "typescript": "^4.9.3"
   },
   "dependencies": {
+    "acorn": "^8.15.0",
     "css": "^3.0.0",
     "fast-xml-parser": "^5.3.6",
     "htmlhint": "^1.9.1",
