@@ -8,6 +8,7 @@ import * as css from 'css';
 import * as sass from 'sass';
 import { SassFormatter } from 'sass-formatter';
 import * as less from 'less';
+import * as acorn from 'acorn';
 
 /**
  * This method is called when the extension is activated
@@ -42,6 +43,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatLESSCommand = vscode.commands.registerCommand('beautify-format.formatLESS', () => {
         beautify('less');
     });
+    let formatJSCommand = vscode.commands.registerCommand('beautify-format.formatJS', () => {
+        beautify('javascript');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -49,6 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatSCSSCommand);
     context.subscriptions.push(formatSASSCommand);
     context.subscriptions.push(formatLESSCommand);
+    context.subscriptions.push(formatJSCommand);
 }
 
 /**
@@ -97,9 +102,58 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
 }
 
 /**
+ * Handle JavaScript formatting and validation
+ */
+async function handleJS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate JavaScript
+    try {
+        acorn.parse(text, { ecmaVersion: 'latest', sourceType: 'module' });
+    } catch (e: any) {
+        validationMessage = `${e.message} at line ${e.loc?.line}, col ${e.loc?.column}`;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format JavaScript
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format JavaScript: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`JavaScript has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('JavaScript formatted successfully!');
+    }
+}
+
+/**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -131,6 +185,8 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleSASS(editor, text);
     } else if (format === 'less') {
         await handleLESS(editor, text);
+    } else if (format === 'javascript') {
+        await handleJS(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -157,7 +213,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -166,6 +222,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'scss') { return 'scss'; }
     if (lang === 'sass') { return 'sass'; }
     if (lang === 'less') { return 'less'; }
+    if (lang === 'javascript' || lang === 'javascriptreact') { return 'javascript'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -198,6 +255,15 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     // CSS heuristic: contains { and } and looks like a rule
     if (trimmed.includes('{') && trimmed.includes('}') && /[a-z0-9-_#.]+\s*\{/i.test(trimmed)) {
         return 'css';
+    }
+
+    // JavaScript heuristic: common keywords or arrow functions
+    if (
+        /\b(var|let|const|function|class|import|export|if|for|while|return)\b/.test(trimmed) ||
+        /\s*=>\s*/.test(trimmed) ||
+        (trimmed.includes('{') && trimmed.includes('}') && trimmed.includes(';'))
+    ) {
+        return 'javascript';
     }
 
     return 'unknown';
