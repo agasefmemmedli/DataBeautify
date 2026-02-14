@@ -1,0 +1,52 @@
+name: Bump Version and Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Тип обновления (patch, minor, major)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Нужно для пуша обновленного package.json
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Нужно для корректной работы тегов
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and Publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          # 1. Поднимаем версию в package.json и создаем тег через vsce
+          # Параметр --commitMessage [skip ci] предотвращает бесконечный цикл пайплайнов
+          npx vsce publish ${{ github.event.inputs.version_type }} -p $VSCE_PAT
+          
+      - name: Push changes to GitHub
+        run: |
+          # Пушим обновленный package.json и новый тег обратно в репозиторий
+          git push origin main --tags
