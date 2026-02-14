@@ -5,6 +5,8 @@ import { XMLValidator } from 'fast-xml-parser';
 import * as jsbeautify from 'js-beautify';
 import { HTMLHint } from 'htmlhint';
 import * as css from 'css';
+import * as sass from 'sass';
+import { SassFormatter } from 'sass-formatter';
 
 /**
  * This method is called when the extension is activated
@@ -30,9 +32,18 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('css');
     });
 
+    let formatSCSSCommand = vscode.commands.registerCommand('beautify-format.formatSCSS', () => {
+        beautify('scss');
+    });
+    let formatSASSCommand = vscode.commands.registerCommand('beautify-format.formatSASS', () => {
+        beautify('sass');
+    });
+
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
     context.subscriptions.push(formatCSSCommand);
+    context.subscriptions.push(formatSCSSCommand);
+    context.subscriptions.push(formatSASSCommand);
 }
 
 /**
@@ -83,7 +94,7 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -109,6 +120,10 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css') {
         await handleHTML(editor, text);
     } else if (format === 'css') {
         await handleCSS(editor, text);
+    } else if (format === 'scss') {
+        await handleSCSS(editor, text);
+    } else if (format === 'sass') {
+        await handleSASS(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -135,12 +150,14 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css') {
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
     if (lang === 'html' || lang === 'htm') { return 'html'; }
     if (lang === 'css') { return 'css'; }
+    if (lang === 'scss') { return 'scss'; }
+    if (lang === 'sass') { return 'sass'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -153,6 +170,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
             return 'html';
         }
         return 'xml';
+    }
+
+    // SCSS heuristic
+    if (trimmed.includes('{') && (trimmed.includes('$') || trimmed.includes('@mixin') || trimmed.includes('@include'))) {
+        return 'scss';
+    }
+
+    // SASS heuristic
+    if (trimmed.startsWith('$') && !trimmed.includes('{')) {
+        return 'sass';
     }
 
     // CSS heuristic: contains { and } and looks like a rule
@@ -239,6 +266,87 @@ async function handleCSS(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`CSS has syntax issues but was beautified. First error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('CSS formatted successfully!');
+    }
+}
+
+/**
+ * Handle SCSS formatting and validation
+ */
+async function handleSCSS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate SCSS
+    try {
+        sass.compileString(text, { syntax: 'scss' });
+    } catch (e: any) {
+        if (e.span) {
+            validationMessage = `${e.message.split('\n')[0]} at line ${e.span.start.line + 1}, col ${e.span.start.column + 1}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    /* eslint-disable */
+    try {
+        // Format SCSS (js-beautify's CSS formatter handles SCSS nesting)
+        formatted = jsbeautify.css(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            selector_separator_newline: true,
+            newline_between_rules: true,
+            end_with_newline: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format SCSS: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`SCSS has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('SCSS formatted successfully!');
+    }
+}
+
+/**
+ * Handle SASS formatting and validation
+ */
+async function handleSASS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate SASS
+    try {
+        sass.compileString(text, { syntax: 'indented' });
+    } catch (e: any) {
+        if (e.span) {
+            validationMessage = `${e.message.split('\n')[0]} at line ${e.span.start.line + 1}, col ${e.span.start.column + 1}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    try {
+        // Format SASS
+        formatted = SassFormatter.Format(text, {
+            tabSize: 2,
+            insertSpaces: true
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format SASS: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`SASS has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('SASS formatted successfully!');
     }
 }
 
