@@ -1,0 +1,83 @@
+name: Jules Auto Merge to Main
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'dev/**'
+      - 'jules/**'
+      # Добавьте сюда паттерны веток, которые должны автоматически мержиться
+
+jobs:
+  check-and-merge:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      
+      - name: Check commit author
+        id: check-author
+        run: |
+          # Получаем информацию о последнем коммите в ветке
+          COMMIT_AUTHOR=$(git log origin/${{ github.ref_name }} -1 --pretty=format:'%an')
+          COMMIT_EMAIL=$(git log origin/${{ github.ref_name }} -1 --pretty=format:'%ae')
+          
+          echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
+          echo "commit_email=$COMMIT_EMAIL" >> $GITHUB_OUTPUT
+          
+          echo "Автор коммита: $COMMIT_AUTHOR"
+          echo "Email: $COMMIT_EMAIL"
+          
+          # Проверяем, что это jules (можно проверять по имени или email)
+          if [[ "$COMMIT_AUTHOR" == "jules" ]] || [[ "$COMMIT_EMAIL" == *"jules"* ]]; then
+            echo "is_jules=true" >> $GITHUB_OUTPUT
+            echo "✅ Коммит от jules, продолжаем мерж"
+          else
+            echo "is_jules=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Коммит не от jules, пропускаем"
+          fi
+      
+      - name: Setup Git
+        if: steps.check-author.outputs.is_jules == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+      
+      - name: Merge to main
+        if: steps.check-author.outputs.is_jules == 'true'
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          
+          echo "📦 Мержим $BRANCH_NAME в main..."
+          
+          # Обновляем main
+          git fetch origin main
+          git checkout main
+          git pull origin main
+          
+          # Мержим ветку
+          if git merge origin/$BRANCH_NAME --no-ff -m "🤖 Auto-merge: $BRANCH_NAME by jules"; then
+            echo "✅ Мерж успешен"
+            git push origin main
+            echo "✅ Изменения запушены в main"
+          else
+            echo "❌ Конфликт при мерже!"
+            echo "Требуется ручное разрешение конфликтов"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "### 📊 Результат Auto-Merge" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ветка:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Автор:** ${{ steps.check-author.outputs.commit_author }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Jules:** ${{ steps.check-author.outputs.is_jules }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Статус:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
