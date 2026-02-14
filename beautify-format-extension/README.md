@@ -1,6 +1,6 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SCSS and SASS files.
+A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SCSS, SASS and LESS files.
 
 ## Features
 
@@ -10,17 +10,18 @@ A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SC
 - 🎨 Format CSS files with proper indentation
 - 🎨 Format SCSS files with proper indentation
 - 🎨 Format SASS files with proper indentation
-- 🔍 Automatic format detection (JSON, XML, HTML, CSS, SCSS or SASS)
-- 🛠️ Smart repair: Fixes minor errors in JSON/XML/HTML/CSS/SCSS/SASS while beautifying
+- 🎨 Format LESS files with proper indentation
+- 🔍 Automatic format detection (JSON, XML, HTML, CSS, SCSS, SASS or LESS)
+- 🛠️ Smart repair: Fixes minor errors in JSON/XML/HTML/CSS/SCSS/SASS/LESS while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
 - 📝 Context menu commands in the editor
 
 ## Usage
 
-### Formatting JSON, XML, HTML, CSS, SCSS or SASS
+### Formatting JSON, XML, HTML, CSS, SCSS, SASS or LESS
 
-1. Open a JSON, XML, HTML, CSS, SCSS or SASS file
+1. Open a JSON, XML, HTML, CSS, SCSS, SASS or LESS file
 2. Use one of the following methods:
    - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"
