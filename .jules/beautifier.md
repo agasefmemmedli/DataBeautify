@@ -41,3 +41,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('javascript', 'javascriptreact') with content-based heuristics. Looked for common JS keywords (`var`, `let`, `const`, `function`, `class`, `import`, etc.) and arrow function markers (`=>`). Added a fallback check for the presence of curly braces `{}` and semicolons `;` to catch simple JS snippets.
+
+## TypeScript Support (v0.1.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected the `typescript` package for validation. Used `ts.createSourceFile` to obtain `parseDiagnostics`, which provides detailed syntax error information (message, line, column).
+- **Recovery:** Reused `js-beautify.js` for formatting. Since TypeScript is a superset of JavaScript, `js-beautify`'s JS formatter handles most TypeScript syntax gracefully and is highly resilient to syntax errors, allowing the tool to produce a readable output even when the input is broken.
+- **Error Reporting:** Syntax errors from `parseDiagnostics` are reported as VS Code warning messages. The first identified error with line/column information is surfaced to the user, fulfilling the fault-tolerant requirement.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('typescript', 'typescriptreact') with content-based heuristics. Looked for TypeScript-specific keywords (`interface`, `namespace`, `type`, `enum`, `public`, `private`, `protected`, `readonly`, `as`, `implements`) and type annotations (e.g., `: string`, `: number`).

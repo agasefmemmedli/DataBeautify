@@ -9,6 +9,7 @@ import * as sass from 'sass';
 import { SassFormatter } from 'sass-formatter';
 import * as less from 'less';
 import * as acorn from 'acorn';
+import * as ts from 'typescript';
 
 /**
  * This method is called when the extension is activated
@@ -46,6 +47,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatJSCommand = vscode.commands.registerCommand('beautify-format.formatJS', () => {
         beautify('javascript');
     });
+    let formatTSCommand = vscode.commands.registerCommand('beautify-format.formatTS', () => {
+        beautify('typescript');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -54,6 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatSASSCommand);
     context.subscriptions.push(formatLESSCommand);
     context.subscriptions.push(formatJSCommand);
+    context.subscriptions.push(formatTSCommand);
 }
 
 /**
@@ -98,6 +103,61 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`HTML has syntax issues but was beautified. First error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('HTML formatted successfully!');
+    }
+}
+
+/**
+ * Handle TypeScript formatting and validation
+ */
+async function handleTS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate TypeScript
+    try {
+        const sourceFile = ts.createSourceFile('temp.ts', text, ts.ScriptTarget.Latest, true);
+        const diagnostics = (sourceFile as any).parseDiagnostics;
+        if (diagnostics && diagnostics.length > 0) {
+            const firstError = diagnostics[0];
+            const { line, character } = ts.getLineAndCharacterOfPosition(sourceFile, firstError.start!);
+            validationMessage = `${ts.flattenDiagnosticMessageText(firstError.messageText, '\n')} at line ${line + 1}, col ${character + 1}`;
+        }
+    } catch (e: any) {
+        validationMessage = e.message;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format TypeScript (using js-beautify's JS formatter)
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format TypeScript: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`TypeScript has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('TypeScript formatted successfully!');
     }
 }
 
@@ -153,7 +213,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -187,6 +247,8 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleLESS(editor, text);
     } else if (format === 'javascript') {
         await handleJS(editor, text);
+    } else if (format === 'typescript') {
+        await handleTS(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -213,7 +275,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -223,6 +285,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'sass') { return 'sass'; }
     if (lang === 'less') { return 'less'; }
     if (lang === 'javascript' || lang === 'javascriptreact') { return 'javascript'; }
+    if (lang === 'typescript' || lang === 'typescriptreact') { return 'typescript'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -255,6 +318,15 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     // CSS heuristic: contains { and } and looks like a rule
     if (trimmed.includes('{') && trimmed.includes('}') && /[a-z0-9-_#.]+\s*\{/i.test(trimmed)) {
         return 'css';
+    }
+
+    // TypeScript heuristic
+    if (
+        /\b(interface|namespace|type|enum|public|private|protected|readonly|as|implements)\b/.test(trimmed) ||
+        /:\s*(string|number|boolean|any|void|unknown|never|object)\b/.test(trimmed) ||
+        /<[A-Z][A-Za-z0-9]*(\s*,\s*[A-Z][A-Za-z0-9]*)*>/.test(trimmed)
+    ) {
+        return 'typescript';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
