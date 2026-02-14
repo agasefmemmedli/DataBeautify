@@ -1,233 +1,112 @@
-name: Auto-Merge and Conditional Build
+name: Auto-Merge to Main (Agasef)
+
 on:
   push:
     branches-ignore:
       - 'main'
+      - 'master'
+
 jobs:
-  merge-and-build:
+  auto-merge:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: write
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0
       
-      # --- AI CONTEXT GENERATION (STORED IN BRANCH) ---
-      - name: Generate AI Context File
-        if: contains(github.ref_name, 'manual_script')
+      # --- CHECK COMMIT AUTHOR ---
+      - name: Check if author is Agasef
+        id: check_author
         run: |
-          # Remove old context file if it exists
-          rm -f project_context.txt
+          AUTHOR="${{ github.event.head_commit.author.name }}"
+          EMAIL="${{ github.event.head_commit.author.email }}"
           
-          echo "PROJECT STRUCTURE:" > project_context.txt
-          find . -maxdepth 3 -not -path '*/.*' >> project_context.txt
-          find . -type f \( -name "*.kt" -o -name "*.xml" -o -name "*.gradle" -o -name "*.kts" \) \
-          -not -path "*/build/*" \
-          -not -path "*/.git/*" \
-          -not -path "*/values-*/*" | while read file; do
-            echo -e "\n\n================================================\nFILE: $file\n================================================\n" >> project_context.txt
-            cat "$file" >> project_context.txt
-          done
-      
-      - name: Commit AI Context to Branch
-        if: contains(github.ref_name, 'manual_script')
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add project_context.txt
-          git diff --staged --quiet || git commit -m "Update AI context file [automated]"
-          git push origin ${{ github.ref_name }}
+          echo "Автор коммита: $AUTHOR"
+          echo "Email: $EMAIL"
+          
+          # Проверяем, что это Agasef Memmedli
+          if [[ "$AUTHOR" == "Agasef Memmedli" ]] || [[ "$AUTHOR" == "agasef"* ]] || [[ "$EMAIL" == *"agasef"* ]]; then
+            echo "should_merge=true" >> $GITHUB_OUTPUT
+            echo "✅ Коммит от Agasef - продолжаем автоматический мерж"
+          else
+            echo "should_merge=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Коммит НЕ от Agasef (автор: $AUTHOR) - пропускаем мерж"
+            exit 0
+          fi
       
       # --- AUTOMATIC BRANCH CLEANUP ---
       - name: Cleanup Old Branches
+        if: steps.check_author.outputs.should_merge == 'true'
         run: |
           echo "Starting branch cleanup..."
           git fetch --prune
           
+          # Удаляем старые ветки, оставляя только 10 самых свежих (кроме main и веток с RELEASE)
           branches_to_delete=$(git branch -r --sort=-committerdate | \
-            grep -vE "origin/main|RELEASE" | \
+            grep -vE "origin/main|origin/master|RELEASE" | \
             sed 's/origin\///' | \
             tail -n +11)
+          
           if [ -z "$branches_to_delete" ]; then
             echo "No branches to delete."
           else
             for branch in $branches_to_delete; do
-              echo "Deleting branch: $branch"
+              echo "Deleting old branch: $branch"
               git push origin --delete "$branch" || echo "Failed to delete $branch"
             done
           fi
       
-      # --- CHECK FORBIDDEN FILES ---
-      - name: Check for forbidden file changes
-        id: check_forbidden
-        run: |
-          # Define forbidden classes/files
-          FORBIDDEN_FILES=(
-            "MediaItemCard"
-            "BannerAdView"
-            "SenderUI.kt"
-            "FileSenderLogic"
-            "SenderManager.kt"
-            "MediaCategoryTabs.kt"
-            "LastReceivedEmptyState.kt"
-            "LastReceivedFilesScreen.kt"
-            "MediaPickerContent.kt"
-            "ReceiverUI.kt"
-            "HomeScreen.kt"
-            "AllToolsScreen.kt"
-            "ToolScreens.kt"
-          )
-          
-          # Get list of changed files compared to main
-          git fetch origin main
-          CHANGED_FILES=$(git diff --name-only origin/main...${{ github.ref_name }})
-          
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
-          
-          # Check if any forbidden files were modified
-          FORBIDDEN_CHANGED=""
-          for file in "${FORBIDDEN_FILES[@]}"; do
-            if echo "$CHANGED_FILES" | grep -q "$file"; then
-              FORBIDDEN_CHANGED="$FORBIDDEN_CHANGED\n- $file"
-              echo "::warning::Forbidden file detected: $file"
-            fi
-          done
-          
-          if [ -n "$FORBIDDEN_CHANGED" ]; then
-            echo "forbidden=true" >> $GITHUB_OUTPUT
-            echo -e "::error::Cannot merge to main. The following forbidden files have changes:$FORBIDDEN_CHANGED"
-            exit 1
-          else
-            echo "forbidden=false" >> $GITHUB_OUTPUT
-            echo "✓ No forbidden files modified. Merge can proceed."
-          fi
-      
       # --- MERGE TO MAIN ---
       - name: Merge to main
+        if: steps.check_author.outputs.should_merge == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Merging ${{ github.ref_name }} into main..."
+          
+          # Переключаемся на main и обновляем
           git checkout main
           git pull origin main
-          git merge --no-commit --no-ff ${{ github.ref_name }}
           
-          # --- IGNORE TASKS FOLDER CHANGES ---
-          # 1. Unstage changes to the tasks directory
-          git reset HEAD tasks/ 2>/dev/null || true
-          
-          # 2. Revert modified/deleted files in tasks to match main
-          git checkout -- tasks/ 2>/dev/null || true
-          
-          # 3. Delete any new files added to tasks/ by the branch
-          git clean -fd tasks/
-          
-          # Complete the merge
-          git commit -m "Merge branch '${{ github.ref_name }}' into main (ignoring tasks/ changes)"
-          git push origin main
-      
-      # --- RENAME APK WITH GUID IN MAIN ---
-      - name: Rename APK with GUID in main
-        if: contains(github.ref_name, 'manual_build')
-        run: |
-          # Generate GUID (UUID)
-          GUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
-          
-          # Check if builds directory and APK files exist
-          if [ -d "builds" ]; then
-            # Rename app-debug-latest.apk if it exists
-            if [ -f "builds/app-debug-latest.apk" ]; then
-              mv "builds/app-debug-latest.apk" "builds/${GUID}-latest.apk"
-              echo "Renamed app-debug-latest.apk to ${GUID}-latest.apk"
-            fi
-            
-            # Rename any timestamped app-debug APKs
-            for file in builds/app-debug-*.apk; do
-              if [ -f "$file" ]; then
-                filename=$(basename "$file")
-                new_filename=$(echo "$filename" | sed "s/app-debug/${GUID}/")
-                mv "$file" "builds/${new_filename}"
-                echo "Renamed $filename to $new_filename"
-              fi
-            done
-            
-            # Commit the renamed files
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add builds/
-            git diff --staged --quiet || git commit -m "Rename APK files with GUID [automated]"
+          # Мержим текущую ветку
+          if git merge --no-ff ${{ github.ref_name }} -m "🤖 Auto-merge: ${{ github.ref_name }} by Agasef"; then
+            echo "✅ Merge successful!"
             git push origin main
+            echo "✅ Changes pushed to main!"
           else
-            echo "No builds directory found, skipping rename"
+            echo "❌ ERROR: Merge conflicts detected"
+            echo "Please resolve conflicts manually"
+            exit 1
           fi
       
-      # --- CLEANUP OLD APKs (KEEP ONLY TOP 3) ---
-      - name: Cleanup old APKs in builds directory
-        if: contains(github.ref_name, 'manual_build')
+      # --- DELETE SOURCE BRANCH ---
+      - name: Delete merged branch
+        if: steps.check_author.outputs.should_merge == 'true' && success()
         run: |
-          if [ -d "builds" ]; then
-            echo "Cleaning up old APK files..."
-            
-            # List all APK files sorted by modification time (newest first), skip top 3, delete the rest
-            find builds/ -type f -name "*.apk" -printf '%T@ %p\n' | \
-              sort -rn | \
-              tail -n +4 | \
-              cut -d' ' -f2- | \
-              while read file; do
-                echo "Deleting old APK: $file"
-                rm -f "$file"
-              done
-            
-            # Commit the cleanup
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add builds/
-            git diff --staged --quiet || git commit -m "Cleanup old APK files [automated]"
-            git push origin main
+          BRANCH_NAME="${{ github.ref_name }}"
+          
+          # Не удаляем защищенные ветки
+          if [[ "$BRANCH_NAME" == *"RELEASE"* ]] || [[ "$BRANCH_NAME" == "develop" ]] || [[ "$BRANCH_NAME" == "dev" ]]; then
+            echo "🔒 Protected branch - skipping deletion"
           else
-            echo "No builds directory found, skipping cleanup"
+            echo "🗑️ Deleting branch: $BRANCH_NAME"
+            git push origin --delete "$BRANCH_NAME" || echo "Branch already deleted or protected"
           fi
       
-      # --- CONDITIONAL BUILD (APK STORED IN BRANCH) ---
-      - name: Set up JDK 17
-        if: contains(github.ref_name, 'manual_build')
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-      
-      - name: Grant execute permission for gradlew
-        if: contains(github.ref_name, 'manual_build')
-        run: chmod +x ./gradlew
-      
-      - name: Build Debug APK
-        if: contains(github.ref_name, 'manual_build')
-        run: ./gradlew assembleDebug
-      
-      - name: Commit APK to Branch
-        if: contains(github.ref_name, 'manual_build')
+      # --- SUMMARY ---
+      - name: Summary
+        if: always()
         run: |
-          # Switch back to the original branch (we're on main after merge)
-          git checkout ${{ github.ref_name }}
-          
-          # Remove old builds directory to avoid accumulation
-          rm -rf builds
-          
-          # Create fresh builds directory
-          mkdir -p builds
-          
-          # Copy APK with timestamp
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          cp app/build/outputs/apk/debug/app-debug.apk "builds/app-debug-${TIMESTAMP}.apk"
-          
-          # Also keep a 'latest' version
-          cp app/build/outputs/apk/debug/app-debug.apk "builds/app-debug-latest.apk"
-          
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add builds/
-          git diff --staged --quiet || git commit -m "Update build artifacts [automated]"
-          git push origin ${{ github.ref_name }}
+          echo "### 📊 Auto-Merge Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ github.event.head_commit.author.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Email:** ${{ github.event.head_commit.author.email }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Should Merge:** ${{ steps.check_author.outputs.should_merge }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
