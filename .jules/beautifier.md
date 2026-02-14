@@ -19,5 +19,15 @@
 - **Error Reporting:** Syntax errors from `sass.compileString` are caught. The first line of the error message along with line/column information is reported as a warning, ensuring the user is notified of issues while the tool still attempts to produce a formatted output.
 
 ### Auto-Detection
-- **SCSS Heuristic:** Look for curly braces `{` combined with common preprocessor markers like `$`, `@mixin`, or `@include`.
-- **SASS Heuristic:** Identify files starting with `$` that lack curly braces `{`, typical of indented SASS syntax.
+- **SCSS Heuristic:** Look for curly braces { combined with common preprocessor markers like $, @mixin, or @include.
+- **SASS Heuristic:** Identify files starting with $ that lack curly braces {, typical of indented SASS syntax.
+
+## LESS Support (v0.0.7)
+
+### Validation & Fault-Tolerance
+- **Decision:** Used the `less` package for validation via `less.render`. This provides accurate syntax error reporting with line and column information.
+- **Recovery:** Reused `js-beautify.css` for formatting. It is highly resilient to LESS-specific syntax and nested structures, allowing the tool to produce a readable output even when the input contains syntax errors.
+- **Error Reporting:** Syntax errors from `less.render` are caught, and the first error (with line/column) is reported as a warning, maintaining the "fault-tolerant" philosophy.
+
+### Auto-Detection
+- **Heuristic:** Look for curly braces { combined with LESS-specific markers: variables (e.g., @variable:) or mixin definitions/calls (e.g., .mixin-name(). This distinguishes LESS from standard CSS and SCSS.

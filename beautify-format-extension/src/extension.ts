@@ -7,6 +7,7 @@ import { HTMLHint } from 'htmlhint';
 import * as css from 'css';
 import * as sass from 'sass';
 import { SassFormatter } from 'sass-formatter';
+import * as less from 'less';
 
 /**
  * This method is called when the extension is activated
@@ -38,12 +39,16 @@ export function activate(context: vscode.ExtensionContext) {
     let formatSASSCommand = vscode.commands.registerCommand('beautify-format.formatSASS', () => {
         beautify('sass');
     });
+    let formatLESSCommand = vscode.commands.registerCommand('beautify-format.formatLESS', () => {
+        beautify('less');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
     context.subscriptions.push(formatCSSCommand);
     context.subscriptions.push(formatSCSSCommand);
     context.subscriptions.push(formatSASSCommand);
+    context.subscriptions.push(formatLESSCommand);
 }
 
 /**
@@ -94,7 +99,7 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -124,6 +129,8 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleSCSS(editor, text);
     } else if (format === 'sass') {
         await handleSASS(editor, text);
+    } else if (format === 'less') {
+        await handleLESS(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -150,7 +157,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -158,6 +165,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'css') { return 'css'; }
     if (lang === 'scss') { return 'scss'; }
     if (lang === 'sass') { return 'sass'; }
+    if (lang === 'less') { return 'less'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -180,6 +188,11 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     // SASS heuristic
     if (trimmed.startsWith('$') && !trimmed.includes('{')) {
         return 'sass';
+    }
+
+    // LESS heuristic
+    if (trimmed.includes('{') && (/@([a-z0-9-_]+)\s*:/i.test(trimmed) || /[.][a-z0-9-_]+\s*\(/i.test(trimmed))) {
+        return 'less';
     }
 
     // CSS heuristic: contains { and } and looks like a rule
@@ -309,6 +322,49 @@ async function handleSCSS(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`SCSS has syntax issues but was beautified. First error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('SCSS formatted successfully!');
+    }
+}
+
+/**
+ * Handle LESS formatting and validation
+ */
+async function handleLESS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate LESS
+    try {
+        await less.render(text);
+    } catch (e: any) {
+        if (e.line) {
+            validationMessage = `${e.message} at line ${e.line}, col ${e.column}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    /* eslint-disable */
+    try {
+        // Format LESS (js-beautify's CSS formatter handles LESS nesting and variables)
+        formatted = jsbeautify.css(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            selector_separator_newline: true,
+            newline_between_rules: true,
+            end_with_newline: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format LESS: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`LESS has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('LESS formatted successfully!');
     }
 }
 
