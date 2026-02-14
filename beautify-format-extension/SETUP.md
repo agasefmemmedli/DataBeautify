@@ -83,8 +83,9 @@ beautify-format-extension/
 
 ✅ JSON file formatting
 ✅ XML file formatting
+✅ HTML file formatting
 ✅ Auto-detection of format
-✅ Smart repair of broken JSON/XML
+✅ Smart repair of broken JSON/XML/HTML
 ✅ Error reporting with line numbers
 ✅ Keyboard shortcuts (Ctrl+Alt+B)
 ✅ Command Palette integration
@@ -95,7 +96,7 @@ beautify-format-extension/
 
 Possible improvements:
 - Add settings for indentation size
-- Support for other formats (HTML, CSS, YAML)
+- Support for other formats (CSS, YAML)
 - Formatting of selected fragments
 - Auto-format on save
 - Customizable formatting styles
