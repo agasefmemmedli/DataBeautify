@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML and CSS files with keyboard shortcuts and context menu",
-  "version": "0.0.3",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS and SASS files with keyboard shortcuts and context menu",
+  "version": "0.0.4",
   "publisher": "DataBeautify",
   "author": {
     "name": "Your Name"
@@ -23,6 +23,9 @@
     "json",
     "xml",
     "html",
+    "css",
+    "scss",
+    "sass",
     "prettify",
     "indent"
   ],
@@ -37,7 +40,9 @@
     "onLanguage:json",
     "onLanguage:xml",
     "onLanguage:html",
-    "onLanguage:css"
+    "onLanguage:css",
+    "onLanguage:scss",
+    "onLanguage:sass"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -45,6 +50,14 @@
       {
         "command": "beautify-format.beautify",
         "title": "Beautify Format"
+      },
+      {
+        "command": "beautify-format.formatSCSS",
+        "title": "Beautify SCSS"
+      },
+      {
+        "command": "beautify-format.formatSASS",
+        "title": "Beautify SASS"
       }
     ],
     "keybindings": [
@@ -59,7 +72,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass",
           "group": "1_modification"
         }
       ]
@@ -90,6 +103,8 @@
     "htmlhint": "^1.9.1",
     "js-beautify": "^1.15.4",
     "jsonrepair": "^3.13.2",
+    "sass": "^1.97.3",
+    "sass-formatter": "^0.8.0",
     "xml-formatter": "^3.6.0"
   }
 }
