@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML and HTML files with keyboard shortcuts and context menu",
-  "version": "0.0.2",
+  "description": "Beautify and format JSON, XML, HTML and CSS files with keyboard shortcuts and context menu",
+  "version": "0.0.3",
   "publisher": "DataBeautify",
   "author": {
     "name": "Your Name"
@@ -36,7 +36,8 @@
     "onCommand:beautify-format.beautify",
     "onLanguage:json",
     "onLanguage:xml",
-    "onLanguage:html"
+    "onLanguage:html",
+    "onLanguage:css"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -58,7 +59,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css",
           "group": "1_modification"
         }
       ]
@@ -73,6 +74,7 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/css": "^0.0.38",
     "@types/htmlhint": "^1.1.5",
     "@types/js-beautify": "^1.14.3",
     "@types/node": "16.x",
@@ -83,6 +85,7 @@
     "typescript": "^4.9.3"
   },
   "dependencies": {
+    "css": "^3.0.0",
     "fast-xml-parser": "^5.3.5",
     "htmlhint": "^1.9.1",
     "js-beautify": "^1.15.4",

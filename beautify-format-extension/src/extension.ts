@@ -4,6 +4,7 @@ import { jsonrepair } from 'jsonrepair';
 import { XMLValidator } from 'fast-xml-parser';
 import * as jsbeautify from 'js-beautify';
 import { HTMLHint } from 'htmlhint';
+import * as css from 'css';
 
 /**
  * This method is called when the extension is activated
@@ -25,9 +26,13 @@ export function activate(context: vscode.ExtensionContext) {
     let formatXMLCommand = vscode.commands.registerCommand('beautify-format.formatXML', () => {
         beautify('xml');
     });
+    let formatCSSCommand = vscode.commands.registerCommand('beautify-format.formatCSS', () => {
+        beautify('css');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
+    context.subscriptions.push(formatCSSCommand);
 }
 
 /**
@@ -47,6 +52,7 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
         }
     }
 
+    /* eslint-disable */
     try {
         // Format HTML
         formatted = jsbeautify.html(text, {
@@ -63,6 +69,7 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
         vscode.window.showErrorMessage(`Failed to format HTML: ${error.message}`);
         return;
     }
+    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
@@ -76,7 +83,7 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -100,8 +107,10 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html') {
         await handleXML(editor, text);
     } else if (format === 'html') {
         await handleHTML(editor, text);
+    } else if (format === 'css') {
+        await handleCSS(editor, text);
     } else {
-        // If unknown, try JSON first then XML/HTML
+        // If unknown, try JSON first then CSS/XML/HTML
         try {
             jsonrepair(text);
             await handleJSON(editor, text);
@@ -114,8 +123,10 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html') {
                 } else {
                     await handleXML(editor, text);
                 }
+            } else if (trimmed.includes('{') && trimmed.includes('}')) {
+                await handleCSS(editor, text);
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML or HTML). Please ensure your file starts with {, [ or <');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML or CSS). Please ensure your file starts with {, [ or <');
             }
         }
     }
@@ -124,11 +135,12 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html') {
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
     if (lang === 'html' || lang === 'htm') { return 'html'; }
+    if (lang === 'css') { return 'css'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -141,6 +153,11 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
             return 'html';
         }
         return 'xml';
+    }
+
+    // CSS heuristic: contains { and } and looks like a rule
+    if (trimmed.includes('{') && trimmed.includes('}') && /[a-z0-9-_#.]+\s*\{/i.test(trimmed)) {
+        return 'css';
     }
 
     return 'unknown';
@@ -176,6 +193,52 @@ async function handleJSON(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`JSON was invalid but repaired. Original error: ${repairMessage}`);
     } else {
         vscode.window.showInformationMessage('JSON formatted successfully!');
+    }
+}
+
+/**
+ * Handle CSS formatting and validation
+ */
+async function handleCSS(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate CSS
+    try {
+        const obj = css.parse(text, { silent: true });
+        if (obj.stylesheet && obj.stylesheet.parsingErrors && obj.stylesheet.parsingErrors.length > 0) {
+            const firstError = obj.stylesheet.parsingErrors[0];
+            validationMessage = `${firstError.reason} at line ${firstError.line}, col ${firstError.column}`;
+            if (obj.stylesheet.parsingErrors.length > 1) {
+                validationMessage += ` (and ${obj.stylesheet.parsingErrors.length - 1} more errors)`;
+            }
+        }
+    } catch (e: any) {
+        validationMessage = e.message;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format CSS
+        formatted = jsbeautify.css(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            selector_separator_newline: true,
+            newline_between_rules: true,
+            end_with_newline: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`CSS has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('CSS formatted successfully!');
     }
 }
 
