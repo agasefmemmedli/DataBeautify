@@ -1,5 +1,3 @@
-HTML (.html, .htm) — основа веба.
-
 CSS (.css) — стили.
 
 SCSS / SASS (.scss, .sass) — препроцессоры стилей.
