@@ -2,7 +2,7 @@
   "name": "beautify-format",
   "displayName": "Beautify Format",
   "description": "Beautify and format JSON, XML, HTML, CSS, SCSS and SASS files with keyboard shortcuts and context menu",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
