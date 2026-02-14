@@ -1,14 +1,11 @@
-// Valid JavaScript
-function helloWorld() {
-const x = 1;
-if(x===1){console.log("Hello");}
-return x;
-}
-
-// Broken JavaScript (missing closing brace)
-function broken() {
-  const y = 2;
-  if (y > 0) {
-    console.log(y);
-// Missing } for if
-// Missing } for function
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const react_1 = __importDefault(require("react"));
+const Greet = ({ name }) => {
+    return <div>Hello {name}!</div>;
+};
+exports.default = Greet;
+//# sourceMappingURL=test.js.map
