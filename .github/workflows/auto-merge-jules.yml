@@ -29,13 +29,17 @@ jobs:
           echo "Автор коммита: $AUTHOR"
           echo "Email: $EMAIL"
           
-          # Проверяем, что это Agasef Memmedli
-          if [[ "$AUTHOR" == "Agasef Memmedli" ]] || [[ "$AUTHOR" == "agasef"* ]] || [[ "$EMAIL" == *"agasef"* ]]; then
+          # Проверяем: Agasef Memmedli ИЛИ google-labs-jules[bot]
+          if [[ "$AUTHOR" == "Agasef Memmedli" ]] || \
+             [[ "$AUTHOR" == "agasef"* ]] || \
+             [[ "$EMAIL" == *"agasef"* ]] || \
+             [[ "$AUTHOR" == "google-labs-jules[bot]" ]] || \
+             [[ "$EMAIL" == *"google-labs-jules"* ]]; then
             echo "should_merge=true" >> $GITHUB_OUTPUT
-            echo "✅ Коммит от Agasef - продолжаем автоматический мерж"
+            echo "✅ Коммит от Agasef или разрешенного бота - продолжаем"
           else
             echo "should_merge=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Коммит НЕ от Agasef (автор: $AUTHOR) - пропускаем мерж"
+            echo "⚠️ Коммит НЕ от Agasef - пропускаем"
             exit 0
           fi
       
@@ -46,7 +50,7 @@ jobs:
           echo "Starting branch cleanup..."
           git fetch --prune
           
-          # Удаляем старые ветки, оставляя только 10 самых свежих (кроме main и веток с RELEASE)
+          # Удаляем старые ветки, оставляя только 10 самых свежих
           branches_to_delete=$(git branch -r --sort=-committerdate | \
             grep -vE "origin/main|origin/master|RELEASE" | \
             sed 's/origin\///' | \
@@ -75,7 +79,7 @@ jobs:
           git pull origin main
           
           # Мержим текущую ветку
-          if git merge --no-ff ${{ github.ref_name }} -m "🤖 Auto-merge: ${{ github.ref_name }} by Agasef"; then
+          if git merge --no-ff ${{ github.ref_name }} -m "🤖 Auto-merge: ${{ github.ref_name }} by ${{ github.event.head_commit.author.name }}"; then
             echo "✅ Merge successful!"
             git push origin main
             echo "✅ Changes pushed to main!"
