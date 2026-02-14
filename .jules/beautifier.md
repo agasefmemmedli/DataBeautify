@@ -51,3 +51,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('typescript', 'typescriptreact') with content-based heuristics. Looked for TypeScript-specific keywords (`interface`, `namespace`, `type`, `enum`, `public`, `private`, `protected`, `readonly`, `as`, `implements`) and type annotations (e.g., `: string`, `: number`).
+
+## JSX & TSX Support (v0.2.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Utilized the `typescript` package for validating both JSX and TSX. By specifying `ts.ScriptKind.JSX` and `ts.ScriptKind.TSX` in `ts.createSourceFile`, we obtain accurate syntax error diagnostics including line and column information.
+- **Recovery:** Used `js-beautify.js` for formatting with the `e4x: true` option enabled. This ensures that JSX elements are handled correctly while maintaining the resilience of the JavaScript formatter, which can still produce readable output even with minor syntax errors.
+- **Error Reporting:** Syntax errors from TypeScript diagnostics are reported as VS Code warning messages, showing the first identified error's message and location.
+
+### Auto-Detection
+- **Heuristic for JSX:** Combines the presence of JSX tags (`<` and `/>` or `</`) with common JavaScript keywords (`import`, `export`, `function`, `const`, etc.) to distinguish JSX from plain JavaScript or XML.
+- **Heuristic for TSX:** Similar to JSX, but also checks for TypeScript-specific markers like interfaces, type annotations, or generic syntax to distinguish it from plain JSX.
+- **Language ID:** Added explicit mapping for `javascriptreact` to `jsx` and `typescriptreact` to `tsx`.

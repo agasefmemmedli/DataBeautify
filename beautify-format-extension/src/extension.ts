@@ -50,6 +50,12 @@ export function activate(context: vscode.ExtensionContext) {
     let formatTSCommand = vscode.commands.registerCommand('beautify-format.formatTS', () => {
         beautify('typescript');
     });
+    let formatJSXCommand = vscode.commands.registerCommand('beautify-format.formatJSX', () => {
+        beautify('jsx');
+    });
+    let formatTSXCommand = vscode.commands.registerCommand('beautify-format.formatTSX', () => {
+        beautify('tsx');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -59,6 +65,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatLESSCommand);
     context.subscriptions.push(formatJSCommand);
     context.subscriptions.push(formatTSCommand);
+    context.subscriptions.push(formatJSXCommand);
+    context.subscriptions.push(formatTSXCommand);
 }
 
 /**
@@ -162,6 +170,116 @@ async function handleTS(editor: vscode.TextEditor, text: string) {
 }
 
 /**
+ * Handle TSX formatting and validation
+ */
+async function handleTSX(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate TSX
+    try {
+        const sourceFile = ts.createSourceFile('temp.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+        const diagnostics = (sourceFile as any).parseDiagnostics;
+        if (diagnostics && diagnostics.length > 0) {
+            const firstError = diagnostics[0];
+            const { line, character } = ts.getLineAndCharacterOfPosition(sourceFile, firstError.start!);
+            validationMessage = `${ts.flattenDiagnosticMessageText(firstError.messageText, '\n')} at line ${line + 1}, col ${character + 1}`;
+        }
+    } catch (e: any) {
+        validationMessage = e.message;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format TSX (using js-beautify's JS formatter)
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format TSX: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`TSX has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('TSX formatted successfully!');
+    }
+}
+
+/**
+ * Handle JSX formatting and validation
+ */
+async function handleJSX(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate JSX
+    try {
+        const sourceFile = ts.createSourceFile('temp.jsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JSX);
+        const diagnostics = (sourceFile as any).parseDiagnostics;
+        if (diagnostics && diagnostics.length > 0) {
+            const firstError = diagnostics[0];
+            const { line, character } = ts.getLineAndCharacterOfPosition(sourceFile, firstError.start!);
+            validationMessage = `${ts.flattenDiagnosticMessageText(firstError.messageText, '\n')} at line ${line + 1}, col ${character + 1}`;
+        }
+    } catch (e: any) {
+        validationMessage = e.message;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format JSX
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format JSX: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`JSX has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('JSX formatted successfully!');
+    }
+}
+
+/**
  * Handle JavaScript formatting and validation
  */
 async function handleJS(editor: vscode.TextEditor, text: string) {
@@ -213,7 +331,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -249,6 +367,10 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleJS(editor, text);
     } else if (format === 'typescript') {
         await handleTS(editor, text);
+    } else if (format === 'jsx') {
+        await handleJSX(editor, text);
+    } else if (format === 'tsx') {
+        await handleTSX(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -275,7 +397,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -284,8 +406,10 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'scss') { return 'scss'; }
     if (lang === 'sass') { return 'sass'; }
     if (lang === 'less') { return 'less'; }
-    if (lang === 'javascript' || lang === 'javascriptreact') { return 'javascript'; }
-    if (lang === 'typescript' || lang === 'typescriptreact') { return 'typescript'; }
+    if (lang === 'javascript') { return 'javascript'; }
+    if (lang === 'javascriptreact') { return 'jsx'; }
+    if (lang === 'typescript') { return 'typescript'; }
+    if (lang === 'typescriptreact') { return 'tsx'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
@@ -318,6 +442,19 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     // CSS heuristic: contains { and } and looks like a rule
     if (trimmed.includes('{') && trimmed.includes('}') && /[a-z0-9-_#.]+\s*\{/i.test(trimmed)) {
         return 'css';
+    }
+
+    // TSX heuristic
+    if (trimmed.includes('<') && (trimmed.includes('/>') || trimmed.includes('</')) &&
+        (/\b(interface|type|public|private|protected|readonly|as|implements)\b/.test(trimmed) ||
+            /:\s*(string|number|boolean|any|void|unknown|never|object)\b/.test(trimmed))) {
+        return 'tsx';
+    }
+
+    // JSX heuristic
+    if (trimmed.includes('<') && (trimmed.includes('/>') || trimmed.includes('</')) &&
+        /\b(import|export|function|const|let|var|return)\b/.test(trimmed)) {
+        return 'jsx';
     }
 
     // TypeScript heuristic

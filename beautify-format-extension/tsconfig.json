@@ -16,6 +16,12 @@
   "exclude": [
     "node_modules",
     ".vscode-test",
-    "test.ts"
+    "test.ts",
+    "test.js",
+    "test.css",
+    "test.less",
+    "test.jsx",
+    "test-broken.jsx",
+    "test.tsx"
   ]
 }
