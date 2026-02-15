@@ -2,7 +2,7 @@
   "name": "beautify-format",
   "displayName": "Beautify Format",
   "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript and TypeScript files with keyboard shortcuts and context menu",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -49,7 +49,8 @@
     "onLanguage:javascript",
     "onLanguage:typescript",
     "onLanguage:javascriptreact",
-    "onLanguage:typescriptreact"
+    "onLanguage:typescriptreact",
+    "onLanguage:vue"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -85,6 +86,10 @@
       {
         "command": "beautify-format.formatTSX",
         "title": "Beautify TSX"
+      },
+      {
+        "command": "beautify-format.formatVue",
+        "title": "Beautify Vue"
       }
     ],
     "keybindings": [
@@ -99,7 +104,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue",
           "group": "1_modification"
         }
       ]

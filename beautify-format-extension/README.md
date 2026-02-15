@@ -1,6 +1,6 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX and TSX files.
+A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX and Vue files.
 
 ## Features
 
@@ -15,7 +15,8 @@ A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SC
 - 🎨 Format TypeScript files with proper indentation
 - 🎨 Format JSX files with proper indentation
 - 🎨 Format TSX files with proper indentation
-- 🔍 Automatic format detection (JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX or TSX)
+- 🎨 Format Vue files with proper indentation
+- 🔍 Automatic format detection (JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX or Vue)
 - 🛠️ Smart repair: Fixes minor errors in supported formats while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
@@ -25,7 +26,7 @@ A Visual Studio Code extension that beautifully formats JSON, XML, HTML, CSS, SC
 
 ### Formatting Supported Languages
 
-1. Open a JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX or TSX file
+1. Open a JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX or Vue file
 2. Use one of the following methods:
    - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"
