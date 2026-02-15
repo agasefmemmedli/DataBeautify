@@ -10,6 +10,7 @@ import { SassFormatter } from 'sass-formatter';
 import * as less from 'less';
 import * as acorn from 'acorn';
 import * as ts from 'typescript';
+import * as svelte from 'svelte/compiler';
 
 /**
  * This method is called when the extension is activated
@@ -59,6 +60,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatVueCommand = vscode.commands.registerCommand('beautify-format.formatVue', () => {
         beautify('vue');
     });
+    let formatSvelteCommand = vscode.commands.registerCommand('beautify-format.formatSvelte', () => {
+        beautify('svelte');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -71,6 +75,78 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatJSXCommand);
     context.subscriptions.push(formatTSXCommand);
     context.subscriptions.push(formatVueCommand);
+    context.subscriptions.push(formatSvelteCommand);
+}
+
+/**
+ * Handle Svelte formatting and validation
+ */
+async function handleSvelte(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Svelte
+    try {
+        svelte.parse(text);
+    } catch (e: any) {
+        if (e.start) {
+            validationMessage = `${e.message} at line ${e.start.line}, col ${e.start.column}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    /* eslint-disable */
+    try {
+        // Format Svelte (using js-beautify's HTML formatter)
+        const options: any = {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            indent_scripts: 'normal',
+            end_with_newline: false,
+            wrap_line_length: 0,
+            indent_inner_html: false,
+            js: {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            },
+            css: {
+                indent_size: 2,
+                indent_char: ' ',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: false
+            }
+        };
+        formatted = jsbeautify.html(text, options);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Svelte: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Svelte has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Svelte formatted successfully!');
+    }
 }
 
 /**
@@ -407,7 +483,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -449,6 +525,8 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleTSX(editor, text);
     } else if (format === 'vue') {
         await handleVue(editor, text);
+    } else if (format === 'svelte') {
+        await handleSvelte(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -475,7 +553,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -489,11 +567,22 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'typescript') { return 'typescript'; }
     if (lang === 'typescriptreact') { return 'tsx'; }
     if (lang === 'vue') { return 'vue'; }
+    if (lang === 'svelte') { return 'svelte'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
     if (trimmed.includes('<template') || /<script\s+setup/i.test(trimmed) || /<style\s+scoped/i.test(trimmed)) {
         return 'vue';
+    }
+
+    // Svelte heuristic: Svelte blocks or .svelte specific tags
+    if (
+        /\{#if\s+/i.test(trimmed) ||
+        /\{#each\s+/i.test(trimmed) ||
+        /\{#await\s+/i.test(trimmed) ||
+        (trimmed.includes('<script') && trimmed.includes('</script>') && (trimmed.includes('export let') || trimmed.includes('$:')))
+    ) {
+        return 'svelte';
     }
 
     if (trimmed.startsWith('<')) {

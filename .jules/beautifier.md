@@ -74,3 +74,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Looked for the `vue` language ID or content-based markers: the presence of `<template` tags, or specific Vue attributes like `script setup` and `style scoped`. This distinguishes Vue SFCs from standard HTML or other template languages.
+
+## Svelte Support (v0.4.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected the `svelte/compiler` (v5) package for validation. The `parse` function provides accurate syntax error reporting with line and column information for Svelte-specific blocks.
+- **Recovery:** Utilized `js-beautify.html` for formatting. While it doesn't natively indent Svelte logic blocks (e.g., `{#if}`), it handles the overall HTML structure, `<script>`, and `<style>` blocks with high resilience, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Errors from `svelte.parse` are caught and reported as VS Code warning messages, surfacing the first identified issue (e.g., unclosed blocks) while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('svelte') with content-based heuristics. Looked for Svelte-specific block syntax (`{#if`, `{#each`, `{#await`) and script-level markers like `export let` or the reactive declaration `$:`. This ensures high confidence in identifying Svelte SFCs even without the correct file extension.
