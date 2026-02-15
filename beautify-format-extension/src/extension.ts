@@ -56,6 +56,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatTSXCommand = vscode.commands.registerCommand('beautify-format.formatTSX', () => {
         beautify('tsx');
     });
+    let formatVueCommand = vscode.commands.registerCommand('beautify-format.formatVue', () => {
+        beautify('vue');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -67,6 +70,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatTSCommand);
     context.subscriptions.push(formatJSXCommand);
     context.subscriptions.push(formatTSXCommand);
+    context.subscriptions.push(formatVueCommand);
 }
 
 /**
@@ -111,6 +115,78 @@ async function handleHTML(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`HTML has syntax issues but was beautified. First error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('HTML formatted successfully!');
+    }
+}
+
+/**
+ * Handle Vue formatting and validation
+ */
+async function handleVue(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Vue (using HTMLHint but ignoring doctype-first)
+    /* eslint-disable @typescript-eslint/naming-convention */
+    const errors = HTMLHint.verify(text, { 'doctype-first': false });
+    /* eslint-enable @typescript-eslint/naming-convention */
+    if (errors.length > 0) {
+        const firstError = errors[0];
+        validationMessage = `${firstError.message} at line ${firstError.line}, col ${firstError.col}`;
+        if (errors.length > 1) {
+            validationMessage += ` (and ${errors.length - 1} more errors)`;
+        }
+    }
+
+    /* eslint-disable */
+    try {
+        // Format Vue (using js-beautify's HTML formatter)
+        const options: any = {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            indent_scripts: 'normal',
+            end_with_newline: false,
+            wrap_line_length: 0,
+            indent_inner_html: false,
+            js: {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            },
+            css: {
+                indent_size: 2,
+                indent_char: ' ',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: false
+            }
+        };
+        formatted = jsbeautify.html(text, options);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Vue: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Vue has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Vue formatted successfully!');
     }
 }
 
@@ -331,7 +407,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx') {
+async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -371,6 +447,8 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
         await handleJSX(editor, text);
     } else if (format === 'tsx') {
         await handleTSX(editor, text);
+    } else if (format === 'vue') {
+        await handleVue(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -397,7 +475,7 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json' || lang === 'jsonc') { return 'json'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -410,9 +488,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'javascriptreact') { return 'jsx'; }
     if (lang === 'typescript') { return 'typescript'; }
     if (lang === 'typescriptreact') { return 'tsx'; }
+    if (lang === 'vue') { return 'vue'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
+    if (trimmed.includes('<template') || /<script\s+setup/i.test(trimmed) || /<style\s+scoped/i.test(trimmed)) {
+        return 'vue';
+    }
+
     if (trimmed.startsWith('<')) {
         // Simple heuristic: if it looks like XML but isn't explicitly,
         // we'll try XML first then HTML in the main loop if unknown.

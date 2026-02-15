@@ -63,3 +63,14 @@
 - **Heuristic for JSX:** Combines the presence of JSX tags (`<` and `/>` or `</`) with common JavaScript keywords (`import`, `export`, `function`, `const`, etc.) to distinguish JSX from plain JavaScript or XML.
 - **Heuristic for TSX:** Similar to JSX, but also checks for TypeScript-specific markers like interfaces, type annotations, or generic syntax to distinguish it from plain JSX.
 - **Language ID:** Added explicit mapping for `javascriptreact` to `jsx` and `typescriptreact` to `tsx`.
+
+## Vue Support (v0.3.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Used `htmlhint` for validation. Since Vue SFCs are structured similarly to HTML, `htmlhint` provides a good baseline for template validation.
+- **Customization:** Disabled the `doctype-first` rule for Vue files, as they typically do not start with a doctype declaration.
+- **Recovery:** Utilized `js-beautify.html` for formatting. It natively supports Vue files and is highly resilient to syntax errors.
+- **Enhanced Formatting:** Configured `js-beautify.html` with specific nested options for `js` and `css` to ensure that `<script>` and `<style>` blocks are formatted consistently with the rest of the extension's standards.
+
+### Auto-Detection
+- **Heuristic:** Looked for the `vue` language ID or content-based markers: the presence of `<template` tags, or specific Vue attributes like `script setup` and `style scoped`. This distinguishes Vue SFCs from standard HTML or other template languages.
