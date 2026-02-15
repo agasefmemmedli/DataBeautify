@@ -15,6 +15,7 @@ import * as phpParser from 'php-parser';
 import { parse, ParseError } from 'jsonc-parser';
 import * as YAML from 'yaml';
 import * as smolToml from 'smol-toml';
+import * as ini from 'ini';
 
 /**
  * This method is called when the extension is activated
@@ -79,6 +80,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatTOMLCommand = vscode.commands.registerCommand('beautify-format.formatTOML', () => {
         beautify('toml');
     });
+    let formatINICommand = vscode.commands.registerCommand('beautify-format.formatINI', () => {
+        beautify('ini');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -96,6 +100,105 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatJSONCCommand);
     context.subscriptions.push(formatYAMLCommand);
     context.subscriptions.push(formatTOMLCommand);
+    context.subscriptions.push(formatINICommand);
+}
+
+/**
+ * Handle INI formatting and validation
+ */
+async function handleINI(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate INI using 'ini' package
+    try {
+        ini.parse(text);
+    } catch (e: any) {
+        validationMessage = e.message;
+    }
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let currentIndent = '';
+
+        for (let line of lines) {
+            const trimmed = line.trim();
+
+            // Handle comments and empty lines
+            if (trimmed === '' || trimmed.startsWith(';') || trimmed.startsWith('#')) {
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            // Handle sections [section]
+            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                // Ensure there is a newline before section if not at the start
+                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            // Handle key = value or key : value
+            let splitIdx = -1;
+            const eqIdx = trimmed.indexOf('=');
+            const colIdx = trimmed.indexOf(':');
+
+            if (eqIdx !== -1 && colIdx !== -1) {
+                splitIdx = Math.min(eqIdx, colIdx);
+            } else {
+                splitIdx = eqIdx !== -1 ? eqIdx : colIdx;
+            }
+
+            if (splitIdx > 0) {
+                const separator = trimmed[splitIdx];
+                const key = trimmed.substring(0, splitIdx).trim();
+                const valuePart = trimmed.substring(splitIdx + 1).trim();
+
+                // Check for inline comments
+                let commentStart = -1;
+                for (let i = 0; i < valuePart.length; i++) {
+                    const char = valuePart[i];
+                    if (char === ';' || char === '#') {
+                        // Check if it's not part of a quoted string (simple check)
+                        const before = valuePart.substring(0, i);
+                        const quoteCount = (before.match(/"/g) || []).length;
+                        if (quoteCount % 2 === 0) {
+                            commentStart = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (commentStart !== -1) {
+                    const value = valuePart.substring(0, commentStart).trim();
+                    const comment = valuePart.substring(commentStart).trim();
+                    formattedLines.push(`${key} ${separator} ${value} ${comment}`);
+                } else {
+                    formattedLines.push(`${key} ${separator} ${valuePart}`);
+                }
+                continue;
+            }
+
+            // Fallback
+            formattedLines.push(trimmed);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format INI: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`INI has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('INI formatted successfully!');
+    }
 }
 
 /**
@@ -747,7 +850,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -799,6 +902,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleYAML(editor, text);
     } else if (format === 'toml') {
         await handleTOML(editor, text);
+    } else if (format === 'ini') {
+        await handleINI(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -817,10 +922,15 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 await handleCSS(editor, text);
             } else if (trimmed.startsWith('---') || /^[a-z0-9_-]+:\s/m.test(trimmed)) {
                 await handleYAML(editor, text);
-            } else if (trimmed.startsWith('[') || /^[a-z0-9_-]+\s*=\s*/m.test(trimmed)) {
-                await handleTOML(editor, text);
+            } else if (trimmed.startsWith('[') || /^[a-z0-9_-]+\s*[=:]\s*/m.test(trimmed) || trimmed.startsWith(';')) {
+                // Heuristic for INI vs TOML
+                if (trimmed.includes(';') || trimmed.includes(':')) {
+                    await handleINI(editor, text);
+                } else {
+                    await handleTOML(editor, text);
+                }
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML or TOML). Please ensure your file starts with {, [, < or has key: value pairs');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML or INI). Please ensure your file starts with {, [, < or has key: value pairs');
             }
         }
     }
@@ -829,7 +939,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -848,6 +958,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'php') { return 'php'; }
     if (lang === 'yaml' || lang === 'yml') { return 'yaml'; }
     if (lang === 'toml') { return 'toml'; }
+    if (lang === 'ini') { return 'ini'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -908,11 +1019,23 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         return 'yaml';
     }
 
-    // TOML heuristic
+    // INI heuristic
+    if (
+        trimmed.startsWith(';') ||
+        (/^[a-z0-9_-]+\s*[:]\s*.+/im.test(trimmed) && !trimmed.includes('{'))
+    ) {
+        return 'ini';
+    }
+
+    // TOML or INI (both use [section] and key=value)
     if (
         (trimmed.startsWith('[') && trimmed.includes(']')) ||
         (/^[a-z0-9_-]+\s*=\s*.+/im.test(trimmed) && !trimmed.includes('{'))
     ) {
+        // If it has a semicolon, it's likely INI
+        if (trimmed.includes(';')) {
+            return 'ini';
+        }
         return 'toml';
     }
 
