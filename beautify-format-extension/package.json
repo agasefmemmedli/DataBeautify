@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript and Svelte files with keyboard shortcuts and context menu",
-  "version": "0.4.0",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte and PHP files with keyboard shortcuts and context menu",
+  "version": "0.5.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -29,6 +29,7 @@
     "less",
     "typescript",
     "svelte",
+    "php",
     "prettify",
     "indent"
   ],
@@ -52,7 +53,8 @@
     "onLanguage:javascriptreact",
     "onLanguage:typescriptreact",
     "onLanguage:vue",
-    "onLanguage:svelte"
+    "onLanguage:svelte",
+    "onLanguage:php"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -96,6 +98,10 @@
       {
         "command": "beautify-format.formatSvelte",
         "title": "Beautify Svelte"
+      },
+      {
+        "command": "beautify-format.formatPHP",
+        "title": "Beautify PHP"
       }
     ],
     "keybindings": [
@@ -110,7 +116,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php",
           "group": "1_modification"
         }
       ]
@@ -145,6 +151,7 @@
     "js-beautify": "^1.15.4",
     "jsonrepair": "^3.13.2",
     "less": "^4.5.1",
+    "php-parser": "^3.2.5",
     "sass": "^1.97.3",
     "sass-formatter": "^0.8.0",
     "svelte": "^5.51.1",

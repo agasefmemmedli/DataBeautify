@@ -1,5 +1,3 @@
-PHP (.php) — все еще лидер в backend-разработке сайтов.
-
 JSONC (.jsonc) — JSON с комментариями (как в настройках VS Code).
 
 YAML / YML (.yaml, .yml) — конфиги Docker, CI/CD, Kubernetes.
