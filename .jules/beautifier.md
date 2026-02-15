@@ -114,3 +114,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('yaml', 'yml') with content-based heuristics. Looked for common YAML markers such as document start (`---`), list items (`- `), comments (`#`), and key-value pairs (`key: value`). This ensures reliable detection even for files without a standard extension.
+
+## TOML Support (v0.8.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected `smol-toml` for validation due to its lightweight nature and accurate error reporting (line/column).
+- **Recovery:** Implemented a custom resilient line-by-line formatter. This approach was chosen over library-based stringification to ensure that comments are preserved, as many common TOML libraries lose comments during the parse/stringify cycle.
+- **Resilient Formatting:** The custom formatter handles key-value pairs (including quoted keys containing equals signs), table headers, and comments. It implements state tracking for multiline strings (`"""` and `'''`) to avoid data corruption, and applies proper indentation for elements nested under tables. It normalizes spacing around the `=` operator while preserving semantic whitespace in multiline contexts, fulfilling the "readability is king" philosophy even for partially broken files.
+- **Error Reporting:** Syntax errors from `smol-toml.parse` are caught and reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('toml') with content-based heuristics. Looked for table headers (e.g., `[table]`) or `key = value` patterns, while explicitly excluding text containing curly braces to avoid false positives with CSS or other brace-based languages. This ensures high confidence in identifying TOML files.
