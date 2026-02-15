@@ -83,6 +83,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatINICommand = vscode.commands.registerCommand('beautify-format.formatINI', () => {
         beautify('ini');
     });
+    let formatENVCommand = vscode.commands.registerCommand('beautify-format.formatENV', () => {
+        beautify('env');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -101,6 +104,60 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatYAMLCommand);
     context.subscriptions.push(formatTOMLCommand);
     context.subscriptions.push(formatINICommand);
+    context.subscriptions.push(formatENVCommand);
+}
+
+/**
+ * Handle ENV formatting and validation
+ */
+async function handleENV(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Handle comments and empty lines
+            if (trimmed === '' || trimmed.startsWith('#')) {
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            // Handle export KEY=VALUE or KEY=VALUE
+            // KEY must start with letter or underscore, followed by letters, numbers or underscores
+            const exportMatch = trimmed.match(/^(export\s+)?([a-z_][a-z0-9_]*)\s*=\s*(.*)$/i);
+            if (exportMatch) {
+                const isExport = exportMatch[1] ? 'export ' : '';
+                const key = exportMatch[2];
+                const value = exportMatch[3];
+                formattedLines.push(`${isExport}${key} = ${value}`);
+            } else {
+                // If it doesn't match the pattern, it's a potential syntax error
+                if (!validationMessage) {
+                    validationMessage = `Potential issue at line ${i + 1}: "${trimmed}"`;
+                }
+                formattedLines.push(trimmed);
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format ENV: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`ENV has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('ENV formatted successfully!');
+    }
 }
 
 /**
@@ -850,7 +907,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -904,6 +961,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleTOML(editor, text);
     } else if (format === 'ini') {
         await handleINI(editor, text);
+    } else if (format === 'env') {
+        await handleENV(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -922,15 +981,17 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 await handleCSS(editor, text);
             } else if (trimmed.startsWith('---') || /^[a-z0-9_-]+:\s/m.test(trimmed)) {
                 await handleYAML(editor, text);
-            } else if (trimmed.startsWith('[') || /^[a-z0-9_-]+\s*[=:]\s*/m.test(trimmed) || trimmed.startsWith(';')) {
-                // Heuristic for INI vs TOML
-                if (trimmed.includes(';') || trimmed.includes(':')) {
+            } else if (trimmed.startsWith('[') || /^[a-z0-9_-]+\s*[=:]\s*/m.test(trimmed) || trimmed.startsWith(';') || trimmed.startsWith('#')) {
+                // Heuristic for INI vs TOML vs ENV
+                if (trimmed.includes(';') || (trimmed.includes(':') && !trimmed.includes('='))) {
                     await handleINI(editor, text);
-                } else {
+                } else if (trimmed.startsWith('[') || (trimmed.includes('=') && !/^(export\s+)?[a-z_][a-z0-9_]*\s*=/i.test(trimmed))) {
                     await handleTOML(editor, text);
+                } else {
+                    await handleENV(editor, text);
                 }
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML or INI). Please ensure your file starts with {, [, < or has key: value pairs');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML, INI or ENV). Please ensure your file starts with {, [, < or has key: value pairs');
             }
         }
     }
@@ -939,7 +1000,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -959,6 +1020,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'yaml' || lang === 'yml') { return 'yaml'; }
     if (lang === 'toml') { return 'toml'; }
     if (lang === 'ini') { return 'ini'; }
+    if (lang === 'dotenv' || lang === 'env') { return 'env'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1019,6 +1081,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         return 'yaml';
     }
 
+    // ENV heuristic
+    if (
+        (trimmed.startsWith('#') && !trimmed.includes('{') && !trimmed.includes('[') && /^[A-Z_]+=/m.test(trimmed)) ||
+        /^(export\s+)?[A-Z_][A-Z0-9_]*\s*=\s*/im.test(trimmed)
+    ) {
+        return 'env';
+    }
+
     // INI heuristic
     if (
         trimmed.startsWith(';') ||
@@ -1027,7 +1097,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         return 'ini';
     }
 
-    // TOML or INI (both use [section] and key=value)
+    // TOML or INI or ENV (all can use key=value)
     if (
         (trimmed.startsWith('[') && trimmed.includes(']')) ||
         (/^[a-z0-9_-]+\s*=\s*.+/im.test(trimmed) && !trimmed.includes('{'))
@@ -1035,6 +1105,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         // If it has a semicolon, it's likely INI
         if (trimmed.includes(';')) {
             return 'ini';
+        }
+        // If it has a section, it's likely TOML or INI
+        if (trimmed.startsWith('[')) {
+            return 'toml';
+        }
+        // If it matches ENV pattern (UPPER_CASE keys)
+        if (/^(export\s+)?[A-Z_][A-Z0-9_]*\s*=\s*/m.test(trimmed)) {
+            return 'env';
         }
         return 'toml';
     }

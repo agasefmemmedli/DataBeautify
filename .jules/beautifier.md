@@ -136,3 +136,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined 'languageId' check ('ini') with content-based heuristics. Explicitly looked for ';' comments or key-value pairs using ':' to identify INI. For ambiguous cases (using '=' and '[section]'), it checks for the presence of ';' to distinguish from TOML. This ensures high confidence in auto-detecting INI files while avoiding false positives with other formats.
+
+## ENV Support (v0.10.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter to handle ENV files. This approach ensures maximum flexibility in preserving comments and handling variations in the format.
+- **Resilient Formatting:** The formatter identifies `KEY=VALUE` and `export KEY=VALUE` patterns using a case-insensitive regex. It normalizes the spacing around the `=` operator (e.g., `KEY = VALUE`) for improved readability, matching the "Beautifier" style established for INI and TOML.
+- **Error Reporting:** Lines that do not match the expected assignment pattern (and are not comments or empty) are flagged as potential syntax issues. The first such issue encountered is reported to the user as a VS Code warning, while the tool continues to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('dotenv', 'env') with content-based heuristics. It looks for common ENV patterns like lines starting with `#` followed by uppercase assignments, or the presence of `export KEY=VALUE`. It also includes logic to distinguish ENV from INI and TOML by checking for the absence of section headers `[...]` or semicolons `;` when uppercase keys are present.

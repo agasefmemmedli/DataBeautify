@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte, PHP, YAML and TOML files with keyboard shortcuts and context menu",
-  "version": "0.8.0",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte, PHP, YAML, TOML, INI and ENV files with keyboard shortcuts and context menu",
+  "version": "0.10.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -59,7 +59,9 @@
     "onLanguage:yaml",
     "onLanguage:yml",
     "onLanguage:toml",
-    "onLanguage:ini"
+    "onLanguage:ini",
+    "onLanguage:dotenv",
+    "onLanguage:env"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -123,6 +125,10 @@
       {
         "command": "beautify-format.formatINI",
         "title": "Beautify INI"
+      },
+      {
+        "command": "beautify-format.formatENV",
+        "title": "Beautify ENV"
       }
     ],
     "keybindings": [
@@ -137,7 +143,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env",
           "group": "1_modification"
         }
       ]
