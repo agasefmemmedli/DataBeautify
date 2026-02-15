@@ -104,3 +104,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('jsonc') with content-based heuristics. If a file starts with `{` or `[` but contains comment markers (`//` or `/*`), it is automatically identified as JSONC rather than standard JSON. This ensures that comments are preserved even if the user hasn't explicitly set the language mode to JSONC.
+
+## YAML Support (v0.7.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected the `yaml` package for its modern API and robust parsing capabilities.
+- **Recovery:** Discovered that `yaml.parseDocument(text)` produces a document object even when syntax errors are present. While `doc.toString()` normally throws if errors exist, clearing the `doc.errors` array allows the stringification to proceed. This results in a "best-effort" formatted output that preserves as much structure and as many comments as possible, perfectly aligning with the "readability is king" philosophy.
+- **Error Reporting:** Syntax errors captured during `parseDocument` are reported as VS Code warning messages. The first identified error is surfaced to the user, ensuring they are aware of issues while still receiving a beautified version of their code.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('yaml', 'yml') with content-based heuristics. Looked for common YAML markers such as document start (`---`), list items (`- `), comments (`#`), and key-value pairs (`key: value`). This ensures reliable detection even for files without a standard extension.

@@ -13,6 +13,7 @@ import * as ts from 'typescript';
 import * as svelte from 'svelte/compiler';
 import * as phpParser from 'php-parser';
 import { parse, ParseError } from 'jsonc-parser';
+import * as YAML from 'yaml';
 
 /**
  * This method is called when the extension is activated
@@ -71,6 +72,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatJSONCCommand = vscode.commands.registerCommand('beautify-format.formatJSONC', () => {
         beautify('jsonc');
     });
+    let formatYAMLCommand = vscode.commands.registerCommand('beautify-format.formatYAML', () => {
+        beautify('yaml');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -86,6 +90,43 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatSvelteCommand);
     context.subscriptions.push(formatPHPCommand);
     context.subscriptions.push(formatJSONCCommand);
+    context.subscriptions.push(formatYAMLCommand);
+}
+
+/**
+ * Handle YAML formatting and validation
+ */
+async function handleYAML(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    try {
+        const doc = YAML.parseDocument(text);
+        if (doc.errors.length > 0) {
+            const firstError = doc.errors[0];
+            validationMessage = firstError.message;
+            // Fault-tolerance: Clear errors to allow toString() to proceed
+            doc.errors = [];
+        }
+
+        // Format YAML
+        formatted = doc.toString({
+            indent: 2,
+            indentSeq: true,
+            simpleKeys: true
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format YAML: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`YAML has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('YAML formatted successfully!');
+    }
 }
 
 /**
@@ -550,7 +591,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -598,6 +639,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleSvelte(editor, text);
     } else if (format === 'php') {
         await handlePHP(editor, text);
+    } else if (format === 'yaml') {
+        await handleYAML(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -614,8 +657,10 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 }
             } else if (trimmed.includes('{') && trimmed.includes('}')) {
                 await handleCSS(editor, text);
+            } else if (trimmed.startsWith('---') || /^[a-z0-9_-]+:\s/m.test(trimmed)) {
+                await handleYAML(editor, text);
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML or CSS). Please ensure your file starts with {, [ or <');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS or YAML). Please ensure your file starts with {, [, < or has key: value pairs');
             }
         }
     }
@@ -624,7 +669,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -641,6 +686,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'vue') { return 'vue'; }
     if (lang === 'svelte') { return 'svelte'; }
     if (lang === 'php') { return 'php'; }
+    if (lang === 'yaml' || lang === 'yml') { return 'yaml'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -689,6 +735,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     // SASS heuristic
     if (trimmed.startsWith('$') && !trimmed.includes('{')) {
         return 'sass';
+    }
+
+    // YAML heuristic (before CSS/JS to avoid conflicts, but specific enough)
+    if (
+        trimmed.startsWith('---') ||
+        (/^\s*-\s+.+/m.test(trimmed) && !trimmed.includes('{')) ||
+        (trimmed.startsWith('#') && !trimmed.includes('{')) ||
+        (/^[a-z0-9_-]+:\s+.+/im.test(trimmed) && !trimmed.includes('{'))
+    ) {
+        return 'yaml';
     }
 
     // LESS heuristic
