@@ -63,7 +63,8 @@
     "onLanguage:dotenv",
     "onLanguage:env",
     "onLanguage:csv",
-    "onLanguage:graphql"
+    "onLanguage:graphql",
+    "onLanguage:python"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -139,6 +140,10 @@
       {
         "command": "beautify-format.formatGraphQL",
         "title": "Beautify GraphQL"
+      },
+      {
+        "command": "beautify-format.formatPython",
+        "title": "Beautify Python"
       }
     ],
     "keybindings": [
@@ -153,7 +158,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python",
           "group": "1_modification"
         }
       ]
@@ -183,6 +188,7 @@
   },
   "dependencies": {
     "acorn": "^8.15.0",
+    "antlr4ts": "^0.5.0-alpha.4",
     "css": "^3.0.0",
     "fast-xml-parser": "^5.3.6",
     "graphql": "^16.12.0",
@@ -193,6 +199,7 @@
     "jsonrepair": "^3.13.2",
     "less": "^4.5.1",
     "php-parser": "^3.2.5",
+    "python-ast": "^0.1.0",
     "sass": "^1.97.3",
     "sass-formatter": "^0.8.0",
     "smol-toml": "^1.6.0",
