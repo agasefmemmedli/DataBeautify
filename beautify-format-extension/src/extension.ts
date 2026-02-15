@@ -86,6 +86,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatENVCommand = vscode.commands.registerCommand('beautify-format.formatENV', () => {
         beautify('env');
     });
+    let formatCSVCommand = vscode.commands.registerCommand('beautify-format.formatCSV', () => {
+        beautify('csv');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -105,6 +108,113 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatTOMLCommand);
     context.subscriptions.push(formatINICommand);
     context.subscriptions.push(formatENVCommand);
+    context.subscriptions.push(formatCSVCommand);
+}
+
+/**
+ * Handle CSV formatting and validation
+ */
+async function handleCSV(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    try {
+        const lines = text.split(/\r?\n/);
+        const rows: { value: string, quoted: boolean }[][] = [];
+        let maxCols = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.trim() === '') {
+                rows.push([]);
+                continue;
+            }
+
+            const cells: { value: string, quoted: boolean }[] = [];
+            let currentCell = '';
+            let inQuotes = false;
+            let wasQuoted = false;
+
+            for (let j = 0; j < line.length; j++) {
+                const char = line[j];
+                if (char === '"') {
+                    wasQuoted = true;
+                    if (inQuotes && line[j + 1] === '"') {
+                        currentCell += '"';
+                        j++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    cells.push({ value: currentCell.trim(), quoted: wasQuoted });
+                    currentCell = '';
+                    wasQuoted = false;
+                } else {
+                    currentCell += char;
+                }
+            }
+            cells.push({ value: currentCell.trim(), quoted: wasQuoted });
+
+            if (inQuotes && !validationMessage) {
+                validationMessage = `Mismatched quote at line ${i + 1}`;
+            }
+
+            rows.push(cells);
+            if (cells.length > maxCols) {
+                maxCols = cells.length;
+            }
+        }
+
+        // Prepare display values (handling re-quoting for data integrity)
+        const rowsWithDisplayValues = rows.map(row => {
+            return row.map(cell => {
+                let displayValue = cell.value;
+                if (cell.quoted || displayValue.includes(',') || displayValue.includes('"')) {
+                    displayValue = '"' + displayValue.replace(/"/g, '""') + '"';
+                }
+                return displayValue;
+            });
+        });
+
+        // Calculate max width for each column based on display values
+        const colWidths = new Array(maxCols).fill(0);
+        for (const row of rowsWithDisplayValues) {
+            for (let i = 0; i < row.length; i++) {
+                if (row[i].length > colWidths[i]) {
+                    colWidths[i] = row[i].length;
+                }
+            }
+        }
+
+        // Check for inconsistent column counts
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].length > 0 && rows[i].length < maxCols && !validationMessage) {
+                validationMessage = `Inconsistent column count at line ${i + 1} (expected ${maxCols}, got ${rows[i].length})`;
+            }
+        }
+
+        // Format with alignment
+        const formattedLines = rowsWithDisplayValues.map(row => {
+            if (row.length === 0) { return ''; }
+            return row.map((displayValue, i) => {
+                const padding = i < row.length - 1 ? ' '.repeat(colWidths[i] - displayValue.length) : '';
+                return displayValue + padding;
+            }).join(', ');
+        });
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format CSV: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`CSV has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('CSV formatted successfully!');
+    }
 }
 
 /**
@@ -907,7 +1017,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -963,6 +1073,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleINI(editor, text);
     } else if (format === 'env') {
         await handleENV(editor, text);
+    } else if (format === 'csv') {
+        await handleCSV(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -990,8 +1102,10 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 } else {
                     await handleENV(editor, text);
                 }
+            } else if (trimmed.includes(',') && trimmed.split('\n')[0].includes(',')) {
+                await handleCSV(editor, text);
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML, INI or ENV). Please ensure your file starts with {, [, < or has key: value pairs');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML, INI, ENV or CSV). Please ensure your file starts with {, [, < or has key: value pairs/commas');
             }
         }
     }
@@ -1000,7 +1114,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1021,6 +1135,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'toml') { return 'toml'; }
     if (lang === 'ini') { return 'ini'; }
     if (lang === 'dotenv' || lang === 'env') { return 'env'; }
+    if (lang === 'csv') { return 'csv'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1069,6 +1184,17 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     // SASS heuristic
     if (trimmed.startsWith('$') && !trimmed.includes('{')) {
         return 'sass';
+    }
+
+    // CSV heuristic
+    const sampleLines = trimmed.split('\n').slice(0, 10);
+    if (sampleLines.length >= 2) {
+        const commaCounts = sampleLines.filter(l => l.trim().length > 0).map(l => (l.match(/,/g) || []).length);
+        // Resilient: Identify as CSV if most lines have commas, even if counts vary slightly
+        const linesWithCommas = commaCounts.filter(c => c > 0);
+        if (linesWithCommas.length >= sampleLines.length / 2 && linesWithCommas.length >= 2) {
+            return 'csv';
+        }
     }
 
     // YAML heuristic (before CSS/JS to avoid conflicts, but specific enough)

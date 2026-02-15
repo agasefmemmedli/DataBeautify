@@ -146,3 +146,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('dotenv', 'env') with content-based heuristics. It looks for common ENV patterns like lines starting with `#` followed by uppercase assignments, or the presence of `export KEY=VALUE`. It also includes logic to distinguish ENV from INI and TOML by checking for the absence of section headers `[...]` or semicolons `;` when uppercase keys are present.
+
+## CSV Support (v0.11.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter for CSV. This allows for column alignment without relying on heavy external libraries, fitting the "Beautifier" 💎 philosophy.
+- **Recovery:** The formatter uses a state-aware character-by-character scan to handle quoted fields (including escaped quotes) and commas. It calculates the maximum width for each column across all rows and pads cells with spaces to achieve a clean tabular layout.
+- **Error Reporting:** The logic detects mismatched quotes (quote started but never closed on the same line) and inconsistent column counts. These are reported as VS Code warning messages to the user, while the tool still produces the best-possible aligned output for the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('csv') with content-based heuristics. It checks the first 10 lines of the file; if it finds consistent comma counts across multiple non-empty lines, it identifies the format as CSV. A fallback heuristic in the main beautify loop also checks for the presence of commas on the first line to catch CSV-like snippets.
