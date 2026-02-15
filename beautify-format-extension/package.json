@@ -55,7 +55,9 @@
     "onLanguage:typescriptreact",
     "onLanguage:vue",
     "onLanguage:svelte",
-    "onLanguage:php"
+    "onLanguage:php",
+    "onLanguage:yaml",
+    "onLanguage:yml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -107,6 +109,10 @@
       {
         "command": "beautify-format.formatJSONC",
         "title": "Beautify JSONC"
+      },
+      {
+        "command": "beautify-format.formatYAML",
+        "title": "Beautify YAML"
       }
     ],
     "keybindings": [
@@ -121,7 +127,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml",
           "group": "1_modification"
         }
       ]
@@ -162,6 +168,7 @@
     "sass-formatter": "^0.8.0",
     "svelte": "^5.51.1",
     "typescript": "^5.7.3",
-    "xml-formatter": "^3.6.0"
+    "xml-formatter": "^3.6.0",
+    "yaml": "^2.8.2"
   }
 }
