@@ -1,0 +1,8 @@
+{
+    "name": "broken-jsonc",
+    "unclosed": [
+        "item1",
+        "item2"
+    // Missing closing bracket for array
+    "version": "1.0.0"
+}

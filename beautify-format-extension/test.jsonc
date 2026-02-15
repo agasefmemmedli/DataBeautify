@@ -1,0 +1,13 @@
+{
+    // This is a comment
+    "name": "beautify-format",
+    /*
+       Multi-line comment
+    */
+    "version": "0.6.0",
+    "supported": [
+        "json",
+        "jsonc", // Inline comment
+        "xml"
+    ]
+}

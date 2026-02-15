@@ -1,5 +1,3 @@
-JSONC (.jsonc) — JSON с комментариями (как в настройках VS Code).
-
 YAML / YML (.yaml, .yml) — конфиги Docker, CI/CD, Kubernetes.
 
 TOML (.toml) — конфиги Rust (Cargo), Python (pyproject).

@@ -94,3 +94,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('php') with content-based heuristics. Looked for the presence of PHP tags (`<?php` or `<?`) at the start of the file or within the content. This ensures reliable identification of PHP files, even those without the standard extension.
+
+## JSONC Support (v0.6.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected the `jsonc-parser` package for validation. It provides detailed error information, including offsets that are converted to line/column positions using VS Code's `positionAt` method.
+- **Recovery:** Used `js-beautify.js` for formatting. Unlike standard `JSON.stringify`, `js-beautify`'s JS formatter preserves comments and handles the JSONC structure resiliently, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Syntax errors from `jsonc-parser` are caught and reported as VS Code warning messages, surfacing the first identified issue while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('jsonc') with content-based heuristics. If a file starts with `{` or `[` but contains comment markers (`//` or `/*`), it is automatically identified as JSONC rather than standard JSON. This ensures that comments are preserved even if the user hasn't explicitly set the language mode to JSONC.
