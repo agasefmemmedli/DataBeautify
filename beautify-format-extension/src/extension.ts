@@ -11,6 +11,10 @@ import * as less from 'less';
 import * as acorn from 'acorn';
 import * as ts from 'typescript';
 import * as svelte from 'svelte/compiler';
+import * as phpParser from 'php-parser';
+import * as prettier from 'prettier';
+import * as phpPlugin from '@prettier/plugin-php';
+import * as jsonc from 'jsonc-parser';
 
 /**
  * This method is called when the extension is activated
@@ -76,6 +80,83 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatTSXCommand);
     context.subscriptions.push(formatVueCommand);
     context.subscriptions.push(formatSvelteCommand);
+
+    let formatPHPCommand = vscode.commands.registerCommand('beautify-format.formatPHP', () => {
+        beautify('php');
+    });
+    let formatJSONCCommand = vscode.commands.registerCommand('beautify-format.formatJSONC', () => {
+        beautify('jsonc');
+    });
+
+    context.subscriptions.push(formatPHPCommand);
+    context.subscriptions.push(formatJSONCCommand);
+}
+
+/**
+ * Handle PHP formatting and validation
+ */
+async function handlePHP(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate PHP
+    const parser = new (phpParser as any).default({
+        parser: {
+            extractDoc: true,
+            php7: true
+        },
+        ast: {
+            withPositions: true
+        }
+    });
+
+    try {
+        parser.parseCode(text);
+    } catch (e: any) {
+        if (e.loc) {
+            validationMessage = `${e.message} at line ${e.loc.start.line}, col ${e.loc.start.column}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    try {
+        // Format PHP using Prettier
+        formatted = await prettier.format(text, {
+            parser: 'php',
+            plugins: [phpPlugin as any],
+            tabWidth: 2,
+            printWidth: 80,
+            singleQuote: true
+        });
+    } catch (error: any) {
+        // Fallback to js-beautify if Prettier fails on broken code
+        /* eslint-disable */
+        try {
+            formatted = jsbeautify.html(text, {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                indent_scripts: 'normal',
+                end_with_newline: false,
+                wrap_line_length: 0,
+                indent_inner_html: false
+            });
+        } catch (fallbackError: any) {
+            /* eslint-enable */
+            vscode.window.showErrorMessage(`Failed to format PHP: ${error.message}`);
+            return;
+        }
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`PHP has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('PHP formatted successfully!');
+    }
 }
 
 /**
@@ -483,7 +564,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -503,6 +584,10 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 
     if (format === 'json') {
         await handleJSON(editor, text);
+    } else if (format === 'jsonc') {
+        await handleJSONC(editor, text);
+    } else if (format === 'php') {
+        await handlePHP(editor, text);
     } else if (format === 'xml') {
         await handleXML(editor, text);
     } else if (format === 'html') {
@@ -553,9 +638,11 @@ async function beautify(forcedFormat?: 'json' | 'xml' | 'html' | 'css' | 'scss' 
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'unknown' {
     const lang = languageId.toLowerCase();
-    if (lang === 'json' || lang === 'jsonc') { return 'json'; }
+    if (lang === 'json') { return 'json'; }
+    if (lang === 'jsonc') { return 'jsonc'; }
+    if (lang === 'php') { return 'php'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
     if (lang === 'html' || lang === 'htm') { return 'html'; }
     if (lang === 'css') { return 'css'; }
@@ -570,7 +657,19 @@ function detectFormat(text: string, languageId: string): 'json' | 'xml' | 'html'
     if (lang === 'svelte') { return 'svelte'; }
 
     const trimmed = text.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) { return 'json'; }
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        // If it contains comments, it's JSONC
+        if (trimmed.includes('//') || trimmed.includes('/*')) {
+            return 'jsonc';
+        }
+        return 'json';
+    }
+
+    // PHP heuristic
+    if (trimmed.includes('<?php') || (trimmed.startsWith('<?') && !trimmed.startsWith('<?xml'))) {
+        return 'php';
+    }
+
     if (trimmed.includes('<template') || /<script\s+setup/i.test(trimmed) || /<style\s+scoped/i.test(trimmed)) {
         return 'vue';
     }
@@ -680,6 +779,58 @@ async function handleJSON(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`JSON was invalid but repaired. Original error: ${repairMessage}`);
     } else {
         vscode.window.showInformationMessage('JSON formatted successfully!');
+    }
+}
+
+/**
+ * Handle JSONC formatting and validation
+ */
+async function handleJSONC(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate JSONC
+    const errors: jsonc.ParseError[] = [];
+    jsonc.parse(text, errors);
+    if (errors.length > 0) {
+        const firstError = errors[0];
+        const offset = firstError.offset;
+        const location = editor.document.positionAt(offset);
+        validationMessage = `JSONC error at line ${location.line + 1}, col ${location.character + 1}`;
+    }
+
+    /* eslint-disable */
+    try {
+        // Format JSONC (using js-beautify's JS formatter to preserve comments)
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format JSONC: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`JSONC has syntax issues but was beautified. First error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('JSONC formatted successfully!');
     }
 }
 

@@ -84,3 +84,24 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('svelte') with content-based heuristics. Looked for Svelte-specific block syntax (`{#if`, `{#each`, `{#await`) and script-level markers like `export let` or the reactive declaration `$:`. This ensures high confidence in identifying Svelte SFCs even without the correct file extension.
+
+## PHP Support (v0.5.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected `php-parser` (by glayzzle) for validation. It provides detailed syntax error reporting including line and column information.
+- **Formatting:** Integrated `prettier` with `@prettier/plugin-php`. Prettier provides industry-standard PHP formatting that handles both pure PHP and PHP mixed with HTML.
+- **Resilience:** Implemented a fallback to `js-beautify.html` if Prettier fails. This ensures that even if the PHP syntax is too broken for Prettier, the overall structure (HTML tags and indentation) is still improved.
+- **Error Reporting:** Syntax errors from `php-parser` are captured and reported as VS Code warning messages, surfacing the issue while still attempting to beautify.
+
+### Auto-Detection
+- **Heuristic:** Checks for `php` language ID or content-based markers like `<?php` or `<?` (excluding `<?xml`). This accurately identifies PHP files even when they lack the `.php` extension.
+
+## JSONC Support (v0.5.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Used `jsonc-parser` (from Microsoft) for validation. It correctly handles comments and provides accurate error offsets.
+- **Formatting:** Utilized `js-beautify.js`. Unlike the standard JSON handler (which uses `JSON.stringify` and loses comments), `js-beautify`'s JS formatter preserves and formats comments within the JSON structure.
+- **Error Reporting:** Errors from `jsonc-parser` are converted from offsets to line/column information using the VS Code document's `positionAt` method and reported as warnings.
+
+### Auto-Detection
+- **Heuristic:** Distinguishes JSONC from standard JSON by checking for the `jsonc` language ID or the presence of comment markers (`//` or `/*`) within a JSON-like structure (starting with `{` or `[`).
