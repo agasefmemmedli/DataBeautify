@@ -14,6 +14,7 @@ import * as svelte from 'svelte/compiler';
 import * as phpParser from 'php-parser';
 import { parse, ParseError } from 'jsonc-parser';
 import * as YAML from 'yaml';
+import * as smolToml from 'smol-toml';
 
 /**
  * This method is called when the extension is activated
@@ -75,6 +76,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatYAMLCommand = vscode.commands.registerCommand('beautify-format.formatYAML', () => {
         beautify('yaml');
     });
+    let formatTOMLCommand = vscode.commands.registerCommand('beautify-format.formatTOML', () => {
+        beautify('toml');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -91,6 +95,158 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatPHPCommand);
     context.subscriptions.push(formatJSONCCommand);
     context.subscriptions.push(formatYAMLCommand);
+    context.subscriptions.push(formatTOMLCommand);
+}
+
+/**
+ * Handle TOML formatting and validation
+ */
+async function handleTOML(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate TOML using smol-toml
+    try {
+        smolToml.parse(text);
+    } catch (e: any) {
+        if (e.line !== undefined) {
+            validationMessage = `${e.message} at line ${e.line}, col ${e.column}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let inMultilineString = false;
+        let multilineStringChar = '';
+        let currentIndent = '';
+
+        for (let line of lines) {
+            // If we are inside a multiline string, preserve the line exactly
+            if (inMultilineString) {
+                formattedLines.push(line);
+                if (line.includes(multilineStringChar.repeat(3))) {
+                    inMultilineString = false;
+                }
+                continue;
+            }
+
+            const trimmed = line.trim();
+
+            // Handle comments and empty lines
+            if (trimmed === '' || trimmed.startsWith('#')) {
+                const indent = (trimmed === '') ? '' : currentIndent;
+                formattedLines.push(indent + trimmed);
+                continue;
+            }
+
+            // Identify if this line starts a multiline string
+            let pendingMultilineToggle = false;
+            let pendingMultilineChar = '';
+            if (trimmed.includes('"""') || trimmed.includes("'''")) {
+                const char = trimmed.includes('"""') ? '"' : "'";
+                // Check if the triple quote is not inside a comment
+                const commentIdx = trimmed.indexOf('#');
+                const tripleIdx = trimmed.indexOf(char.repeat(3));
+                if (commentIdx === -1 || tripleIdx < commentIdx) {
+                    const matches = trimmed.match(new RegExp(char.repeat(3), 'g'));
+                    if (matches && matches.length % 2 !== 0) {
+                        pendingMultilineToggle = true;
+                        pendingMultilineChar = char;
+                    }
+                }
+            }
+
+            // Handle table headers [table] or [[table]]
+            if (trimmed.startsWith('[') && trimmed.endsWith(']') && !trimmed.includes('=')) {
+                formattedLines.push(trimmed);
+                currentIndent = '  ';
+                if (pendingMultilineToggle) {
+                    inMultilineString = true;
+                    multilineStringChar = pendingMultilineChar;
+                }
+                continue;
+            }
+
+            // Handle key = value
+            let eqIndex = -1;
+            let inKeyString = false;
+            let keyStringChar = '';
+            for (let i = 0; i < trimmed.length; i++) {
+                const char = trimmed[i];
+                if ((char === '"' || char === "'") && (i === 0 || trimmed[i - 1] !== '\\')) {
+                    if (!inKeyString) {
+                        inKeyString = true;
+                        keyStringChar = char;
+                    } else if (keyStringChar === char) {
+                        inKeyString = false;
+                    }
+                } else if (char === '=' && !inKeyString) {
+                    eqIndex = i;
+                    break;
+                }
+            }
+
+            if (eqIndex > 0) {
+                const key = trimmed.substring(0, eqIndex).trim();
+                const valuePart = trimmed.substring(eqIndex + 1).trim();
+
+                let commentStart = -1;
+                let inValueString = false;
+                let valueStringChar = '';
+
+                for (let i = 0; i < valuePart.length; i++) {
+                    const char = valuePart[i];
+                    if ((char === '"' || char === "'") && (i === 0 || valuePart[i - 1] !== '\\')) {
+                        if (!inValueString) {
+                            inValueString = true;
+                            valueStringChar = char;
+                        } else if (valueStringChar === char) {
+                            inValueString = false;
+                        }
+                    } else if (char === '#' && !inValueString) {
+                        commentStart = i;
+                        break;
+                    }
+                }
+
+                if (commentStart !== -1) {
+                    const value = valuePart.substring(0, commentStart).trim();
+                    const comment = valuePart.substring(commentStart);
+                    formattedLines.push(`${currentIndent}${key} = ${value} ${comment}`);
+                } else {
+                    formattedLines.push(`${currentIndent}${key} = ${valuePart}`);
+                }
+                if (pendingMultilineToggle) {
+                    inMultilineString = true;
+                    multilineStringChar = pendingMultilineChar;
+                }
+                continue;
+            }
+
+            // Fallback for anything else
+            formattedLines.push(currentIndent + trimmed);
+            if (pendingMultilineToggle) {
+                inMultilineString = true;
+                multilineStringChar = pendingMultilineChar;
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format TOML: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`TOML has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('TOML formatted successfully!');
+    }
 }
 
 /**
@@ -591,7 +747,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -641,6 +797,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handlePHP(editor, text);
     } else if (format === 'yaml') {
         await handleYAML(editor, text);
+    } else if (format === 'toml') {
+        await handleTOML(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -659,8 +817,10 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 await handleCSS(editor, text);
             } else if (trimmed.startsWith('---') || /^[a-z0-9_-]+:\s/m.test(trimmed)) {
                 await handleYAML(editor, text);
+            } else if (trimmed.startsWith('[') || /^[a-z0-9_-]+\s*=\s*/m.test(trimmed)) {
+                await handleTOML(editor, text);
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS or YAML). Please ensure your file starts with {, [, < or has key: value pairs');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML or TOML). Please ensure your file starts with {, [, < or has key: value pairs');
             }
         }
     }
@@ -669,7 +829,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -687,6 +847,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'svelte') { return 'svelte'; }
     if (lang === 'php') { return 'php'; }
     if (lang === 'yaml' || lang === 'yml') { return 'yaml'; }
+    if (lang === 'toml') { return 'toml'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -745,6 +906,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         (/^[a-z0-9_-]+:\s+.+/im.test(trimmed) && !trimmed.includes('{'))
     ) {
         return 'yaml';
+    }
+
+    // TOML heuristic
+    if (
+        (trimmed.startsWith('[') && trimmed.includes(']')) ||
+        (/^[a-z0-9_-]+\s*=\s*.+/im.test(trimmed) && !trimmed.includes('{'))
+    ) {
+        return 'toml';
     }
 
     // LESS heuristic

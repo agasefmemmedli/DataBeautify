@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte and PHP files with keyboard shortcuts and context menu",
-  "version": "0.5.0",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte, PHP, YAML and TOML files with keyboard shortcuts and context menu",
+  "version": "0.8.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -57,7 +57,8 @@
     "onLanguage:svelte",
     "onLanguage:php",
     "onLanguage:yaml",
-    "onLanguage:yml"
+    "onLanguage:yml",
+    "onLanguage:toml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -113,6 +114,10 @@
       {
         "command": "beautify-format.formatYAML",
         "title": "Beautify YAML"
+      },
+      {
+        "command": "beautify-format.formatTOML",
+        "title": "Beautify TOML"
       }
     ],
     "keybindings": [
@@ -127,7 +132,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml",
           "group": "1_modification"
         }
       ]
@@ -147,7 +152,7 @@
     "@types/htmlhint": "^1.1.5",
     "@types/js-beautify": "^1.14.3",
     "@types/less": "^3.0.8",
-    "@types/node": "16.x",
+    "@types/node": "^16.18.126",
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
@@ -166,6 +171,7 @@
     "php-parser": "^3.2.5",
     "sass": "^1.97.3",
     "sass-formatter": "^0.8.0",
+    "smol-toml": "^1.6.0",
     "svelte": "^5.51.1",
     "typescript": "^5.7.3",
     "xml-formatter": "^3.6.0",
