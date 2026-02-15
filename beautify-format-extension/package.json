@@ -42,6 +42,7 @@
   "activationEvents": [
     "onCommand:beautify-format.beautify",
     "onLanguage:json",
+    "onLanguage:jsonc",
     "onLanguage:xml",
     "onLanguage:html",
     "onLanguage:css",
@@ -102,6 +103,10 @@
       {
         "command": "beautify-format.formatPHP",
         "title": "Beautify PHP"
+      },
+      {
+        "command": "beautify-format.formatJSONC",
+        "title": "Beautify JSONC"
       }
     ],
     "keybindings": [
@@ -116,7 +121,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php",
           "group": "1_modification"
         }
       ]
@@ -149,6 +154,7 @@
     "fast-xml-parser": "^5.3.6",
     "htmlhint": "^1.9.1",
     "js-beautify": "^1.15.4",
+    "jsonc-parser": "^3.3.1",
     "jsonrepair": "^3.13.2",
     "less": "^4.5.1",
     "php-parser": "^3.2.5",
