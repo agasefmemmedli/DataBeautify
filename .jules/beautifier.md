@@ -157,3 +157,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('csv') with content-based heuristics. It detects the delimiter and checks if the first few rows have a consistent number of columns (> 1). This ensures high confidence in identifying CSV files even without the correct extension, while avoiding false positives on plain text or other formats.
+
+## GraphQL Support (v0.12.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Integrated the official `graphql` package for validation. Its `parse` function provides accurate syntax error reporting with line and column information.
+- **Recovery:** Implemented a custom resilient brace-based line-by-line formatter. This approach ensures that even if the GraphQL query is partially broken (e.g., missing closing braces), the tool can still provide a structured output.
+- **Resilient Formatting:** The formatter tracks indentation levels by counting opening (`{`, `(`, `[`) and closing (`}`, `)`, `]`) braces. It specifically handles leading closing braces to adjust indentation for the current line and calculates the net change for subsequent lines. It also includes basic state tracking for strings (`"`) and multiline blocks (`"""`) to prevent misidentifying braces within literals, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Syntax errors from `graphql.parse` are caught and reported as VS Code warning messages, surfacing the first identified issue while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('graphql') with content-based heuristics. It looks for common GraphQL keywords (`query`, `mutation`, `subscription`, `type`, etc.) or simple query patterns starting with `{` that lack JSON-specific markers like colons followed by quotes. This ensures reliable identification of GraphQL files even without the correct extension.

@@ -16,6 +16,7 @@ import { parse, ParseError } from 'jsonc-parser';
 import * as YAML from 'yaml';
 import * as smolToml from 'smol-toml';
 import * as ini from 'ini';
+import * as graphql from 'graphql';
 
 /**
  * This method is called when the extension is activated
@@ -89,6 +90,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatCSVCommand = vscode.commands.registerCommand('beautify-format.formatCSV', () => {
         beautify('csv');
     });
+    let formatGraphQLCommand = vscode.commands.registerCommand('beautify-format.formatGraphQL', () => {
+        beautify('graphql');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -109,6 +113,115 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatINICommand);
     context.subscriptions.push(formatENVCommand);
     context.subscriptions.push(formatCSVCommand);
+    context.subscriptions.push(formatGraphQLCommand);
+}
+
+/**
+ * Handle GraphQL formatting and validation
+ */
+async function handleGraphQL(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate GraphQL using graphql package
+    try {
+        graphql.parse(text);
+    } catch (e: any) {
+        if (e.locations && e.locations.length > 0) {
+            validationMessage = `${e.message} at line ${e.locations[0].line}, col ${e.locations[0].column}`;
+        } else {
+            validationMessage = e.message;
+        }
+    }
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inTripleString = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inTripleString) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle multiline strings (triple quotes)
+            if (inTripleString) {
+                formattedLines.push(line);
+                if (trimmed.includes('"""')) {
+                    const matches = (trimmed.match(/"""/g) || []).length;
+                    if (matches % 2 !== 0) {
+                        inTripleString = false;
+                    }
+                }
+                continue;
+            }
+
+            if (trimmed.includes('"""')) {
+                const matches = (trimmed.match(/"""/g) || []).length;
+                if (matches % 2 !== 0) {
+                    inTripleString = true;
+                }
+            }
+
+            // Count leading closing braces to adjust indentation for CURRENT line
+            let leadingClosingCount = 0;
+            let j = 0;
+            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+                leadingClosingCount++;
+                j++;
+            }
+
+            indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+
+            formattedLines.push('  '.repeat(indentLevel) + trimmed);
+
+            // Calculate net brace change for NEXT line, excluding leading closing braces
+            let netChange = 0;
+            let inString = false;
+            const remaining = trimmed.substring(leadingClosingCount);
+
+            for (let k = 0; k < remaining.length; k++) {
+                const char = remaining[k];
+                if (char === '"' && (k === 0 || remaining[k-1] !== '\\')) {
+                    inString = !inString;
+                    continue;
+                }
+                if (inString) {
+                    continue;
+                }
+                if (char === '#') {
+                    break; // Comment
+                }
+
+                if (char === '{' || char === '(' || char === '[') {
+                    netChange++;
+                }
+                if (char === '}' || char === ')' || char === ']') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format GraphQL: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`GraphQL has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('GraphQL formatted successfully!');
+    }
 }
 
 /**
@@ -1078,7 +1191,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1136,6 +1249,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleENV(editor, text);
     } else if (format === 'csv') {
         await handleCSV(editor, text);
+    } else if (format === 'graphql') {
+        await handleGraphQL(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1176,7 +1291,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1198,6 +1313,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'ini') { return 'ini'; }
     if (lang === 'dotenv' || lang === 'env') { return 'env'; }
     if (lang === 'csv') { return 'csv'; }
+    if (lang === 'graphql') { return 'graphql'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1211,6 +1327,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     // PHP heuristic
     if (trimmed.startsWith('<?php') || trimmed.startsWith('<?') || trimmed.includes('<?php')) {
         return 'php';
+    }
+
+    // GraphQL heuristic
+    if (
+        /^\s*(query|mutation|subscription|fragment|schema|type|interface|enum|scalar|union|input|directive|extend)\b/i.test(trimmed) ||
+        (/^\s*\{/m.test(trimmed) && trimmed.includes('}') && !trimmed.includes(':') && !trimmed.includes('"'))
+    ) {
+        return 'graphql';
     }
 
     if (trimmed.includes('<template') || /<script\s+setup/i.test(trimmed) || /<style\s+scoped/i.test(trimmed)) {
