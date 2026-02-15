@@ -58,7 +58,8 @@
     "onLanguage:php",
     "onLanguage:yaml",
     "onLanguage:yml",
-    "onLanguage:toml"
+    "onLanguage:toml",
+    "onLanguage:ini"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -118,6 +119,10 @@
       {
         "command": "beautify-format.formatTOML",
         "title": "Beautify TOML"
+      },
+      {
+        "command": "beautify-format.formatINI",
+        "title": "Beautify INI"
       }
     ],
     "keybindings": [
@@ -132,7 +137,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini",
           "group": "1_modification"
         }
       ]
@@ -150,6 +155,7 @@
     "@types/acorn": "^4.0.6",
     "@types/css": "^0.0.38",
     "@types/htmlhint": "^1.1.5",
+    "@types/ini": "^4.1.1",
     "@types/js-beautify": "^1.14.3",
     "@types/less": "^3.0.8",
     "@types/node": "^16.18.126",
@@ -164,6 +170,7 @@
     "css": "^3.0.0",
     "fast-xml-parser": "^5.3.6",
     "htmlhint": "^1.9.1",
+    "ini": "^6.0.0",
     "js-beautify": "^1.15.4",
     "jsonc-parser": "^3.3.1",
     "jsonrepair": "^3.13.2",

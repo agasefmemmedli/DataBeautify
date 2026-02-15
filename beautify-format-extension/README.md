@@ -1,6 +1,6 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML and TOML files.
+A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML and INI files.
 
 ## Features
 
@@ -21,7 +21,8 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 - 🎨 Format PHP files with proper indentation
 - 🎨 Format YAML files with proper indentation
 - 🎨 Format TOML files with proper indentation
-- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML or TOML)
+- 🎨 Format INI files with proper indentation
+- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML or INI)
 - 🛠️ Smart repair: Fixes minor errors in supported formats while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
@@ -31,7 +32,7 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 
 ### Formatting Supported Languages
 
-1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML or TOML file
+1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML or INI file
 2. Use one of the following methods:
    - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"

@@ -125,3 +125,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('toml') with content-based heuristics. Looked for table headers (e.g., `[table]`) or `key = value` patterns, while explicitly excluding text containing curly braces to avoid false positives with CSS or other brace-based languages. This ensures high confidence in identifying TOML files.
+
+## INI Support (v0.9.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Utilized the 'ini' package for basic validation. Since INI is a very lenient format, the package helps identify core structural issues, although it rarely throws errors.
+- **Recovery:** Implemented a custom resilient line-by-line formatter. Similar to the TOML approach, this ensures that comments (both ';' and '#') are preserved and that the document structure is maintained even if some lines are malformed.
+- **Resilient Formatting:** The formatter handles sections, key-value pairs (supporting both '=' and ':' separators), and inline comments. It ensures consistent spacing around separators and adds a newline before new sections to improve readability. It also includes a basic quote-awareness check for inline comments to prevent misidentifying semicolons inside quoted strings, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Any errors from 'ini.parse' are caught and reported as VS Code warnings, although the primary focus is on providing a structured output regardless of input quality.
+
+### Auto-Detection
+- **Heuristic:** Combined 'languageId' check ('ini') with content-based heuristics. Explicitly looked for ';' comments or key-value pairs using ':' to identify INI. For ambiguous cases (using '=' and '[section]'), it checks for the presence of ';' to distinguish from TOML. This ensures high confidence in auto-detecting INI files while avoiding false positives with other formats.
