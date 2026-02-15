@@ -84,3 +84,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('svelte') with content-based heuristics. Looked for Svelte-specific block syntax (`{#if`, `{#each`, `{#await`) and script-level markers like `export let` or the reactive declaration `$:`. This ensures high confidence in identifying Svelte SFCs even without the correct file extension.
+
+## PHP Support (v0.5.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Integrated `php-parser` for validation. It provides a detailed AST and accurate error locations (line/column) for PHP syntax errors.
+- **Recovery:** Reused `js-beautify.html` for formatting with the `templating: ['php']` option. This allows the tool to handle PHP tags and mixed HTML/PHP content resiliently, providing a structured output even when the PHP code contains minor syntax errors (like missing semicolons).
+- **Error Reporting:** Syntax errors from `php-parser` are caught and reported as VS Code warning messages, surfacing the first identified issue while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('php') with content-based heuristics. Looked for the presence of PHP tags (`<?php` or `<?`) at the start of the file or within the content. This ensures reliable identification of PHP files, even those without the standard extension.
