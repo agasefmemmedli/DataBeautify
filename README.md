@@ -1,5 +1,3 @@
-Svelte (.svelte) — компоненты Svelte.
-
 PHP (.php) — все еще лидер в backend-разработке сайтов.
 
 JSONC (.jsonc) — JSON с комментариями (как в настройках VS Code).

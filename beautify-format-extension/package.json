@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript and TypeScript files with keyboard shortcuts and context menu",
-  "version": "0.3.0",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript and Svelte files with keyboard shortcuts and context menu",
+  "version": "0.4.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -28,6 +28,7 @@
     "sass",
     "less",
     "typescript",
+    "svelte",
     "prettify",
     "indent"
   ],
@@ -50,7 +51,8 @@
     "onLanguage:typescript",
     "onLanguage:javascriptreact",
     "onLanguage:typescriptreact",
-    "onLanguage:vue"
+    "onLanguage:vue",
+    "onLanguage:svelte"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -90,6 +92,10 @@
       {
         "command": "beautify-format.formatVue",
         "title": "Beautify Vue"
+      },
+      {
+        "command": "beautify-format.formatSvelte",
+        "title": "Beautify Svelte"
       }
     ],
     "keybindings": [
@@ -104,7 +110,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue",
+          "when": "editorLangId == json || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte",
           "group": "1_modification"
         }
       ]
@@ -141,6 +147,7 @@
     "less": "^4.5.1",
     "sass": "^1.97.3",
     "sass-formatter": "^0.8.0",
+    "svelte": "^5.51.1",
     "typescript": "^5.7.3",
     "xml-formatter": "^3.6.0"
   }
