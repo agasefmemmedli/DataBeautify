@@ -18,6 +18,7 @@ import * as smolToml from 'smol-toml';
 import * as ini from 'ini';
 import * as graphql from 'graphql';
 import * as pythonAst from 'python-ast';
+import * as javaAst from 'java-ast';
 
 /**
  * This method is called when the extension is activated
@@ -97,6 +98,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatPythonCommand = vscode.commands.registerCommand('beautify-format.formatPython', () => {
         beautify('python');
     });
+    let formatJavaCommand = vscode.commands.registerCommand('beautify-format.formatJava', () => {
+        beautify('java');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -119,6 +123,70 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatCSVCommand);
     context.subscriptions.push(formatGraphQLCommand);
     context.subscriptions.push(formatPythonCommand);
+    context.subscriptions.push(formatJavaCommand);
+}
+
+/**
+ * Handle Java formatting and validation
+ */
+async function handleJava(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Java using java-ast
+    const originalConsoleError = console.error;
+    let errorOutput = '';
+    console.error = (...args: any[]) => {
+        errorOutput += args.join(' ') + '\n';
+    };
+
+    try {
+        javaAst.parse(text);
+    } catch (e: any) {
+        if (!errorOutput) {
+            errorOutput = e.message;
+        }
+    } finally {
+        console.error = originalConsoleError;
+    }
+
+    if (errorOutput) {
+        validationMessage = errorOutput.split('\n')[0].trim();
+    }
+
+    /* eslint-disable */
+    try {
+        // Format Java (using js-beautify's JS formatter which handles Java well)
+        formatted = jsbeautify.js(text, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Java: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Java has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Java formatted successfully!');
+    }
 }
 
 /**
@@ -1282,7 +1350,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1344,6 +1412,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleGraphQL(editor, text);
     } else if (format === 'python') {
         await handlePython(editor, text);
+    } else if (format === 'java') {
+        await handleJava(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1384,7 +1454,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1408,6 +1478,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'csv') { return 'csv'; }
     if (lang === 'graphql') { return 'graphql'; }
     if (lang === 'python') { return 'python'; }
+    if (lang === 'java') { return 'java'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1560,6 +1631,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /if __name__ == ['"]__main__['"]:/m.test(trimmed)
     ) {
         return 'python';
+    }
+
+    // Java heuristic
+    if (
+        /\b(public|private|protected)\s+(class|interface|enum|record)\b/.test(trimmed) ||
+        /\bimport\s+java\./.test(trimmed) ||
+        /\bpublic\s+static\s+void\s+main\b/.test(trimmed) ||
+        /^\s*package\s+[a-z0-9_.]+\s*;/m.test(trimmed)
+    ) {
+        return 'java';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
