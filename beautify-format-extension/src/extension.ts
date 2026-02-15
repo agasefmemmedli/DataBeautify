@@ -86,6 +86,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatENVCommand = vscode.commands.registerCommand('beautify-format.formatENV', () => {
         beautify('env');
     });
+    let formatCSVCommand = vscode.commands.registerCommand('beautify-format.formatCSV', () => {
+        beautify('csv');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -105,6 +108,174 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatTOMLCommand);
     context.subscriptions.push(formatINICommand);
     context.subscriptions.push(formatENVCommand);
+    context.subscriptions.push(formatCSVCommand);
+}
+
+/**
+ * Handle CSV formatting and validation
+ */
+async function handleCSV(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    try {
+        const delimiter = detectDelimiter(text);
+        const lines = text.split('\n');
+        const rows: string[][] = [];
+        let hasUnclosedQuotes = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.trim() === '') {
+                rows.push([]);
+                continue;
+            }
+
+            // Split and check for unclosed quotes
+            let inQuotes = false;
+            for (let j = 0; j < line.length; j++) {
+                if (line[j] === '"') {
+                    if (inQuotes && j + 1 < line.length && line[j + 1] === '"') {
+                        j++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                }
+            }
+            if (inQuotes) {
+                hasUnclosedQuotes = true;
+                if (!validationMessage) {
+                    validationMessage = `Unclosed quotes at line ${i + 1}`;
+                }
+            }
+
+            rows.push(splitCSVLine(line, delimiter));
+        }
+
+        // Calculate max widths
+        const maxWidths: number[] = [];
+        for (const row of rows) {
+            for (let i = 0; i < row.length; i++) {
+                maxWidths[i] = Math.max(maxWidths[i] || 0, row[i].length);
+            }
+        }
+
+        // Check for inconsistent column count
+        const headerRow = rows.find(r => r.length > 0);
+        const headerCount = headerRow ? headerRow.length : 0;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].length > 0 && rows[i].length !== headerCount && !validationMessage) {
+                validationMessage = `Inconsistent column count at line ${i + 1} (expected ${headerCount}, got ${rows[i].length})`;
+            }
+        }
+
+        // Format
+        const formattedLines = rows.map(row => {
+            if (row.length === 0) {
+                return '';
+            }
+            return row.map((cell, i) => {
+                if (i === row.length - 1) {
+                    return cell; // Don't pad last column
+                }
+                return cell.padEnd(maxWidths[i]);
+            }).join(` ${delimiter} `);
+        });
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format CSV: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`CSV has issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('CSV formatted successfully!');
+    }
+}
+
+/**
+ * Detect CSV delimiter
+ */
+function detectDelimiter(text: string): string {
+    const delimiters = [',', ';', '\t', '|'];
+    const lines = text.split('\n').filter(l => l.trim() !== '').slice(0, 5);
+    if (lines.length === 0) {
+        return ',';
+    }
+
+    const counts: Record<string, number[]> = {};
+    delimiters.forEach(d => counts[d] = []);
+
+    for (const line of lines) {
+        delimiters.forEach(d => {
+            let count = 0;
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                if (line[i] === '"') {
+                    if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (line[i] === d && !inQuotes) {
+                    count++;
+                }
+            }
+            counts[d].push(count);
+        });
+    }
+
+    // Find delimiter with consistent non-zero count
+    for (const d of delimiters) {
+        const dCounts = counts[d];
+        if (dCounts[0] > 0 && dCounts.every(c => c === dCounts[0])) {
+            return d;
+        }
+    }
+
+    // Fallback: most frequent non-zero
+    let bestD = ',';
+    let maxCount = -1;
+    for (const d of delimiters) {
+        const sum = counts[d].reduce((a, b) => a + b, 0);
+        if (sum > maxCount) {
+            maxCount = sum;
+            bestD = d;
+        }
+    }
+    return bestD;
+}
+
+/**
+ * Split CSV line by delimiter respecting quotes
+ */
+function splitCSVLine(line: string, delimiter: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+            if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+                current += '""';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+                current += char;
+            }
+        } else if (char === delimiter && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current.trim());
+    return result;
 }
 
 /**
@@ -907,7 +1078,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -963,6 +1134,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleINI(editor, text);
     } else if (format === 'env') {
         await handleENV(editor, text);
+    } else if (format === 'csv') {
+        await handleCSV(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -990,8 +1163,11 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
                 } else {
                     await handleENV(editor, text);
                 }
+            } else if (detectDelimiter(trimmed) !== ',' || trimmed.includes(',')) {
+                // Heuristic for CSV
+                await handleCSV(editor, text);
             } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML, INI or ENV). Please ensure your file starts with {, [, < or has key: value pairs');
+                vscode.window.showErrorMessage('Could not detect format (JSON, XML, HTML, CSS, YAML, TOML, INI, ENV or CSV). Please ensure your file starts with {, [, < or has key: value pairs');
             }
         }
     }
@@ -1000,7 +1176,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1021,6 +1197,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'toml') { return 'toml'; }
     if (lang === 'ini') { return 'ini'; }
     if (lang === 'dotenv' || lang === 'env') { return 'env'; }
+    if (lang === 'csv') { return 'csv'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1095,6 +1272,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         (/^[a-z0-9_-]+\s*[:]\s*.+/im.test(trimmed) && !trimmed.includes('{'))
     ) {
         return 'ini';
+    }
+
+    // CSV heuristic
+    const lines = trimmed.split('\n').filter(l => l.trim() !== '');
+    if (lines.length > 1) {
+        const d = detectDelimiter(trimmed);
+        const counts = lines.slice(0, 3).map(l => splitCSVLine(l, d).length);
+        if (counts.length > 1 && counts.every(c => c > 1 && c === counts[0])) {
+            return 'csv';
+        }
     }
 
     // TOML or INI or ENV (all can use key=value)

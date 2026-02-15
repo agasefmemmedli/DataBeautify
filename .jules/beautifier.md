@@ -146,3 +146,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('dotenv', 'env') with content-based heuristics. It looks for common ENV patterns like lines starting with `#` followed by uppercase assignments, or the presence of `export KEY=VALUE`. It also includes logic to distinguish ENV from INI and TOML by checking for the absence of section headers `[...]` or semicolons `;` when uppercase keys are present.
+
+## CSV Support (v0.11.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter for CSV files. This avoids external dependencies while providing maximum flexibility in handling various delimiters and quoting styles.
+- **Resilient Formatting:** The formatter automatically detects the most consistent delimiter (comma, semicolon, tab, or pipe) by analyzing the first few lines. It uses a state-machine-inspired parser to correctly identify cell boundaries while respecting double quotes and escaped quotes (\"\").
+- **Column Alignment:** To improve readability, the tool calculates the maximum width of each column and pads values accordingly, ensuring a neat tabular view. The last column is not padded to prevent trailing whitespace.
+- **Error Reporting:** The tool identifies and reports unclosed quotes and inconsistent column counts across rows as VS Code warnings, while still attempting to align and format the data.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('csv') with content-based heuristics. It detects the delimiter and checks if the first few rows have a consistent number of columns (> 1). This ensures high confidence in identifying CSV files even without the correct extension, while avoiding false positives on plain text or other formats.

@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte, PHP, YAML, TOML, INI and ENV files with keyboard shortcuts and context menu",
-  "version": "0.10.0",
+  "description": "Beautify and format JSON, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, Svelte, PHP, YAML, TOML, INI, ENV and CSV files with keyboard shortcuts and context menu",
+  "version": "0.11.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -61,7 +61,8 @@
     "onLanguage:toml",
     "onLanguage:ini",
     "onLanguage:dotenv",
-    "onLanguage:env"
+    "onLanguage:env",
+    "onLanguage:csv"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -129,6 +130,10 @@
       {
         "command": "beautify-format.formatENV",
         "title": "Beautify ENV"
+      },
+      {
+        "command": "beautify-format.formatCSV",
+        "title": "Beautify CSV"
       }
     ],
     "keybindings": [
@@ -143,7 +148,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv",
           "group": "1_modification"
         }
       ]
