@@ -17,6 +17,7 @@ import * as YAML from 'yaml';
 import * as smolToml from 'smol-toml';
 import * as ini from 'ini';
 import * as graphql from 'graphql';
+import * as pythonAst from 'python-ast';
 
 /**
  * This method is called when the extension is activated
@@ -93,6 +94,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatGraphQLCommand = vscode.commands.registerCommand('beautify-format.formatGraphQL', () => {
         beautify('graphql');
     });
+    let formatPythonCommand = vscode.commands.registerCommand('beautify-format.formatPython', () => {
+        beautify('python');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -114,6 +118,93 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatENVCommand);
     context.subscriptions.push(formatCSVCommand);
     context.subscriptions.push(formatGraphQLCommand);
+    context.subscriptions.push(formatPythonCommand);
+}
+
+/**
+ * Handle Python formatting and validation
+ */
+async function handlePython(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Python using python-ast
+    const originalConsoleError = console.error;
+    let errorOutput = '';
+    console.error = (...args: any[]) => {
+        errorOutput += args.join(' ') + '\n';
+    };
+
+    try {
+        pythonAst.parse(text);
+    } catch (e: any) {
+        if (!errorOutput) {
+            errorOutput = e.message;
+        }
+    } finally {
+        console.error = originalConsoleError;
+    }
+
+    if (errorOutput) {
+        validationMessage = errorOutput.split('\n')[0].trim();
+    }
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let forceNextIndent = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Heuristic for de-indenting keywords
+            const deindentKeywords = ['elif ', 'elif:', 'else:', 'except ', 'except:', 'finally:'];
+            const shouldDeindent = deindentKeywords.some(kw => trimmed.startsWith(kw));
+
+            if (shouldDeindent) {
+                indentLevel = Math.max(0, indentLevel - 1);
+            } else if (!forceNextIndent) {
+                // Calculate effective indentation for this line
+                // If the user has already de-indented more than we expected, follow them
+                const userIndent = line.length - line.trimStart().length;
+                const userLevel = Math.floor(userIndent / 4);
+
+                if (userLevel < indentLevel) {
+                    indentLevel = userLevel;
+                }
+            }
+
+            formattedLines.push('    '.repeat(indentLevel) + trimmed);
+
+            // If this line starts a block, the next line should be indented
+            if (trimmed.endsWith(':')) {
+                indentLevel++;
+                forceNextIndent = true;
+            } else {
+                forceNextIndent = false;
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Python: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Python has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Python formatted successfully!');
+    }
 }
 
 /**
@@ -1191,7 +1282,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1251,6 +1342,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleCSV(editor, text);
     } else if (format === 'graphql') {
         await handleGraphQL(editor, text);
+    } else if (format === 'python') {
+        await handlePython(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1291,7 +1384,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1314,6 +1407,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'dotenv' || lang === 'env') { return 'env'; }
     if (lang === 'csv') { return 'csv'; }
     if (lang === 'graphql') { return 'graphql'; }
+    if (lang === 'python') { return 'python'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1458,6 +1552,14 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /<[A-Z][A-Za-z0-9]*(\s*,\s*[A-Z][A-Za-z0-9]*)*>/.test(trimmed)
     ) {
         return 'typescript';
+    }
+
+    // Python heuristic
+    if (
+        /^\s*(def|class|if|for|while|with|try|import|from|async\s+def|async\s+for|async\s+with)\b/m.test(trimmed) ||
+        /if __name__ == ['"]__main__['"]:/m.test(trimmed)
+    ) {
+        return 'python';
     }
 
     // JavaScript heuristic: common keywords or arrow functions

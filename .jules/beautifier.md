@@ -168,3 +168,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('graphql') with content-based heuristics. It looks for common GraphQL keywords (`query`, `mutation`, `subscription`, `type`, etc.) or simple query patterns starting with `{` that lack JSON-specific markers like colons followed by quotes. This ensures reliable identification of GraphQL files even without the correct extension.
+
+## Python Support (v0.13.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected `python-ast` for validation as it supports modern Python 3 syntax. Discovered that the `parse` method prints syntax errors to the console instead of throwing exceptions.
+- **Error Reporting:** Implemented a console-capturing hack (overriding `console.error`) to catch and report the first identified syntax error from `python-ast` as a VS Code warning. This ensures the user is notified of the issue without halting the beautification process.
+- **Resilient Formatting:** Developed a custom line-by-line formatter that normalizes indentation to 4 spaces. It implements colon-awareness to force indentation on following lines, and keyword-awareness to handle de-indentation for `elif`, `else`, `except`, and `finally`. It also tracks user-driven de-indentation to correctly identify the end of blocks in messy code, fulfilling the "readability is king" philosophy even for partially broken snippets.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('python') with content-based heuristics. Looked for common Python keywords (`def`, `class`, `import`, etc.) and the standard `if __name__ == "__main__":` entry point pattern. This ensures high confidence in identifying Python files even without the correct extension.
