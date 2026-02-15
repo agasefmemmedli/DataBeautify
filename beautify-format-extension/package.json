@@ -64,7 +64,8 @@
     "onLanguage:env",
     "onLanguage:csv",
     "onLanguage:graphql",
-    "onLanguage:python"
+    "onLanguage:python",
+    "onLanguage:java"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -144,6 +145,10 @@
       {
         "command": "beautify-format.formatPython",
         "title": "Beautify Python"
+      },
+      {
+        "command": "beautify-format.formatJava",
+        "title": "Beautify Java"
       }
     ],
     "keybindings": [
@@ -158,7 +163,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java",
           "group": "1_modification"
         }
       ]
@@ -194,6 +199,7 @@
     "graphql": "^16.12.0",
     "htmlhint": "^1.9.1",
     "ini": "^6.0.0",
+    "java-ast": "^0.4.1",
     "js-beautify": "^1.15.4",
     "jsonc-parser": "^3.3.1",
     "jsonrepair": "^3.13.2",

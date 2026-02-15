@@ -178,3 +178,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('python') with content-based heuristics. Looked for common Python keywords (`def`, `class`, `import`, etc.) and the standard `if __name__ == "__main__":` entry point pattern. This ensures high confidence in identifying Python files even without the correct extension.
+
+## Java Support (v0.14.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Selected `java-ast` for validation. Similar to `python-ast`, it provides accurate syntax error reporting but prints to `console.error` instead of throwing exceptions.
+- **Error Reporting:** Captured `console.error` output during parsing to report the first identified syntax error as a VS Code warning.
+- **Recovery:** Used `js-beautify.js` for formatting with an `indent_size` of 4. Since Java's brace-based structure is similar to JavaScript, the JS formatter provides excellent resilience and high-quality output even for partially broken code, fulfilling the "readability is king" philosophy.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('java') with content-based heuristics. Looked for Java-specific patterns such as access modifiers followed by class/interface/enum keywords, `import java.` statements, the standard `main` method signature, and `package` declarations. This ensures reliable identification of Java source files.
