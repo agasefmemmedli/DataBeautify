@@ -188,3 +188,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('java') with content-based heuristics. Looked for Java-specific patterns such as access modifiers followed by class/interface/enum keywords, `import java.` statements, the standard `main` method signature, and `package` declarations. This ensures reliable identification of Java source files.
+
+## C# Support (v0.15.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for C#. This approach was chosen because a lightweight, standalone C# AST parser for JavaScript was not readily available.
+- **Resilient Validation:** The validator tracks balanced braces (`{}`), parentheses (`()`), and brackets (`[]`). It is state-aware, correctly handling single-line comments (`//`), multi-line comments (`/* */`), standard strings (`"`), verbatim strings (`@"`), and interpolated strings (`$"` and `$$"""`). This allows it to identify and report the first structural syntax error while remaining fault-tolerant.
+- **Recovery:** Used `js-beautify.js` for formatting with a 4-space indentation standard. Given C#'s similarity to Java and JavaScript, the JS formatter provides a high-quality, resilient beautification even for code with syntax issues, adhering to the "readability is king" philosophy.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('csharp') with content-based heuristics. Looked for C#-specific markers: common namespaces (`using System;`), namespace declarations, access modifiers followed by C# keywords (`struct`, `record`), the `static void Main` entry point, and common class library calls (`Console.WriteLine`). This ensures high confidence in identifying C# files even without the `.cs` extension.
