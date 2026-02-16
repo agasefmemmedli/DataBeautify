@@ -278,3 +278,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('dart') with content-based heuristics. Looked for Dart-specific markers: import statements (dart:, package:, .dart), the "void main()" entry point, @override annotations, and common keywords (class, mixin, extension, final, const, late). This ensures reliable identification of Dart files even without the .dart extension.
+
+## Dockerfile Support (v0.23.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter and validator for Dockerfile. This avoids external dependencies while providing structured output.
+- **Resilient Formatting:** The formatter normalizes instruction case (e.g., `from` -> `FROM`) and handles indentation for multiline instructions (lines ending with `\`). It is state-aware of multiline continuations to ensure proper structure.
+- **Error Reporting:** Structural issues like unclosed quotes, missing arguments for instructions, or the absence of a `FROM` instruction are reported as VS Code warnings, while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('dockerfile') with content-based heuristics. Looked for common Dockerfile instructions at the start of lines (case-insensitive): `FROM`, `RUN`, `COPY`, `ADD`, `WORKDIR`, `EXPOSE`, `ENTRYPOINT`, `CMD`, `ENV`, `ARG`, `LABEL`, `USER`, `VOLUME`, `STOPSIGNAL`, `HEALTHCHECK`, `ONBUILD`, `MAINTAINER`, `SHELL`. This ensures high confidence in identifying Dockerfiles even without the standard name.

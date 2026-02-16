@@ -157,6 +157,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('dart');
     });
     context.subscriptions.push(formatDartCommand);
+
+    let formatDockerfileCommand = vscode.commands.registerCommand('beautify-format.formatDockerfile', () => {
+        beautify('dockerfile');
+    });
+    context.subscriptions.push(formatDockerfileCommand);
 }
 
 /**
@@ -3034,9 +3039,129 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 }
 
 /**
+ * Handle Dockerfile formatting and validation
+ */
+async function handleDockerfile(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Dockerfile
+    validationMessage = validateDockerfile(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let isMultiline = false;
+
+        const instructions = [
+            'FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'EXPOSE', 'ENTRYPOINT',
+            'CMD', 'ENV', 'ARG', 'LABEL', 'USER', 'VOLUME', 'STOPSIGNAL',
+            'HEALTHCHECK', 'ONBUILD', 'MAINTAINER', 'SHELL'
+        ];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' || trimmed.startsWith('#')) {
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            let currentLine = trimmed;
+            if (!isMultiline) {
+                // Check if line starts with an instruction
+                const firstWord = trimmed.split(/\s+/)[0].toUpperCase();
+                if (instructions.includes(firstWord)) {
+                    // Normalize instruction case
+                    const rest = trimmed.substring(firstWord.length).trim();
+                    currentLine = `${firstWord} ${rest}`;
+                }
+                formattedLines.push(currentLine);
+            } else {
+                // Indent multiline continuation
+                formattedLines.push('    ' + trimmed);
+            }
+
+            // Check if this line ends with a backslash for multiline support
+            isMultiline = trimmed.endsWith('\\');
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Dockerfile: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Dockerfile has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Dockerfile formatted successfully!');
+    }
+}
+
+/**
+ * Validate Dockerfile code for basic issues
+ */
+function validateDockerfile(text: string): string | undefined {
+    const lines = text.split('\n');
+    let hasFrom = false;
+    let inQuotes = false;
+    let quoteChar = '';
+
+    const instructions = [
+        'FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'EXPOSE', 'ENTRYPOINT',
+        'CMD', 'ENV', 'ARG', 'LABEL', 'USER', 'VOLUME', 'STOPSIGNAL',
+        'HEALTHCHECK', 'ONBUILD', 'MAINTAINER', 'SHELL'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+        // Check for unclosed quotes
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            if ((char === '"' || char === "'") && (j === 0 || line[j - 1] !== '\\')) {
+                if (!inQuotes) {
+                    inQuotes = true;
+                    quoteChar = char;
+                } else if (char === quoteChar) {
+                    inQuotes = false;
+                }
+            }
+        }
+
+        const firstWord = trimmed.split(/\s+/)[0].toUpperCase();
+        if (instructions.includes(firstWord)) {
+            if (firstWord === 'FROM') hasFrom = true;
+
+            const rest = trimmed.substring(firstWord.length).trim();
+            if (rest === '' && !trimmed.endsWith('\\')) {
+                return `Instruction '${firstWord}' has no arguments at line ${i + 1}`;
+            }
+        }
+    }
+
+    if (inQuotes) {
+        return "Unclosed string literal";
+    }
+
+    if (!hasFrom && text.trim().length > 0) {
+        return "Dockerfile should start with a 'FROM' instruction";
+    }
+
+    return undefined;
+}
+
+/**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -3116,6 +3241,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleSwift(editor, text);
     } else if (format === 'dart') {
         await handleDart(editor, text);
+    } else if (format === 'dockerfile') {
+        await handleDockerfile(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -3156,7 +3283,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -3188,7 +3315,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'go') { return 'go'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
-    if (lang === 'dart') { return 'dart'; }
+    if (lang === 'dart' || lang === 'dockerfile') { return lang as any; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -3438,6 +3565,13 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /\b(final|const|late|var|dynamic)\s+[A-Z_a-z_][A-Za-z0-9_]*\b/.test(trimmed)
     ) {
         return 'dart';
+    }
+
+    // Dockerfile heuristic
+    if (
+        /^\s*(FROM|RUN|COPY|ADD|WORKDIR|EXPOSE|ENTRYPOINT|CMD|ENV|ARG|LABEL|USER|VOLUME|STOPSIGNAL|HEALTHCHECK|ONBUILD|MAINTAINER|SHELL)\b/i.test(trimmed)
+    ) {
+        return 'dockerfile';
     }
 
     // JavaScript heuristic: common keywords or arrow functions

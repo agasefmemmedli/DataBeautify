@@ -47,7 +47,8 @@ async function runTests() {
         'kt': 'kotlin',
         'rs': 'rust',
         'rb': 'ruby',
-        'dart': 'dart'
+        'dart': 'dart',
+        'dockerfile': 'dockerfile'
     };
 
     let passed = 0;
