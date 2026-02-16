@@ -101,6 +101,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatJavaCommand = vscode.commands.registerCommand('beautify-format.formatJava', () => {
         beautify('java');
     });
+    let formatCSharpCommand = vscode.commands.registerCommand('beautify-format.formatCSharp', () => {
+        beautify('csharp');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -124,6 +127,177 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatGraphQLCommand);
     context.subscriptions.push(formatPythonCommand);
     context.subscriptions.push(formatJavaCommand);
+    context.subscriptions.push(formatCSharpCommand);
+}
+
+/**
+ * Handle C# formatting and validation
+ */
+async function handleCSharp(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate C# using custom resilient validator
+    validationMessage = validateCSharp(text);
+
+    /* eslint-disable */
+    try {
+        // Format C# (using js-beautify's JS formatter which handles C# well)
+        formatted = jsbeautify.js(text, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format C#: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`C# has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('C# formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient C# validator
+ */
+function validateCSharp(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let inString = false;
+    let inVerbatimString = false;
+    let inChar = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inLineComment) {
+                break;
+            }
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (inVerbatimString) {
+                    if (char === '"' && nextChar === '"') {
+                        j++; // Escaped quote
+                    } else if (char === '"') {
+                        inString = false;
+                        inVerbatimString = false;
+                    }
+                } else {
+                    if (char === '\\') {
+                        j++; // Escape sequence
+                    } else if (char === '"') {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === "'") {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            // Start of comment
+            if (char === '/' && nextChar === '/') {
+                inLineComment = true;
+                j++;
+                continue;
+            }
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                j++;
+                continue;
+            }
+
+            // Start of string
+            if (char === '@' && nextChar === '"') {
+                inString = true;
+                inVerbatimString = true;
+                j++;
+                continue;
+            }
+            if (char === '$' && nextChar === '"') {
+                inString = true;
+                j++;
+                continue;
+            }
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === "'") {
+                inChar = true;
+                continue;
+            }
+
+            // Braces
+            if (char === '{' || char === '(' || char === '[') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closing for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+            }
+        }
+        inLineComment = false;
+    }
+
+    if (inBlockComment) {
+        return "Unclosed block comment";
+    }
+    if (inString) {
+        return "Unclosed string literal";
+    }
+    if (inChar) {
+        return "Unclosed character literal";
+    }
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -1350,7 +1524,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1414,6 +1588,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handlePython(editor, text);
     } else if (format === 'java') {
         await handleJava(editor, text);
+    } else if (format === 'csharp') {
+        await handleCSharp(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1454,7 +1630,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1479,6 +1655,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'graphql') { return 'graphql'; }
     if (lang === 'python') { return 'python'; }
     if (lang === 'java') { return 'java'; }
+    if (lang === 'csharp') { return 'csharp'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1641,6 +1818,17 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /^\s*package\s+[a-z0-9_.]+\s*;/m.test(trimmed)
     ) {
         return 'java';
+    }
+
+    // C# heuristic
+    if (
+        /\b(public|private|protected|internal)\s+(class|interface|enum|struct|record)\b/.test(trimmed) ||
+        /\busing\s+[A-Z][A-Za-z0-9.]*\s*;/.test(trimmed) ||
+        /\bnamespace\s+[A-Z][A-Za-z0-9.]*(\s*\{|;)/.test(trimmed) ||
+        /\bstatic\s+void\s+Main\b/.test(trimmed) ||
+        /\bConsole\.(WriteLine|Write)\b/.test(trimmed)
+    ) {
+        return 'csharp';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
