@@ -1,8 +1,3 @@
-C (.c, .h) — классика.
-
-
-Ruby (.rb) — веб-фреймворки (Rails).
-
 Swift (.swift) — разработка под iOS.
 
 Kotlin (.kt, .kts) — Android и JVM.
