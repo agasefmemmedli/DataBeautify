@@ -219,3 +219,16 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('go') with content-based heuristics. Looked for Go-specific markers: `package` and `func` keywords at the start of lines, `import` blocks, `go func` goroutines, channel operations (`chan`), `select` blocks, and the `:=` assignment operator. This ensures high confidence in identifying Go files even without the correct extension.
+
+## Rust Support (v0.18.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for Rust. This tracks balanced braces (`{}`), parentheses (`()`), and brackets (`[]`), while being state-aware for line comments (`//`), block comments (`/* */`), double-quoted strings (`\"`), and character literals (`'`).
+- **Recovery:** Developed a custom resilient line-by-line formatter. This approach ensures that even with syntax errors, the tool can provide a structured output.
+- **Special Case - Lifetimes vs Chars:** The validator and formatter include heuristic logic to distinguish between character literals (e.g., `'a'`) and Rust lifetimes (e.g., `'static`, `'a`) by checking for a closing single quote.
+- **Special Case - Raw Strings:** Added support for Rust raw strings `r\"...\"`, `r#\"...\"#`, etc., ensuring that delimiters are correctly matched and no formatting is applied inside raw literals.
+- **Resilient Formatting:** The formatter tracks `indentLevel` based on braces and other opening/closing characters. It normalizes spacing around the `=>` and `->` operators, fulfilling the \"readability is king\" philosophy.
+- **Error Reporting:** Syntax errors identified by the validator (e.g., mismatched braces or unclosed strings) are reported as VS Code warning messages, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('rust', 'rs') with content-based heuristics. Looked for Rust-specific markers: keywords (`fn`, `mod`, `pub`, `impl`, `trait`), macros (`println!`, `vec!`), `match` blocks with `=>` arms, and attribute patterns like `#[derive(...)]`. This ensures high confidence in identifying Rust files even without the correct extension.

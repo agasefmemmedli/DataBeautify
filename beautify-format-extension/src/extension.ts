@@ -110,6 +110,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatGoCommand = vscode.commands.registerCommand('beautify-format.formatGo', () => {
         beautify('go');
     });
+    let formatRustCommand = vscode.commands.registerCommand('beautify-format.formatRust', () => {
+        beautify('rust');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -136,6 +139,197 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatCSharpCommand);
     context.subscriptions.push(formatCPPCommand);
     context.subscriptions.push(formatGoCommand);
+    context.subscriptions.push(formatRustCommand);
+}
+
+/**
+ * Handle Rust formatting and validation
+ */
+async function handleRust(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Rust using custom resilient validator
+    validationMessage = validateRust(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inRawString = false;
+        let rawStringHashes = 0;
+        let inString = false;
+        let inChar = false;
+        let blockCommentLevel = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inRawString && blockCommentLevel === 0) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle Rust raw strings r"..." or r#..."#
+            if (inRawString) {
+                formattedLines.push(line);
+                const endMatch = line.match(new RegExp('"' + '#'.repeat(rawStringHashes)));
+                if (endMatch) {
+                    inRawString = false;
+                }
+                continue;
+            }
+
+            // Indentation adjustment for closing braces at the START of the line
+            let leadingClosingCount = 0;
+            if (blockCommentLevel === 0 && !inString && !inChar) {
+                let j = 0;
+                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+                    leadingClosingCount++;
+                    j++;
+                }
+            }
+
+            if (leadingClosingCount > 0) {
+                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            }
+
+            // Apply indentation
+            let currentLine = (blockCommentLevel > 0 || inString || inChar) ? line : '    '.repeat(Math.max(0, indentLevel)) + trimmed;
+
+            // Normalize => and -> operators (only if not in string/comment/rawstring)
+            if (blockCommentLevel === 0 && !inString && !inChar && !inRawString) {
+                // This is still a bit naive but better than global replace on the whole line if we were tracking state within the line.
+                // To be truly robust we should do this character by character.
+            }
+
+            formattedLines.push(currentLine);
+
+            // Calculate net brace change for NEXT line and track state
+            let netChange = 0;
+            const startIdx = (blockCommentLevel > 0 || inString || inChar) ? 0 : leadingClosingCount;
+            const textToProcess = (blockCommentLevel > 0 || inString || inChar) ? line : trimmed.substring(leadingClosingCount);
+
+            for (let k = 0; k < textToProcess.length; k++) {
+                const char = textToProcess[k];
+                const nextChar = textToProcess[k + 1];
+
+                if (inRawString) {
+                    const remaining = textToProcess.substring(k);
+                    const endMatch = remaining.match(new RegExp('^"' + '#'.repeat(rawStringHashes)));
+                    if (endMatch) {
+                        inRawString = false;
+                        k += endMatch[0].length - 1;
+                    }
+                    continue;
+                }
+
+                if (blockCommentLevel > 0) {
+                    if (char === '*' && nextChar === '/') {
+                        blockCommentLevel--;
+                        k++;
+                    } else if (char === '/' && nextChar === '*') {
+                        blockCommentLevel++;
+                        k++;
+                    }
+                    continue;
+                }
+
+                if (inString) {
+                    if (char === '\\') {
+                        k++;
+                    } else if (char === '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (inChar) {
+                    if (char === '\\') {
+                        k++;
+                    } else if (char === "'") {
+                        inChar = false;
+                    }
+                    continue;
+                }
+
+                // Start of comment
+                if (char === '/' && nextChar === '/') {
+                    break; // Line comment, rest of line is ignored
+                }
+                if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    k++;
+                    continue;
+                }
+
+                // Start of raw string
+                if (char === 'r' && (nextChar === '"' || nextChar === '#')) {
+                    let hashes = 0;
+                    let m = k + 1;
+                    while (m < textToProcess.length && textToProcess[m] === '#') {
+                        hashes++;
+                        m++;
+                    }
+                    if (m < textToProcess.length && textToProcess[m] === '"') {
+                        inRawString = true;
+                        rawStringHashes = hashes;
+                        k = m;
+                        continue;
+                    }
+                }
+
+                if (char === '"') {
+                    inString = true;
+                    continue;
+                }
+
+                if (char === "'") {
+                    const remaining = textToProcess.substring(k + 1);
+                    if (/^([^'\\]|\\.)'/.test(remaining)) {
+                        inChar = true;
+                    }
+                    continue;
+                }
+
+                if (char === '{' || char === '(' || char === '[') {
+                    netChange++;
+                }
+                if (char === '}' || char === ')' || char === ']') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+
+        // Post-process to normalize operators outside of strings/comments
+        // (A bit complex to do perfectly without a full parser, but let's keep it simple for now as per "resilient" goal)
+        // Actually, the previous version was simpler. Let's stick to a slightly better version.
+        formatted = formatted.split('\n').map(l => {
+            // Only normalize if the line doesn't seem to be a multiline string/comment middle
+            if (l.trim().startsWith('*') || l.trim().startsWith('"')) {
+                return l;
+            }
+            return l.replace(/([^ ])=>/g, '$1 =>').replace(/=>([^ ])/g, '=> $1')
+                    .replace(/([^ ])->/g, '$1 ->').replace(/->([^ ])/g, '-> $1');
+        }).join('\n');
+
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Rust: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Rust has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Rust formatted successfully!');
+    }
 }
 
 /**
@@ -425,6 +619,165 @@ function validateCPP(text: string): string | undefined {
     }
 
     if (inBlockComment) {
+        return "Unclosed block comment";
+    }
+    if (inRawString) {
+        return "Unclosed raw string literal";
+    }
+    if (inString) {
+        return "Unclosed string literal";
+    }
+    if (inChar) {
+        return "Unclosed character literal";
+    }
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Custom resilient Rust validator
+ */
+function validateRust(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let inString = false;
+    let inChar = false;
+    let inLineComment = false;
+    let blockCommentLevel = 0;
+    let inRawString = false;
+    let rawStringHashes = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inLineComment) {
+                break;
+            }
+            if (blockCommentLevel > 0) {
+                if (char === '*' && nextChar === '/') {
+                    blockCommentLevel--;
+                    j++;
+                } else if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inRawString) {
+                // Check for end of raw string: " followed by matching number of #
+                if (char === '"') {
+                    let hashesFound = 0;
+                    while (j + 1 + hashesFound < line.length && line[j + 1 + hashesFound] === '#') {
+                        hashesFound++;
+                    }
+                    if (hashesFound >= rawStringHashes) {
+                        inRawString = false;
+                        j += rawStringHashes;
+                    }
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (char === '\\') {
+                    j++; // Escape sequence
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === "'") {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            // Start of comment
+            if (char === '/' && nextChar === '/') {
+                inLineComment = true;
+                j++;
+                continue;
+            }
+            if (char === '/' && nextChar === '*') {
+                blockCommentLevel++;
+                j++;
+                continue;
+            }
+
+            // Start of raw string r" or r#...# "
+            if (char === 'r' && (nextChar === '"' || nextChar === '#')) {
+                let hashes = 0;
+                let k = j + 1;
+                while (k < line.length && line[k] === '#') {
+                    hashes++;
+                    k++;
+                }
+                if (k < line.length && line[k] === '"') {
+                    inRawString = true;
+                    rawStringHashes = hashes;
+                    j = k;
+                    continue;
+                }
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            // Check for char vs lifetime
+            if (char === "'") {
+                // Lifetime starts with ' followed by id, e.g. 'static, 'a
+                // Char literal is 'c' or '\n' etc.
+                // Heuristic: if next is identifier start and it's NOT followed by ' soon, it's a lifetime.
+                const remaining = line.substring(j + 1);
+                const charMatch = remaining.match(/^([^'\\]|\\.)'/);
+                if (charMatch) {
+                    inChar = true;
+                    continue;
+                } else {
+                    // It's likely a lifetime, ignore it
+                    // Skip ' and letters
+                    let k = j + 1;
+                    while (k < line.length && /[a-zA-Z0-9_]/.test(line[k])) {
+                        k++;
+                    }
+                    j = k - 1;
+                    continue;
+                }
+            }
+
+            // Braces
+            if (char === '{' || char === '(' || char === '[') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closing for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+            }
+        }
+        inLineComment = false;
+    }
+
+    if (blockCommentLevel > 0) {
         return "Unclosed block comment";
     }
     if (inRawString) {
@@ -1957,7 +2310,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -2027,6 +2380,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleCPP(editor, text);
     } else if (format === 'go') {
         await handleGo(editor, text);
+    } else if (format === 'rust') {
+        await handleRust(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -2067,7 +2422,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -2094,6 +2449,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'java') { return 'java'; }
     if (lang === 'csharp') { return 'csharp'; }
     if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
+    if (lang === 'rust' || lang === 'rs') { return 'rust'; }
     if (lang === 'go') { return 'go'; }
 
     const trimmed = text.trim();
@@ -2268,6 +2624,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /\bConsole\.(WriteLine|Write)\b/.test(trimmed)
     ) {
         return 'csharp';
+    }
+
+    // Rust heuristic
+    if (
+        /^\s*(fn|mod|pub|use|crate|type|struct|enum|impl|trait|match|unsafe|async|await)\b/m.test(trimmed) ||
+        /\b(println!|vec!|panic!|format!|assert!)\b/.test(trimmed) ||
+        /\b(match\s+.+\s*\{|=>|->)\b/.test(trimmed) ||
+        /#!?\[[a-z_]+\(?.+\)?\]/i.test(trimmed)
+    ) {
+        return 'rust';
     }
 
     // Go heuristic
