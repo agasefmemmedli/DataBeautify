@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift and Dart files with keyboard shortcuts and context menu",
-  "version": "0.22.0",
+  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart and Dockerfile files with keyboard shortcuts and context menu",
+  "version": "0.23.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -75,7 +75,8 @@
     "onLanguage:rust",
     "onLanguage:ruby",
     "onLanguage:swift",
-    "onLanguage:dart"
+    "onLanguage:dart",
+    "onLanguage:dockerfile"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -191,6 +192,10 @@
       {
         "command": "beautify-format.formatDart",
         "title": "Beautify Dart"
+      },
+      {
+        "command": "beautify-format.formatDockerfile",
+        "title": "Beautify Dockerfile"
       }
     ],
     "keybindings": [
@@ -205,7 +210,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile",
           "group": "1_modification"
         }
       ]
