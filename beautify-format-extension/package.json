@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go, Rust and Ruby files with keyboard shortcuts and context menu",
-  "version": "0.19.0",
+  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go, Rust, Ruby and Swift files with keyboard shortcuts and context menu",
+  "version": "0.20.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -72,7 +72,8 @@
     "onLanguage:c",
     "onLanguage:go",
     "onLanguage:rust",
-    "onLanguage:ruby"
+    "onLanguage:ruby",
+    "onLanguage:swift"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -176,6 +177,10 @@
       {
         "command": "beautify-format.formatRuby",
         "title": "Beautify Ruby"
+      },
+      {
+        "command": "beautify-format.formatSwift",
+        "title": "Beautify Swift"
       }
     ],
     "keybindings": [
@@ -190,7 +195,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift",
           "group": "1_modification"
         }
       ]

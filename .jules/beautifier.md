@@ -243,3 +243,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('ruby', 'rb') with content-based heuristics. Looked for Ruby-specific markers: keywords at the start of lines (`class`, `module`, `def`), common library calls (`require`, `include`), attribute macros (`attr_accessor`, etc.), and the presence of `do...end` blocks. It also identifies Ruby by the combination of `#` comments and specific keywords, ensuring reliable detection even without a standard extension.
+
+## Swift Support (v0.20.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient structural validator for Swift. This handles nested block comments and string interpolation, which are key features of the language.
+- **Resilient Validation:** The validator tracks balanced braces ({}), parentheses (()), and brackets ([]). It is state-aware, correctly handling single-line comments (//), multi-line nested comments (/* /* */ */), standard strings (""), and multiline strings (""" """).
+- **Special Case - Interpolation:** Added support for Swift's string interpolation \(...). The validator and formatter use a state stack and track brace depth to correctly identify when the code returns from interpolation (NORMAL state) back to the STRING state.
+- **Recovery:** Developed a custom resilient line-by-line formatter (standardizing 4-space indentation). It tracks indentLevel based on braces and other opening/closing characters while being aware of the current state (comment/string/normal) to ensure "readability is king" even for partially broken snippets.
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings are reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('swift') with content-based heuristics. Looked for Swift-specific markers: common import statements (Foundation, UIKit, SwiftUI), keywords followed by identifiers (protocol, extension, actor, func, let, var), and attribute patterns like @main. This ensures high confidence in identifying Swift files even without the correct extension.
