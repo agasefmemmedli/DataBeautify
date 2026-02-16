@@ -51,7 +51,8 @@ async function runTests() {
         'dockerfile': 'dockerfile',
         'ps1': 'powershell',
         'tf': 'terraform',
-        'makefile': 'makefile'
+        'makefile': 'makefile',
+        'nginx': 'nginx'
     };
 
     let passed = 0;
