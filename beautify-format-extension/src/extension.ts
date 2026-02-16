@@ -182,6 +182,160 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('hcl');
     });
     context.subscriptions.push(formatHCLCommand);
+
+    let formatNginxCommand = vscode.commands.registerCommand('beautify-format.formatNginx', () => {
+        beautify('nginx');
+    });
+    context.subscriptions.push(formatNginxCommand);
+}
+
+/**
+ * Handle Nginx formatting and validation
+ */
+async function handleNginx(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Nginx
+    validationMessage = validateNginx(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let stateStack: ('STRING' | 'NORMAL')[] = ['NORMAL'];
+        let quoteChar = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && stateStack[stateStack.length - 1] === 'NORMAL') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Indentation adjustment for closing characters at the START of the line
+            let currentLineIndent = indentLevel;
+            if (stateStack[stateStack.length - 1] === 'NORMAL') {
+                let j = 0;
+                while (j < trimmed.length) {
+                    if (trimmed[j] === '}') {
+                        currentLineIndent--;
+                    } else if (trimmed[j] === ' ' || trimmed[j] === '\t') {
+                        // Skip whitespace between closing braces
+                    } else {
+                        break;
+                    }
+                    j++;
+                }
+            }
+
+            // Apply indentation (standard 4 spaces for Nginx)
+            formattedLines.push('    '.repeat(Math.max(0, currentLineIndent)) + trimmed);
+
+            // Calculate net brace change for NEXT line
+            let netChange = 0;
+            for (let k = 0; k < trimmed.length; k++) {
+                const char = trimmed[k];
+                const currentState = stateStack[stateStack.length - 1];
+
+                if (currentState === 'STRING') {
+                    if (char === '\\') {
+                        k++;
+                    } else if (char === quoteChar) {
+                        stateStack.pop();
+                    }
+                    continue;
+                }
+
+                if (char === '#') {
+                    break; // Line comment
+                }
+
+                if (char === '"' || char === "'") {
+                    stateStack.push('STRING');
+                    quoteChar = char;
+                    continue;
+                }
+
+                if (char === '{') {
+                    netChange++;
+                } else if (char === '}') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Nginx: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Nginx configuration has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Nginx configuration formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Nginx validator
+ */
+function validateNginx(text: string): string | undefined {
+    let braceLevel = 0;
+    let inString = false;
+    let quoteChar = '';
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+
+            if (inString) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === quoteChar) {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (char === '#') {
+                break; // Line comment
+            }
+
+            if (char === '"' || char === "'") {
+                inString = true;
+                quoteChar = char;
+                continue;
+            }
+
+            if (char === '{') {
+                braceLevel++;
+            } else if (char === '}') {
+                braceLevel--;
+                if (braceLevel < 0) {
+                    return `Extra closing brace at line ${i + 1}, col ${j + 1}`;
+                }
+            }
+        }
+    }
+
+    if (braceLevel > 0) {
+        return `Missing ${braceLevel} closing brace(s)`;
+    }
+    if (inString) {
+        return `Unclosed string literal`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4013,7 +4167,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4103,6 +4257,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleHCL(editor, text);
     } else if (format === 'makefile') {
         await handleMakefile(editor, text);
+    } else if (format === 'nginx') {
+        await handleNginx(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4143,7 +4299,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4178,6 +4334,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'swift') { return 'swift'; }
     if (lang === 'terraform' || lang === 'hcl' || lang === 'terraform-vars') { return 'hcl'; }
     if (lang === 'makefile') { return 'makefile'; }
+    if (lang === 'nginx') { return 'nginx'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4475,6 +4632,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^[A-Z_]+ = /m.test(trimmed)
     ) {
         return 'makefile';
+    }
+
+    // Nginx heuristic
+    if (
+        /^\s*(http|server|location|upstream|events)\b\s*\{/im.test(trimmed) ||
+        /^\s*(listen|proxy_pass|root|index|server_name|include)\s+[^;]+;/im.test(trimmed)
+    ) {
+        return 'nginx';
     }
 
     // JavaScript heuristic: common keywords or arrow functions

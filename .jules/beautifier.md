@@ -332,3 +332,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('makefile') with content-based heuristics. Looked for target definitions (`target: dependencies`), variable assignments (`VAR = value`), or lines starting with a tab followed by a command. This ensures high confidence in identifying Makefiles even without the standard name.
+
+## Nginx Support (v0.28.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter and character-by-character validator for Nginx configuration files.
+- **Resilient Formatting:** The formatter normalizes indentation to 4 spaces, following common Nginx configuration standards. It is state-aware, handling single-line comments (#) and strings ('', "") to avoid misidentifying structural braces inside them.
+- **Structural Awareness:** It correctly handles nested blocks by tracking brace depth ({ }). Braces at the start of a line are out-dented for the current line and re-indented for subsequent content, ensuring a clean and structured layout even for messy inputs.
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings are reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the configuration.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('nginx') with content-based heuristics. Looked for Nginx-specific block starts (http, server, location, upstream, events followed by {) and common directives (listen, proxy_pass, root, index, server_name, include followed by a semicolon). This ensures high confidence in identifying Nginx configurations even without the .conf extension.
