@@ -172,6 +172,141 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('powershell');
     });
     context.subscriptions.push(formatPowerShellCommand);
+
+    let formatHCLCommand = vscode.commands.registerCommand('beautify-format.formatHCL', () => {
+        beautify('hcl');
+    });
+    context.subscriptions.push(formatHCLCommand);
+}
+
+/**
+ * Handle Terraform/HCL formatting and validation
+ */
+async function handleHCL(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate HCL using custom resilient validator
+    validationMessage = validateHCL(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inMultilineComment = false;
+        let inHeredoc = false;
+        let heredocDelimiter = '';
+        let stateStack: ('STRING' | 'NORMAL')[] = ['NORMAL'];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inMultilineComment && !inHeredoc && stateStack[stateStack.length - 1] === 'NORMAL') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle Multiline Comments
+            if (inMultilineComment) {
+                formattedLines.push(line);
+                if (trimmed.includes('*/')) {
+                    inMultilineComment = false;
+                }
+                continue;
+            }
+
+            // Handle Heredocs
+            if (inHeredoc) {
+                formattedLines.push(line);
+                if (trimmed === heredocDelimiter) {
+                    inHeredoc = false;
+                }
+                continue;
+            }
+
+            // Indentation adjustment for closing characters at the START of the line
+            let leadingClosingCount = 0;
+            if (stateStack[stateStack.length - 1] === 'NORMAL') {
+                let j = 0;
+                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ']' || trimmed[j] === ')')) {
+                    leadingClosingCount++;
+                    j++;
+                }
+            }
+
+            if (leadingClosingCount > 0) {
+                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            }
+
+            // Apply indentation (HCL uses 2 spaces)
+            formattedLines.push('  '.repeat(Math.max(0, indentLevel)) + trimmed);
+
+            // Calculate net brace change for NEXT line
+            let netChange = 0;
+            for (let k = 0; k < trimmed.length; k++) {
+                const char = trimmed[k];
+                const nextChar = trimmed[k + 1];
+                const currentState = stateStack[stateStack.length - 1];
+
+                if (currentState === 'STRING') {
+                    if (char === '\\') {
+                        k++;
+                    } else if (char === '"') {
+                        stateStack.pop();
+                    }
+                    continue;
+                }
+
+                if (char === '#' || (char === '/' && nextChar === '/')) {
+                    break; // Line comment
+                }
+
+                if (char === '/' && nextChar === '*') {
+                    inMultilineComment = true;
+                    k++;
+                    continue;
+                }
+
+                if (char === '<' && nextChar === '<') {
+                    // Potential heredoc
+                    const remaining = trimmed.substring(k);
+                    const heredocMatch = remaining.match(/^<<-?\s*([A-Z0-9_]+)/i);
+                    if (heredocMatch) {
+                        inHeredoc = true;
+                        heredocDelimiter = heredocMatch[1];
+                        break;
+                    }
+                }
+
+                if (char === '"') {
+                    stateStack.push('STRING');
+                    continue;
+                }
+
+                if (char === '{' || char === '[' || char === '(') {
+                    netChange++;
+                } else if (char === '}' || char === ']' || char === ')') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Terraform/HCL: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Terraform/HCL has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Terraform/HCL formatted successfully!');
+    }
 }
 
 /**
@@ -525,6 +660,113 @@ function validatePowerShell(text: string): string | undefined {
     if (lastState === 'HERE_STRING' || lastState === 'LITERAL_HERE_STRING') return "Unclosed here-string";
     if (lastState === 'STRING' || lastState === 'LITERAL_STRING') return "Unclosed string literal";
 
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Custom resilient HCL validator
+ */
+function validateHCL(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let stateStack: ('STRING' | 'NORMAL')[] = ['NORMAL'];
+    let inMultilineComment = false;
+    let inHeredoc = false;
+    let heredocDelimiter = '';
+    const interpStack: number[] = [];
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (inHeredoc) {
+            if (trimmed === heredocDelimiter) {
+                inHeredoc = false;
+            }
+            continue;
+        }
+
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+            const currentState = stateStack[stateStack.length - 1];
+
+            if (inMultilineComment) {
+                if (char === '*' && nextChar === '/') {
+                    inMultilineComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (currentState === 'STRING') {
+                if (char === '\\') {
+                    j++;
+                } else if (char === '$' && nextChar === '{') {
+                    stateStack.push('NORMAL');
+                    interpStack.push(stack.length);
+                    stack.push({ char: '{', line: i + 1, col: j + 2 });
+                    j++;
+                } else if (char === '"') {
+                    stateStack.pop();
+                }
+                continue;
+            }
+
+            if (char === '#' || (char === '/' && nextChar === '/')) {
+                break; // Line comment
+            }
+
+            if (char === '/' && nextChar === '*') {
+                inMultilineComment = true;
+                j++;
+                continue;
+            }
+
+            if (char === '<' && nextChar === '<') {
+                const remaining = line.substring(j);
+                const heredocMatch = remaining.match(/^<<-?\s*([A-Z0-9_]+)/i);
+                if (heredocMatch) {
+                    inHeredoc = true;
+                    heredocDelimiter = heredocMatch[1];
+                    j = line.length;
+                    continue;
+                }
+            }
+
+            if (char === '"') {
+                stateStack.push('STRING');
+                continue;
+            }
+
+            if (char === '{' || char === '[' || char === '(') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ']' || char === ')') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ']' && last.char !== '[') ||
+                    (char === ')' && last.char !== '(')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closure for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+                if (char === '}' && interpStack.length > 0 && stack.length === interpStack[interpStack.length - 1]) {
+                    interpStack.pop();
+                    stateStack.pop();
+                }
+            }
+        }
+    }
+
+    if (inMultilineComment) return "Unclosed multiline comment";
+    if (inHeredoc) return "Unclosed heredoc";
+    if (stateStack.pop() === 'STRING') return "Unclosed string literal";
     if (stack.length > 0) {
         const last = stack.pop()!;
         return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
@@ -3631,7 +3873,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -3717,6 +3959,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleShell(editor, text);
     } else if (format === 'powershell') {
         await handlePowerShell(editor, text);
+    } else if (format === 'hcl') {
+        await handleHCL(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -3757,7 +4001,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -3790,6 +4034,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'powershell' || lang === 'ps1' || lang === 'psm1') { return 'powershell'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
+    if (lang === 'terraform' || lang === 'hcl' || lang === 'terraform-vars') { return 'hcl'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4070,6 +4315,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         trimmed.startsWith('<#') || trimmed.startsWith('@"') || trimmed.startsWith("@'")
     ) {
         return 'powershell';
+    }
+
+    // HCL heuristic
+    if (
+        /^\s*(resource|variable|data|module|locals|output|terraform|provider)\b\s*["']?[a-z0-9_-]*["']?\s*["']?[a-z0-9_-]*["']?\s*\{/i.test(trimmed) ||
+        (/^\s*[a-z0-9_-]+\s*\{/i.test(trimmed) && trimmed.includes('}') && trimmed.includes('=') && !trimmed.includes(';') && !trimmed.includes(':'))
+    ) {
+        return 'hcl';
     }
 
     // JavaScript heuristic: common keywords or arrow functions

@@ -49,7 +49,8 @@ async function runTests() {
         'rb': 'ruby',
         'dart': 'dart',
         'dockerfile': 'dockerfile',
-        'ps1': 'powershell'
+        'ps1': 'powershell',
+        'tf': 'terraform'
     };
 
     let passed = 0;
