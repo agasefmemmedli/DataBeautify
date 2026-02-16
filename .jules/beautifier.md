@@ -266,3 +266,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('kotlin') with content-based heuristics. Looked for Kotlin-specific markers: keywords at the start of lines (fun, val, var, package, import), the "companion object" pattern, "when" expressions, and common type declarations (e.g., : String, : Int). This ensures reliable identification of Kotlin files even without the .kt extension.
+
+## Dart Support (v0.22.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for Dart. This handles Dart's specific features like triple-quoted strings, raw strings, and string interpolation without requiring a heavy external parser.
+- **Resilient Validation:** The validator tracks balanced braces ({}), parentheses (()), and brackets ([]). It is state-aware, correctly handling single-line comments (//, ///), multi-line comments (/* */, /** */), standard strings ('', ""), and raw strings (r'', r"").
+- **Special Case - Interpolation:** Added support for Dart's string interpolation ${expression}. The validator tracks brace depth to correctly identify when the code returns from interpolation (NORMAL state) back to the STRING state.
+- **Recovery:** Used `js-beautify.js` for formatting with a 2-space indentation standard. Given Dart's similarity to Java and JavaScript, the JS formatter provides high-quality, resilient beautification even for code with syntax issues, adhering to the "readability is king" philosophy.
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings/comments are reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('dart') with content-based heuristics. Looked for Dart-specific markers: import statements (dart:, package:, .dart), the "void main()" entry point, @override annotations, and common keywords (class, mixin, extension, final, const, late). This ensures reliable identification of Dart files even without the .dart extension.

@@ -46,7 +46,8 @@ async function runTests() {
         'ts': 'typescript',
         'kt': 'kotlin',
         'rs': 'rust',
-        'rb': 'ruby'
+        'rb': 'ruby',
+        'dart': 'dart'
     };
 
     let passed = 0;
