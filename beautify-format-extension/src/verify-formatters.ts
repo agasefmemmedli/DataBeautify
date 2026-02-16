@@ -48,7 +48,8 @@ async function runTests() {
         'rs': 'rust',
         'rb': 'ruby',
         'dart': 'dart',
-        'dockerfile': 'dockerfile'
+        'dockerfile': 'dockerfile',
+        'ps1': 'powershell'
     };
 
     let passed = 0;

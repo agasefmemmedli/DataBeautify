@@ -298,3 +298,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('shellscript', 'sh') with content-based heuristics. Looked for shebangs (`#!`) at the start of the file or Shell-specific keywords (`export`, `alias`, `source`, `shopt`) and patterns (`if [[`, `case $... in`). This ensures reliable identification of Shell scripts even without the `.sh` extension.
+
+## PowerShell Support (v0.25.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient structural validator for PowerShell. It tracks balanced braces ({}), parentheses (()), and brackets ([]), while being state-aware for single-line comments (#), block comments (<# #>), standard strings ("", ''), and here-strings (@"" "", @'' '').
+- **Special Case - Here-Strings:** Added support for PowerShell here-strings, ensuring that delimiters at the start/end of lines are correctly identified and no formatting is applied inside them.
+- **Special Case - Escape Character:** The validator and formatter correctly handle PowerShell's backtick (`) escape character inside strings to avoid misidentifying closing quotes.
+- **Recovery:** Developed a custom resilient line-by-line formatter (standardizing 4-space indentation). It tracks indentLevel based on structural characters while being aware of the current state (comment/string/here-string/normal).
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings/comments are reported as VS Code warnings, fulfilling the requirement to surface errors while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('powershell') with content-based heuristics. Looked for PowerShell-specific markers: shebangs containing 'powershell', Verb-Noun patterns (Get-, Set-, Write-), variables ($prefix), keywords (param, begin, process, end, workflow), and unique delimiters like <# or here-string markers (@", @'). This ensures high confidence in identifying PowerShell files even without the .ps1 extension.

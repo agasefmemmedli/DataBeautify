@@ -167,6 +167,157 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('shell');
     });
     context.subscriptions.push(formatShellCommand);
+
+    let formatPowerShellCommand = vscode.commands.registerCommand('beautify-format.formatPowerShell', () => {
+        beautify('powershell');
+    });
+    context.subscriptions.push(formatPowerShellCommand);
+}
+
+/**
+ * Handle PowerShell formatting and validation
+ */
+async function handlePowerShell(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate PowerShell using custom resilient validator
+    validationMessage = validatePowerShell(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inHereString = false;
+        let hereStringMarker = '';
+        let blockCommentLevel = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inHereString && blockCommentLevel === 0) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle Here-Strings and Block Comments
+            if (inHereString) {
+                formattedLines.push(line);
+                if (trimmed === hereStringMarker) {
+                    inHereString = false;
+                }
+                continue;
+            }
+
+            if (blockCommentLevel > 0) {
+                formattedLines.push(line);
+                // Check for end of block comment
+                let pos = 0;
+                while ((pos = line.indexOf('#>', pos)) !== -1) {
+                    blockCommentLevel--;
+                    pos += 2;
+                    if (blockCommentLevel === 0) break;
+                }
+                continue;
+            }
+
+            // Check for start of Here-String (must be at the end of the line)
+            if (trimmed.endsWith('@"') || trimmed.endsWith("@'")) {
+                inHereString = true;
+                hereStringMarker = trimmed.endsWith('@"') ? '"@' : "'@";
+                formattedLines.push('    '.repeat(indentLevel) + trimmed);
+                continue;
+            }
+
+            // Check for start of Block Comment
+            if (trimmed.startsWith('<#')) {
+                blockCommentLevel++;
+                formattedLines.push('    '.repeat(indentLevel) + trimmed);
+                // Check if it ends on the same line
+                let pos = 2;
+                while ((pos = line.indexOf('#>', pos)) !== -1) {
+                    blockCommentLevel--;
+                    pos += 2;
+                    if (blockCommentLevel === 0) break;
+                }
+                continue;
+            }
+
+            // Indentation adjustment for closing characters at the START of the line
+            let leadingClosingCount = 0;
+            let j = 0;
+            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+                leadingClosingCount++;
+                j++;
+            }
+
+            if (leadingClosingCount > 0) {
+                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            }
+
+            // Apply indentation
+            formattedLines.push('    '.repeat(Math.max(0, indentLevel)) + trimmed);
+
+            // Calculate net brace change for NEXT line
+            let netChange = 0;
+            let inString = false;
+            let stringChar = '';
+
+            for (let k = leadingClosingCount; k < trimmed.length; k++) {
+                const char = trimmed[k];
+                const nextChar = trimmed[k+1];
+
+                if (inString) {
+                    if (char === '`') { // PowerShell escape character
+                        k++;
+                    } else if (char === stringChar) {
+                        if (nextChar === stringChar) {
+                            k++; // Escaped quote "" or ''
+                        } else {
+                            inString = false;
+                        }
+                    }
+                    continue;
+                }
+
+                if (char === '"' || char === "'") {
+                    inString = true;
+                    stringChar = char;
+                    continue;
+                }
+
+                if (char === '#') break; // Line comment
+
+                if (char === '<' && nextChar === '#') {
+                    blockCommentLevel++;
+                    k++;
+                    continue;
+                }
+
+                if (char === '{' || char === '(' || char === '[') {
+                    netChange++;
+                } else if (char === '}' || char === ')' || char === ']') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format PowerShell: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`PowerShell has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('PowerShell formatted successfully!');
+    }
 }
 
 /**
@@ -253,6 +404,133 @@ async function handleShell(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Shell Script formatted successfully!');
     }
+}
+
+/**
+ * Custom resilient PowerShell validator
+ */
+function validatePowerShell(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let stateStack: ('STRING' | 'LITERAL_STRING' | 'HERE_STRING' | 'LITERAL_HERE_STRING' | 'NORMAL')[] = ['NORMAL'];
+    let blockCommentLevel = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        const currentState = stateStack[stateStack.length - 1];
+
+        if (currentState === 'HERE_STRING') {
+            if (trimmed === '"@') stateStack.pop();
+            continue;
+        }
+        if (currentState === 'LITERAL_HERE_STRING') {
+            if (trimmed === "'@") stateStack.pop();
+            continue;
+        }
+
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+            const currentStateInner = stateStack[stateStack.length - 1];
+
+            if (blockCommentLevel > 0) {
+                if (char === '#' && nextChar === '>') {
+                    blockCommentLevel--;
+                    j++;
+                } else if (char === '<' && nextChar === '#') {
+                    blockCommentLevel++;
+                    j++;
+                }
+                continue;
+            }
+
+            if (currentStateInner === 'STRING') {
+                if (char === '`') { // PowerShell escape
+                    j++;
+                } else if (char === '"') {
+                    stateStack.pop();
+                }
+                continue;
+            }
+
+            if (currentStateInner === 'LITERAL_STRING') {
+                if (char === "'") {
+                    stateStack.pop();
+                }
+                continue;
+            }
+
+            // NORMAL state
+            if (char === '#' && (j === 0 || /\s/.test(line[j - 1]))) {
+                // Line comment
+                break;
+            }
+
+            if (char === '<' && nextChar === '#') {
+                blockCommentLevel++;
+                j++;
+                continue;
+            }
+
+            // Check for Here-Strings (must be at the end of the line)
+            if (j === line.length - 2) {
+                if (line.endsWith('@"')) {
+                    stateStack.push('HERE_STRING');
+                    j = line.length;
+                    continue;
+                }
+                if (line.endsWith("@'")) {
+                    stateStack.push('LITERAL_HERE_STRING');
+                    j = line.length;
+                    continue;
+                }
+            }
+
+            if (char === '"') {
+                if (nextChar === '"') {
+                    j++; // Escaped quote ""
+                } else {
+                    stateStack.push('STRING');
+                }
+                continue;
+            }
+            if (char === "'") {
+                if (nextChar === "'") {
+                    j++; // Escaped quote ''
+                } else {
+                    stateStack.push('LITERAL_STRING');
+                }
+                continue;
+            }
+
+            if (char === '{' || char === '(' || char === '[') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closure for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+            }
+        }
+    }
+
+    if (blockCommentLevel > 0) return "Unclosed block comment";
+    const lastState = stateStack.pop();
+    if (lastState === 'HERE_STRING' || lastState === 'LITERAL_HERE_STRING') return "Unclosed here-string";
+    if (lastState === 'STRING' || lastState === 'LITERAL_STRING') return "Unclosed string literal";
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -3353,7 +3631,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -3437,6 +3715,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleDockerfile(editor, text);
     } else if (format === 'shell') {
         await handleShell(editor, text);
+    } else if (format === 'powershell') {
+        await handlePowerShell(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -3477,7 +3757,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -3507,6 +3787,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
     if (lang === 'rust' || lang === 'rs') { return 'rust'; }
     if (lang === 'go') { return 'go'; }
+    if (lang === 'powershell' || lang === 'ps1' || lang === 'psm1') { return 'powershell'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
@@ -3772,11 +4053,23 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
 
     // Shell heuristic
     if (
-        trimmed.startsWith('#!') ||
+        (trimmed.startsWith('#!') && (trimmed.includes('sh') && !trimmed.toLowerCase().includes('pwsh'))) ||
         /^\s*(export|alias|source|unset|readonly|shopt)\b/m.test(trimmed) ||
         /\b(if\s+\[\[|if\s+\[|case\s+\$.+\s+in)\b/.test(trimmed)
     ) {
         return 'shell';
+    }
+
+    // PowerShell heuristic
+    if (
+        (trimmed.startsWith('#!') && trimmed.toLowerCase().includes('powershell')) ||
+        /^\s*#[^!]/m.test(trimmed) && (trimmed.includes('Get-') || trimmed.includes('Set-') || trimmed.includes('Write-')) ||
+        /^\s*(param|begin|process|end|filter|workflow|parallel)\b/im.test(trimmed) ||
+        /^\s*(\$[a-z_][a-z0-9_]*\s*=|\[[a-z0-9.]+\])/im.test(trimmed) ||
+        (trimmed.includes('{') && trimmed.includes('}') && /\$[a-z_]/i.test(trimmed)) ||
+        trimmed.startsWith('<#') || trimmed.startsWith('@"') || trimmed.startsWith("@'")
+    ) {
+        return 'powershell';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
