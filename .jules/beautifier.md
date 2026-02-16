@@ -198,3 +198,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('csharp') with content-based heuristics. Looked for C#-specific markers: common namespaces (`using System;`), namespace declarations, access modifiers followed by C# keywords (`struct`, `record`), the `static void Main` entry point, and common class library calls (`Console.WriteLine`). This ensures high confidence in identifying C# files even without the `.cs` extension.
+
+## C++ Support (v0.16.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient validator for C++. This handles comments, strings, and character literals to accurately track brace balancing.
+- **Recovery:** Used `js-beautify.js` for formatting with a 4-space indentation standard. Similar to Java and C#, the JS formatter provides a high-quality, resilient beautification for C-style syntax even with errors.
+- **Special Case:** Added support for C++ raw strings `R"delimiter( ... )delimiter"` in the validator to prevent misidentifying braces inside raw literals.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('cpp', 'c') with content-based heuristics. Looked for C++ specific markers: `#include` directives, standard library usage (`std::cout`, `std::vector`, etc.), `using namespace std;`, templates, access modifiers (`public:`, etc.), and class definitions ending with `};`. This provides high confidence while distinguishing C++ from other brace-based languages.
