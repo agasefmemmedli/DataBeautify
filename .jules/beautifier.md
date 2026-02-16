@@ -255,3 +255,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('swift') with content-based heuristics. Looked for Swift-specific markers: common import statements (Foundation, UIKit, SwiftUI), keywords followed by identifiers (protocol, extension, actor, func, let, var), and attribute patterns like @main. This ensures high confidence in identifying Swift files even without the correct extension.
+
+## Kotlin Support (v0.21.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for Kotlin. This approach was chosen to handle Kotlin's specific features like nested block comments and raw strings without requiring a heavy external parser.
+- **Resilient Validation:** The validator tracks balanced braces ({}), parentheses (()), and brackets ([]). It is state-aware, correctly handling single-line comments (//), multi-line nested comments (/* /* */ */), standard strings (""), and raw strings (""" """).
+- **Recovery:** Used `js-beautify.js` for formatting with a 4-space indentation standard. Given Kotlin's similarity to Java and JavaScript, the JS formatter provides high-quality, resilient beautification even for code with syntax issues, adhering to the "readability is king" philosophy.
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings/comments are reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('kotlin') with content-based heuristics. Looked for Kotlin-specific markers: keywords at the start of lines (fun, val, var, package, import), the "companion object" pattern, "when" expressions, and common type declarations (e.g., : String, : Int). This ensures reliable identification of Kotlin files even without the .kt extension.
