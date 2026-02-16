@@ -1,5 +1,3 @@
-Swift (.swift) — разработка под iOS.
-
 Kotlin (.kt, .kts) — Android и JVM.
 
 Dart (.dart) — Flutter разработка.

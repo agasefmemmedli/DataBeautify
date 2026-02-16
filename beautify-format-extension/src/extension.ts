@@ -116,6 +116,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatRubyCommand = vscode.commands.registerCommand('beautify-format.formatRuby', () => {
         beautify('ruby');
     });
+    let formatSwiftCommand = vscode.commands.registerCommand('beautify-format.formatSwift', () => {
+        beautify('swift');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -144,6 +147,154 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatGoCommand);
     context.subscriptions.push(formatRustCommand);
     context.subscriptions.push(formatRubyCommand);
+    context.subscriptions.push(formatSwiftCommand);
+}
+
+/**
+ * Handle Swift formatting and validation
+ */
+async function handleSwift(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Swift using custom resilient validator
+    validationMessage = validateSwift(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let stateStack: ('STRING' | 'MULTILINE_STRING' | 'NORMAL')[] = ['NORMAL'];
+        let blockCommentLevel = 0;
+        // Tracking interpolation braces to return to STRING state
+        const interpBraceStack: number[] = [];
+        let currentTotalBraceDepth = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && stateStack[stateStack.length - 1] === 'NORMAL' && blockCommentLevel === 0) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Indentation adjustment for closing braces at the START of the line
+            let leadingClosingCount = 0;
+            if (blockCommentLevel === 0 && stateStack[stateStack.length - 1] === 'NORMAL') {
+                let j = 0;
+                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+                    leadingClosingCount++;
+                    j++;
+                }
+            }
+
+            if (leadingClosingCount > 0) {
+                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            }
+
+            // Apply indentation (Swift uses 4 spaces)
+            let currentLine = (blockCommentLevel > 0 || stateStack[stateStack.length - 1] !== 'NORMAL')
+                ? line
+                : '    '.repeat(Math.max(0, indentLevel)) + trimmed;
+
+            formattedLines.push(currentLine);
+
+            // Calculate net brace change for NEXT line and track state
+            let netChange = 0;
+            const textToProcess = (blockCommentLevel > 0 || stateStack[stateStack.length - 1] !== 'NORMAL')
+                ? line
+                : trimmed.substring(leadingClosingCount);
+
+            for (let k = 0; k < textToProcess.length; k++) {
+                const char = textToProcess[k];
+                const nextChar = textToProcess[k + 1];
+                const nextNextChar = textToProcess[k + 2];
+                const currentState = stateStack[stateStack.length - 1];
+
+                if (blockCommentLevel > 0) {
+                    if (char === '*' && nextChar === '/') {
+                        blockCommentLevel--;
+                        k++;
+                    } else if (char === '/' && nextChar === '*') {
+                        blockCommentLevel++;
+                        k++;
+                    }
+                    continue;
+                }
+
+                if (currentState === 'MULTILINE_STRING') {
+                    if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                        stateStack.pop();
+                        k += 2;
+                    }
+                    continue;
+                }
+
+                if (currentState === 'STRING') {
+                    if (char === '\\') {
+                        if (nextChar === '(') {
+                            stateStack.push('NORMAL');
+                            interpBraceStack.push(currentTotalBraceDepth - leadingClosingCount + netChange);
+                            netChange++;
+                            k++;
+                        } else {
+                            k++; // Escape sequence
+                        }
+                    } else if (char === '"') {
+                        stateStack.pop();
+                    }
+                    continue;
+                }
+
+                // NORMAL state
+                if (char === '/' && nextChar === '/') {
+                    // Line comment
+                    break;
+                }
+                if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    k++;
+                    continue;
+                }
+                if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                    stateStack.push('MULTILINE_STRING');
+                    k += 2;
+                    continue;
+                }
+                if (char === '"') {
+                    stateStack.push('STRING');
+                    continue;
+                }
+
+                if (char === '{' || char === '(' || char === '[') {
+                    netChange++;
+                } else if (char === '}' || char === ')' || char === ']') {
+                    if (char === ')' && interpBraceStack.length > 0 && (currentTotalBraceDepth - leadingClosingCount + netChange - 1) === interpBraceStack[interpBraceStack.length - 1]) {
+                        interpBraceStack.pop();
+                        stateStack.pop();
+                    }
+                    netChange--;
+                }
+            }
+
+            currentTotalBraceDepth += (netChange - leadingClosingCount);
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Swift: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Swift has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Swift formatted successfully!');
+    }
 }
 
 /**
@@ -275,6 +426,115 @@ function validateRuby(text: string): string | undefined {
     if (stack.length > 0) {
         const last = stack.pop()!;
         return `Unclosed '${last.word}' from line ${last.line}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Validate Swift code for basic structural errors
+ */
+function validateSwift(text: string): string | undefined {
+    const braceStack: { char: string, line: number, col: number, isInterpolation?: boolean }[] = [];
+    let stateStack: ('STRING' | 'MULTILINE_STRING' | 'NORMAL')[] = ['NORMAL'];
+    let blockCommentLevel = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+            const nextNextChar = line[j + 2];
+            const currentState = stateStack[stateStack.length - 1];
+
+            if (blockCommentLevel > 0) {
+                if (char === '*' && nextChar === '/') {
+                    blockCommentLevel--;
+                    j++;
+                } else if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    j++;
+                }
+                continue;
+            }
+
+            if (currentState === 'MULTILINE_STRING') {
+                if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                    stateStack.pop();
+                    j += 2;
+                }
+                continue;
+            }
+
+            if (currentState === 'STRING') {
+                if (char === '\\') {
+                    if (nextChar === '(') {
+                        braceStack.push({ char: '(', line: i, col: j + 1, isInterpolation: true });
+                        stateStack.push('NORMAL');
+                        j++;
+                    } else {
+                        j++; // Escape sequence
+                    }
+                } else if (char === '"') {
+                    stateStack.pop();
+                }
+                continue;
+            }
+
+            // NORMAL state
+            if (char === '/' && nextChar === '/') {
+                // Line comment
+                break;
+            }
+            if (char === '/' && nextChar === '*') {
+                blockCommentLevel++;
+                j++;
+                continue;
+            }
+            if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                stateStack.push('MULTILINE_STRING');
+                j += 2;
+                continue;
+            }
+            if (char === '"') {
+                stateStack.push('STRING');
+                continue;
+            }
+
+            if (char === '{' || char === '(' || char === '[') {
+                braceStack.push({ char, line: i, col: j });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (braceStack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = braceStack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closure for '${last.char}' from line ${last.line + 1}, col ${last.col + 1})`;
+                }
+                if (char === ')' && last.isInterpolation) {
+                    stateStack.pop(); // Return from NORMAL (inside interpolation) to STRING
+                }
+            }
+        }
+    }
+
+    if (blockCommentLevel > 0) {
+        return "Unclosed block comment";
+    }
+    const lastState = stateStack.pop();
+    if (lastState === 'MULTILINE_STRING') {
+        return "Unclosed multiline string";
+    }
+    if (lastState === 'STRING') {
+        return "Unclosed string literal";
+    }
+
+    if (braceStack.length > 0) {
+        const last = braceStack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line + 1}, col ${last.col + 1}`;
     }
 
     return undefined;
@@ -2448,7 +2708,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -2522,6 +2782,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleRust(editor, text);
     } else if (format === 'ruby') {
         await handleRuby(editor, text);
+    } else if (format === 'swift') {
+        await handleSwift(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -2562,7 +2824,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -2592,6 +2854,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'rust' || lang === 'rs') { return 'rust'; }
     if (lang === 'go') { return 'go'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
+    if (lang === 'swift') { return 'swift'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -2810,6 +3073,17 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         (/\bclass\s+[A-Za-z0-9_]+\s*\{/.test(trimmed) && trimmed.includes('};'))
     ) {
         return 'cpp';
+    }
+
+    // Swift heuristic
+    if (
+        /^\s*(import\s+Swift|import\s+Foundation|import\s+UIKit|import\s+SwiftUI)\b/m.test(trimmed) ||
+        /^\s*(protocol|extension|actor|any|associatedtype|async|await)\s+[A-Z_a-z]/m.test(trimmed) ||
+        /^\s*(func|let|var|struct|enum|class)\s+[A-Z_a-z]/m.test(trimmed) ||
+        /\b(print|debugPrint|fatalError|precondition)\b/.test(trimmed) ||
+        /^\s*(@main|@UIApplicationMain|@NSApplicationMain)\b/m.test(trimmed)
+    ) {
+        return 'swift';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
