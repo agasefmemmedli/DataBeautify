@@ -104,6 +104,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatCSharpCommand = vscode.commands.registerCommand('beautify-format.formatCSharp', () => {
         beautify('csharp');
     });
+    let formatCPPCommand = vscode.commands.registerCommand('beautify-format.formatCPP', () => {
+        beautify('cpp');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -128,6 +131,183 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatPythonCommand);
     context.subscriptions.push(formatJavaCommand);
     context.subscriptions.push(formatCSharpCommand);
+    context.subscriptions.push(formatCPPCommand);
+}
+
+/**
+ * Handle C++ formatting and validation
+ */
+async function handleCPP(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate C++ using custom resilient validator
+    validationMessage = validateCPP(text);
+
+    /* eslint-disable */
+    try {
+        // Format C++ (using js-beautify's JS formatter which handles C-style syntax well)
+        formatted = jsbeautify.js(text, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format C++: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`C++ has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('C++ formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient C++ validator
+ */
+function validateCPP(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let inString = false;
+    let inChar = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let inRawString = false;
+    let rawStringDelimiter = '';
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inLineComment) {
+                break;
+            }
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inRawString) {
+                // Check for end of raw string: )delimiter"
+                if (char === ')') {
+                    const potentialDelimiter = line.substring(j + 1, j + 1 + rawStringDelimiter.length);
+                    if (potentialDelimiter === rawStringDelimiter && line[j + 1 + rawStringDelimiter.length] === '"') {
+                        inRawString = false;
+                        j += rawStringDelimiter.length + 1;
+                    }
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (char === '\\') {
+                    j++; // Escape sequence
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === "'") {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            // Start of comment
+            if (char === '/' && nextChar === '/') {
+                inLineComment = true;
+                j++;
+                continue;
+            }
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                j++;
+                continue;
+            }
+
+            // Start of raw string R"delimiter(
+            if (char === 'R' && nextChar === '"') {
+                const openParenIdx = line.indexOf('(', j + 2);
+                if (openParenIdx !== -1) {
+                    inRawString = true;
+                    rawStringDelimiter = line.substring(j + 2, openParenIdx);
+                    j = openParenIdx;
+                    continue;
+                }
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === "'") {
+                inChar = true;
+                continue;
+            }
+
+            // Braces
+            if (char === '{' || char === '(' || char === '[') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closing for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+            }
+        }
+        inLineComment = false;
+    }
+
+    if (inBlockComment) {
+        return "Unclosed block comment";
+    }
+    if (inRawString) {
+        return "Unclosed raw string literal";
+    }
+    if (inString) {
+        return "Unclosed string literal";
+    }
+    if (inChar) {
+        return "Unclosed character literal";
+    }
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -1524,7 +1704,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1590,6 +1770,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleJava(editor, text);
     } else if (format === 'csharp') {
         await handleCSharp(editor, text);
+    } else if (format === 'cpp') {
+        await handleCPP(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1630,7 +1812,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1656,6 +1838,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'python') { return 'python'; }
     if (lang === 'java') { return 'java'; }
     if (lang === 'csharp') { return 'csharp'; }
+    if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1829,6 +2012,18 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /\bConsole\.(WriteLine|Write)\b/.test(trimmed)
     ) {
         return 'csharp';
+    }
+
+    // C++ heuristic
+    if (
+        /^\s*#include\s*[<"]/m.test(trimmed) ||
+        /\b(std::cout|std::endl|std::vector|std::string|std::map|std::set)\b/.test(trimmed) ||
+        /\busing\s+namespace\s+std\s*;/.test(trimmed) ||
+        /\btemplate\s*<\s*.+\s*>/m.test(trimmed) ||
+        /\b(public|private|protected)\s*:\s*/.test(trimmed) ||
+        (/\bclass\s+[A-Za-z0-9_]+\s*\{/.test(trimmed) && trimmed.includes('};'))
+    ) {
+        return 'cpp';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
