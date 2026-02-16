@@ -113,6 +113,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatRustCommand = vscode.commands.registerCommand('beautify-format.formatRust', () => {
         beautify('rust');
     });
+    let formatRubyCommand = vscode.commands.registerCommand('beautify-format.formatRuby', () => {
+        beautify('ruby');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -140,6 +143,141 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatCPPCommand);
     context.subscriptions.push(formatGoCommand);
     context.subscriptions.push(formatRustCommand);
+    context.subscriptions.push(formatRubyCommand);
+}
+
+/**
+ * Handle Ruby formatting and validation
+ */
+async function handleRuby(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Ruby using custom resilient validator
+    validationMessage = validateRuby(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+
+        // Keywords that start a block
+        const blockOpeners = /^(class|module|def|begin|case|if|unless|while|until|for)\b/;
+        // Keywords that end a block
+        const blockClosers = /^end\b/;
+        // Keywords that are middle of a block
+        const blockIntermediates = /^(elsif|else|when|rescue|ensure)\b/;
+        // 'do' at the end of a line (common for blocks)
+        const doAtEnd = /\bdo\b(\s*\|.*\|)?\s*$/;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Adjust indent for the current line if it's a closer or intermediate
+            let currentIndent = indentLevel;
+            if (blockClosers.test(trimmed) || blockIntermediates.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation (Ruby uses 2 spaces)
+            formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+            // Calculate indentation for the NEXT line
+            let nextIndent = indentLevel;
+
+            // If line starts with an opener or ends with 'do', increment indent
+            // We check if it starts with an opener to avoid modifier if/unless
+            if (blockOpeners.test(trimmed) || doAtEnd.test(trimmed) || blockIntermediates.test(trimmed)) {
+                nextIndent = currentIndent + 1;
+            } else if (blockClosers.test(trimmed)) {
+                nextIndent = Math.max(0, indentLevel - 1);
+            }
+
+            indentLevel = nextIndent;
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Ruby: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Ruby has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Ruby formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Ruby validator
+ */
+function validateRuby(text: string): string | undefined {
+    const stack: { word: string, line: number }[] = [];
+    const lines = text.split('\n');
+
+    const openers = ['class', 'module', 'def', 'begin', 'case', 'if', 'unless', 'while', 'until', 'for'];
+    const intermediates = ['elsif', 'else', 'when', 'rescue', 'ensure'];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        let trimmed = line.trim();
+
+        // Remove comments
+        const commentIdx = trimmed.indexOf('#');
+        if (commentIdx !== -1) {
+            trimmed = trimmed.substring(0, commentIdx).trim();
+        }
+
+        if (trimmed === '') {
+            continue;
+        }
+
+        // Split by semicolon for multiple statements on one line
+        const statements = trimmed.split(';');
+        for (const stmt of statements) {
+            const tokens = stmt.trim().split(/\s+/);
+            if (tokens.length === 0 || tokens[0] === '') {
+                continue;
+            }
+
+            // Check if the statement starts with an opener
+            const firstToken = tokens[0].replace(/[^a-z]/g, ''); // Simple cleanup
+
+            if (openers.includes(firstToken)) {
+                stack.push({ word: firstToken, line: i + 1 });
+            } else if (firstToken === 'end') {
+                if (stack.length === 0) {
+                    return `Unexpected 'end' at line ${i + 1}`;
+                }
+                stack.pop();
+            } else if (intermediates.includes(firstToken)) {
+                if (stack.length === 0) {
+                    return `Unexpected intermediate keyword '${firstToken}' at line ${i + 1}`;
+                }
+            }
+
+            // Check for 'do' at end of statement
+            if (stmt.trim().endsWith('do') || /\bdo\s*\|.*\|\s*$/.test(stmt.trim())) {
+                stack.push({ word: 'do', line: i + 1 });
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.word}' from line ${last.line}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -2310,7 +2448,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -2382,6 +2520,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleGo(editor, text);
     } else if (format === 'rust') {
         await handleRust(editor, text);
+    } else if (format === 'ruby') {
+        await handleRuby(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -2422,7 +2562,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -2451,6 +2591,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
     if (lang === 'rust' || lang === 'rs') { return 'rust'; }
     if (lang === 'go') { return 'go'; }
+    if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -2634,6 +2775,16 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /#!?\[[a-z_]+\(?.+\)?\]/i.test(trimmed)
     ) {
         return 'rust';
+    }
+
+    // Ruby heuristic
+    if (
+        /^\s*(class|module|def)\s+[A-Z_a-z]/m.test(trimmed) ||
+        /\b(require|include|attr_accessor|attr_reader|attr_writer)\b/.test(trimmed) ||
+        (/^\s*#/.test(trimmed) && /\b(def|class|end)\b/.test(text)) ||
+        (trimmed.includes('do') && trimmed.includes('end'))
+    ) {
+        return 'ruby';
     }
 
     // Go heuristic

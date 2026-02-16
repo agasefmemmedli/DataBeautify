@@ -232,3 +232,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('rust', 'rs') with content-based heuristics. Looked for Rust-specific markers: keywords (`fn`, `mod`, `pub`, `impl`, `trait`), macros (`println!`, `vec!`), `match` blocks with `=>` arms, and attribute patterns like `#[derive(...)]`. This ensures high confidence in identifying Rust files even without the correct extension.
+
+## Ruby Support (v0.19.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient structural validator for Ruby. Given Ruby's dynamic nature and lack of a lightweight, standalone JS-based AST parser that handles syntax errors gracefully, a keyword-based block tracker was chosen.
+- **Resilient Validation:** The validator tracks the balance of block-opening keywords (`class`, `module`, `def`, `begin`, `do`, `case`, `if`, `unless`, `while`, `until`, `for`) and the `end` keyword. It uses a heuristic to distinguish between `if/unless/while/until` as block openers vs. modifiers by checking if they appear at the start of a trimmed line.
+- **Recovery:** Developed a custom resilient line-by-line formatter. It maintains an `indentLevel` (using 2 spaces as per Ruby standards) by adjusting for block openers, closers (`end`), and intermediates (`elsif`, `else`, `when`, `rescue`, `ensure`). Intermediates are out-dented for the current line and re-indented for the subsequent content, ensuring a structured output even for partially broken snippets.
+- **Error Reporting:** Structural issues like unclosed blocks or unexpected `end` keywords are reported as VS Code warnings, fulfilling the requirement to surface errors while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('ruby', 'rb') with content-based heuristics. Looked for Ruby-specific markers: keywords at the start of lines (`class`, `module`, `def`), common library calls (`require`, `include`), attribute macros (`attr_accessor`, etc.), and the presence of `do...end` blocks. It also identifies Ruby by the combination of `#` comments and specific keywords, ensuring reliable detection even without a standard extension.

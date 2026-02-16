@@ -1,6 +1,6 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go and Rust files.
+A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go, Rust and Ruby files.
 
 ## Features
 
@@ -31,7 +31,8 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 - 🎨 Format C++ files with proper indentation
 - 🎨 Format Go files with proper indentation
 - 🎨 Format Rust files with proper indentation
-- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go or Rust)
+- 🎨 Format Ruby files with proper indentation
+- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go, Rust or Ruby)
 - 🛠️ Smart repair: Fixes minor errors in supported formats while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
@@ -41,7 +42,7 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 
 ### Formatting Supported Languages
 
-1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go or Rust file
+1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, C#, C++, Go, Rust or Ruby file
 2. Use one of the following methods:
    - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"
