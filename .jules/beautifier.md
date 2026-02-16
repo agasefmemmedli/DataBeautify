@@ -310,3 +310,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('powershell') with content-based heuristics. Looked for PowerShell-specific markers: shebangs containing 'powershell', Verb-Noun patterns (Get-, Set-, Write-), variables ($prefix), keywords (param, begin, process, end, workflow), and unique delimiters like <# or here-string markers (@", @'). This ensures high confidence in identifying PowerShell files even without the .ps1 extension.
+
+## Terraform/HCL Support (v0.26.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for HCL. This tracks balanced braces ({}), parentheses (()), and brackets ([]).
+- **Special Case - Interpolation:** Added support for HCL's string interpolation ${...}. The validator tracks the interpolation depth to correctly return from NORMAL state to STRING state, similar to the logic used for Dart and Swift.
+- **Special Case - Heredocs:** Implemented support for HCL heredocs (<<EOF ... EOF). The validator and formatter identify the start marker and preserve all content until the end marker is found at the start of a line.
+- **Recovery:** Developed a custom resilient line-by-line formatter (standardizing 2-space indentation). It tracks indentLevel based on structural characters while being aware of comments (#, //, /* */), strings, and heredocs.
+- **Error Reporting:** Structural issues like mismatched braces or unclosed strings/heredocs are reported as VS Code warnings, fulfilling the requirement to surface errors while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('terraform', 'hcl', 'terraform-vars') with content-based heuristics. Looked for HCL-specific keywords (resource, variable, data, module, locals, terraform, provider) followed by block definitions. This ensures high confidence in identifying HCL files even without the correct extension.
