@@ -152,6 +152,56 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatRustCommand);
     context.subscriptions.push(formatRubyCommand);
     context.subscriptions.push(formatSwiftCommand);
+
+    let formatDartCommand = vscode.commands.registerCommand('beautify-format.formatDart', () => {
+        beautify('dart');
+    });
+    context.subscriptions.push(formatDartCommand);
+}
+
+/**
+ * Handle Dart formatting and validation
+ */
+async function handleDart(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Dart using custom resilient validator
+    validationMessage = validateDart(text);
+
+    /* eslint-disable */
+    try {
+        // Format Dart (using js-beautify's JS formatter which handles Dart well)
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Dart: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Dart has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Dart formatted successfully!');
+    }
 }
 
 /**
@@ -430,6 +480,135 @@ function validateRuby(text: string): string | undefined {
     if (stack.length > 0) {
         const last = stack.pop()!;
         return `Unclosed '${last.word}' from line ${last.line}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Validate Dart code for basic structural errors
+ */
+function validateDart(text: string): string | undefined {
+    const braceStack: { char: string, line: number, col: number, isInterpolation?: boolean }[] = [];
+    let stateStack: ('STRING' | 'MULTILINE_STRING' | 'NORMAL')[] = ['NORMAL'];
+    let stringChar = ''; // ' or "
+    let isRaw = false;
+    let blockCommentLevel = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+            const nextNextChar = line[j + 2];
+            const currentState = stateStack[stateStack.length - 1];
+
+            if (blockCommentLevel > 0) {
+                if (char === '*' && nextChar === '/') {
+                    blockCommentLevel--;
+                    j++;
+                } else if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    j++;
+                }
+                continue;
+            }
+
+            if (currentState === 'MULTILINE_STRING') {
+                if (char === stringChar && nextChar === stringChar && nextNextChar === stringChar) {
+                    stateStack.pop();
+                    j += 2;
+                    isRaw = false;
+                }
+                continue;
+            }
+
+            if (currentState === 'STRING') {
+                if (char === '\\' && !isRaw) {
+                    j++; // Escape sequence
+                } else if (char === '$' && !isRaw) {
+                    if (nextChar === '{') {
+                        braceStack.push({ char: '{', line: i, col: j + 1, isInterpolation: true });
+                        stateStack.push('NORMAL');
+                        j++;
+                    }
+                } else if (char === stringChar) {
+                    stateStack.pop();
+                    isRaw = false;
+                }
+                continue;
+            }
+
+            // NORMAL state
+            if (char === '/' && nextChar === '/') {
+                // Line comment
+                break;
+            }
+            if (char === '/' && nextChar === '*') {
+                blockCommentLevel++;
+                j++;
+                continue;
+            }
+
+            // Strings
+            let currentIsRaw = false;
+            let checkIdx = j;
+            if (char === 'r' && (nextChar === "'" || nextChar === '"')) {
+                currentIsRaw = true;
+                checkIdx = j + 1;
+            }
+
+            const checkChar = line[checkIdx];
+            const checkNextChar = line[checkIdx + 1];
+            const checkNextNextChar = line[checkIdx + 2];
+
+            if (checkChar === "'" || checkChar === '"') {
+                stringChar = checkChar;
+                isRaw = currentIsRaw;
+                if (checkNextChar === stringChar && checkNextNextChar === stringChar) {
+                    stateStack.push('MULTILINE_STRING');
+                    j = checkIdx + 2;
+                } else {
+                    stateStack.push('STRING');
+                    j = checkIdx;
+                }
+                continue;
+            }
+
+            if (char === '{' || char === '(' || char === '[') {
+                braceStack.push({ char, line: i, col: j });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (braceStack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = braceStack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closure for '${last.char}' from line ${last.line + 1}, col ${last.col + 1})`;
+                }
+                if (char === '}' && last.isInterpolation) {
+                    stateStack.pop(); // Return from NORMAL (inside interpolation) to STRING
+                }
+            }
+        }
+    }
+
+    if (blockCommentLevel > 0) {
+        return "Unclosed block comment";
+    }
+    const lastState = stateStack.pop();
+    if (lastState === 'MULTILINE_STRING') {
+        return "Unclosed multiline string";
+    }
+    if (lastState === 'STRING') {
+        return "Unclosed string literal";
+    }
+
+    if (braceStack.length > 0) {
+        const last = braceStack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line + 1}, col ${last.col + 1}`;
     }
 
     return undefined;
@@ -2857,7 +3036,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -2935,6 +3114,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleRuby(editor, text);
     } else if (format === 'swift') {
         await handleSwift(editor, text);
+    } else if (format === 'dart') {
+        await handleDart(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -2975,7 +3156,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -3007,6 +3188,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'go') { return 'go'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
+    if (lang === 'dart') { return 'dart'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -3245,6 +3427,17 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^\s*(@main|@UIApplicationMain|@NSApplicationMain)\b/m.test(trimmed)
     ) {
         return 'swift';
+    }
+
+    // Dart heuristic
+    if (
+        /^\s*import\s+['"](dart:|package:|.*\.dart)/m.test(trimmed) ||
+        /\bvoid\s+main\s*\(\)/.test(trimmed) ||
+        /@override\b/.test(trimmed) ||
+        /^\s*(class|mixin|extension)\s+[A-Z_a-z]/m.test(trimmed) ||
+        /\b(final|const|late|var|dynamic)\s+[A-Z_a-z_][A-Za-z0-9_]*\b/.test(trimmed)
+    ) {
+        return 'dart';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
