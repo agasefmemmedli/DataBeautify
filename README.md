@@ -1,5 +1,3 @@
-PowerShell (.ps1) — автоматизация в Windows.
-
 Terraform / HCL (.tf, .tfvars) — инфраструктура как код.
 
 Makefile (Makefile) — автоматизация сборки.
