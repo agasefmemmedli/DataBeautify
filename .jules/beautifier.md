@@ -288,3 +288,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('dockerfile') with content-based heuristics. Looked for common Dockerfile instructions at the start of lines (case-insensitive): `FROM`, `RUN`, `COPY`, `ADD`, `WORKDIR`, `EXPOSE`, `ENTRYPOINT`, `CMD`, `ENV`, `ARG`, `LABEL`, `USER`, `VOLUME`, `STOPSIGNAL`, `HEALTHCHECK`, `ONBUILD`, `MAINTAINER`, `SHELL`. This ensures high confidence in identifying Dockerfiles even without the standard name.
+
+## Shell Script Support (v0.24.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient structural validator for Shell Script. This handles balanced keywords (`if/fi`, `for/done`, etc.) and braces/parentheses.
+- **Recovery:** Developed a custom resilient line-by-line formatter. It maintains an `indentLevel` by adjusting for block openers, closers, and intermediates (`then`, `do`, `else`, `elif`, `;;`). Intermediates are out-dented for the current line and re-indented for the subsequent content. It also includes support for Heredocs to prevent corrupting their content.
+- **Error Reporting:** Structural issues like unclosed blocks or mismatched keywords are reported as VS Code warnings, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('shellscript', 'sh') with content-based heuristics. Looked for shebangs (`#!`) at the start of the file or Shell-specific keywords (`export`, `alias`, `source`, `shopt`) and patterns (`if [[`, `case $... in`). This ensures reliable identification of Shell scripts even without the `.sh` extension.
