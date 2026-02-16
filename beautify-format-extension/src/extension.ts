@@ -101,6 +101,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatJavaCommand = vscode.commands.registerCommand('beautify-format.formatJava', () => {
         beautify('java');
     });
+    let formatKotlinCommand = vscode.commands.registerCommand('beautify-format.formatKotlin', () => {
+        beautify('kotlin');
+    });
     let formatCSharpCommand = vscode.commands.registerCommand('beautify-format.formatCSharp', () => {
         beautify('csharp');
     });
@@ -142,6 +145,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatGraphQLCommand);
     context.subscriptions.push(formatPythonCommand);
     context.subscriptions.push(formatJavaCommand);
+    context.subscriptions.push(formatKotlinCommand);
     context.subscriptions.push(formatCSharpCommand);
     context.subscriptions.push(formatCPPCommand);
     context.subscriptions.push(formatGoCommand);
@@ -426,6 +430,106 @@ function validateRuby(text: string): string | undefined {
     if (stack.length > 0) {
         const last = stack.pop()!;
         return `Unclosed '${last.word}' from line ${last.line}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Validate Kotlin code for basic structural errors
+ */
+function validateKotlin(text: string): string | undefined {
+    const braceStack: { char: string, line: number, col: number }[] = [];
+    let stateStack: ('STRING' | 'MULTILINE_STRING' | 'NORMAL')[] = ['NORMAL'];
+    let blockCommentLevel = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+            const nextNextChar = line[j + 2];
+            const currentState = stateStack[stateStack.length - 1];
+
+            if (blockCommentLevel > 0) {
+                if (char === '*' && nextChar === '/') {
+                    blockCommentLevel--;
+                    j++;
+                } else if (char === '/' && nextChar === '*') {
+                    blockCommentLevel++;
+                    j++;
+                }
+                continue;
+            }
+
+            if (currentState === 'MULTILINE_STRING') {
+                if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                    stateStack.pop();
+                    j += 2;
+                }
+                continue;
+            }
+
+            if (currentState === 'STRING') {
+                if (char === '\\') {
+                    j++; // Escape sequence
+                } else if (char === '"') {
+                    stateStack.pop();
+                }
+                continue;
+            }
+
+            // NORMAL state
+            if (char === '/' && nextChar === '/') {
+                // Line comment
+                break;
+            }
+            if (char === '/' && nextChar === '*') {
+                blockCommentLevel++;
+                j++;
+                continue;
+            }
+            if (char === '"' && nextChar === '"' && nextNextChar === '"') {
+                stateStack.push('MULTILINE_STRING');
+                j += 2;
+                continue;
+            }
+            if (char === '"') {
+                stateStack.push('STRING');
+                continue;
+            }
+
+            if (char === '{' || char === '(' || char === '[') {
+                braceStack.push({ char, line: i, col: j });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (braceStack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = braceStack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closure for '${last.char}' from line ${last.line + 1}, col ${last.col + 1})`;
+                }
+            }
+        }
+    }
+
+    if (blockCommentLevel > 0) {
+        return "Unclosed block comment";
+    }
+    const lastState = stateStack.pop();
+    if (lastState === 'MULTILINE_STRING') {
+        return "Unclosed multiline string";
+    }
+    if (lastState === 'STRING') {
+        return "Unclosed string literal";
+    }
+
+    if (braceStack.length > 0) {
+        const last = braceStack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line + 1}, col ${last.col + 1}`;
     }
 
     return undefined;
@@ -1482,6 +1586,51 @@ function validateCSharp(text: string): string | undefined {
     }
 
     return undefined;
+}
+
+/**
+ * Handle Kotlin formatting and validation
+ */
+async function handleKotlin(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Kotlin using custom resilient validator
+    validationMessage = validateKotlin(text);
+
+    /* eslint-disable */
+    try {
+        // Format Kotlin (using js-beautify's JS formatter which handles Kotlin well)
+        formatted = jsbeautify.js(text, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Kotlin: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Kotlin has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Kotlin formatted successfully!');
+    }
 }
 
 /**
@@ -2708,7 +2857,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -2772,6 +2921,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handlePython(editor, text);
     } else if (format === 'java') {
         await handleJava(editor, text);
+    } else if (format === 'kotlin') {
+        await handleKotlin(editor, text);
     } else if (format === 'csharp') {
         await handleCSharp(editor, text);
     } else if (format === 'cpp') {
@@ -2824,7 +2975,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -2849,6 +3000,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'graphql') { return 'graphql'; }
     if (lang === 'python') { return 'python'; }
     if (lang === 'java') { return 'java'; }
+    if (lang === 'kotlin' || lang === 'kt' || lang === 'kts') { return 'kotlin'; }
     if (lang === 'csharp') { return 'csharp'; }
     if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
     if (lang === 'rust' || lang === 'rs') { return 'rust'; }
@@ -3017,6 +3169,15 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /^\s*package\s+[a-z0-9_.]+\s*;/m.test(trimmed)
     ) {
         return 'java';
+    }
+
+    // Kotlin heuristic
+    if (
+        /^\s*(fun|val|var|package|import|class|interface|object)\b/m.test(trimmed) ||
+        /\b(companion\s+object|when\s*\(|->)\b/.test(trimmed) ||
+        /:\s*(String|Int|Long|Double|Float|Boolean|Any|Unit)\b/.test(trimmed)
+    ) {
+        return 'kotlin';
     }
 
     // C# heuristic
