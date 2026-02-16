@@ -123,6 +123,10 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('swift');
     });
 
+    let formatMakefileCommand = vscode.commands.registerCommand('beautify-format.formatMakefile', () => {
+        beautify('makefile');
+    });
+
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
     context.subscriptions.push(formatCSSCommand);
@@ -152,6 +156,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatRustCommand);
     context.subscriptions.push(formatRubyCommand);
     context.subscriptions.push(formatSwiftCommand);
+    context.subscriptions.push(formatMakefileCommand);
 
     let formatDartCommand = vscode.commands.registerCommand('beautify-format.formatDart', () => {
         beautify('dart');
@@ -177,6 +182,141 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('hcl');
     });
     context.subscriptions.push(formatHCLCommand);
+}
+
+/**
+ * Handle Makefile formatting and validation
+ */
+async function handleMakefile(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Makefile
+    validationMessage = validateMakefile(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let inRecipe = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
+
+            if (trimmedLine === '') {
+                formattedLines.push('');
+                inRecipe = false;
+                continue;
+            }
+
+            if (trimmedLine.startsWith('#')) {
+                // Keep comments as they are but trim trailing whitespace
+                formattedLines.push(line.trimEnd());
+                continue;
+            }
+
+            // In Makefiles, any line starting with a tab is part of a recipe
+            if (line.startsWith('\t')) {
+                formattedLines.push('\t' + trimmedLine);
+                inRecipe = true;
+                continue;
+            }
+
+            // Not starting with a tab, so it's a top-level construct
+
+            // Check for assignment: KEY op VALUE
+            // ops: =, :=, ::=, +=, ?=, !=
+            const assignmentMatch = trimmedLine.match(/^([a-zA-Z0-9._-]+)\s*(\?=|:=|::=|\+=|!=|=)\s*(.*)$/);
+            if (assignmentMatch) {
+                const [, key, op, value] = assignmentMatch;
+                formattedLines.push(`${key} ${op} ${value.trim()}`);
+                inRecipe = false;
+                continue;
+            }
+
+            // Check for target definition: target: dependencies
+            if (trimmedLine.includes(':')) {
+                const colonIdx = trimmedLine.indexOf(':');
+                const targetPart = trimmedLine.substring(0, colonIdx).trim();
+                const depsPart = trimmedLine.substring(colonIdx + 1).trim();
+                formattedLines.push(`${targetPart}: ${depsPart}`);
+                inRecipe = true; // Subsequent indented lines are recipes
+                continue;
+            }
+
+            // Directives (include, ifeq, etc.) or unknown
+            // If it was indented but not with a tab, and we were in a recipe, maybe force it?
+            // "Readability is King" - if it looks like a recipe line but missing a tab
+            if (inRecipe && (line.startsWith(' ') || /^[a-z0-9]/i.test(trimmedLine))) {
+                // This is risky if it's actually another target but without a colon (unlikely)
+                // or a directive that the user forgot to unindent.
+                // Let's stick to being safe: if it doesn't have a colon and we were in a recipe,
+                // and it's not a known directive, assume it's a recipe.
+                const directives = /^(include|sinclude|-include|ifdef|ifndef|ifeq|ifneq|else|endif|vpath|export|unexport|override|undefine|define|endef)\b/;
+                if (!directives.test(trimmedLine)) {
+                    formattedLines.push('\t' + trimmedLine);
+                    continue;
+                }
+            }
+
+            // Default fallback
+            formattedLines.push(trimmedLine);
+            inRecipe = false;
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Makefile: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Makefile has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Makefile formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Makefile validator
+ */
+function validateMakefile(text: string): string | undefined {
+    const lines = text.split('\n');
+    let hasTarget = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+        if (line.startsWith(' ')) {
+            // Makefile recipes MUST start with a TAB, not spaces
+            return `Line ${i + 1} starts with spaces. Makefile recipes must start with a TAB character.`;
+        }
+
+        if (trimmed.includes(':')) {
+            if (line.startsWith('\t')) {
+                // This might be okay if it's a command that happens to have a colon,
+                // but usually targets shouldn't be indented.
+            } else {
+                hasTarget = true;
+            }
+        }
+
+        if (line.startsWith('\t') && !hasTarget) {
+            return `Recipe at line ${i + 1} defined before any target.`;
+        }
+    }
+
+    if (!hasTarget && text.trim().length > 0) {
+        // A Makefile without targets might be just variables, which is technically okay but often a sign of incompleteness if intended as a script.
+        // But let's be lenient.
+    }
+
+    return undefined;
 }
 
 /**
@@ -3873,7 +4013,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -3961,6 +4101,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handlePowerShell(editor, text);
     } else if (format === 'hcl') {
         await handleHCL(editor, text);
+    } else if (format === 'makefile') {
+        await handleMakefile(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4001,7 +4143,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4035,6 +4177,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
     if (lang === 'terraform' || lang === 'hcl' || lang === 'terraform-vars') { return 'hcl'; }
+    if (lang === 'makefile') { return 'makefile'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4323,6 +4466,15 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         (/^\s*[a-z0-9_-]+\s*\{/i.test(trimmed) && trimmed.includes('}') && trimmed.includes('=') && !trimmed.includes(';') && !trimmed.includes(':'))
     ) {
         return 'hcl';
+    }
+
+    // Makefile heuristic
+    if (
+        /^([a-z0-9_-]+):/im.test(trimmed) ||
+        (/^\t[a-z0-9_-]+/im.test(text) && trimmed.includes(':')) ||
+        /^[A-Z_]+ = /m.test(trimmed)
+    ) {
+        return 'makefile';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
