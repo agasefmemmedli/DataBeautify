@@ -1,5 +1,3 @@
-Shell Script (.sh) — скрипты Bash/Zsh.
-
 PowerShell (.ps1) — автоматизация в Windows.
 
 Terraform / HCL (.tf, .tfvars) — инфраструктура как код.

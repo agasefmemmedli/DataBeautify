@@ -162,6 +162,198 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('dockerfile');
     });
     context.subscriptions.push(formatDockerfileCommand);
+
+    let formatShellCommand = vscode.commands.registerCommand('beautify-format.formatShell', () => {
+        beautify('shell');
+    });
+    context.subscriptions.push(formatShellCommand);
+}
+
+/**
+ * Handle Shell Script formatting and validation
+ */
+async function handleShell(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Shell using custom resilient validator
+    validationMessage = validateShell(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inHeredoc = false;
+        let heredocDelimiter = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inHeredoc) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle Heredoc
+            if (inHeredoc) {
+                formattedLines.push(line);
+                if (trimmed === heredocDelimiter) {
+                    inHeredoc = false;
+                }
+                continue;
+            }
+
+            const heredocMatch = line.match(/<<-?\s*["']?([A-Z0-9_]+)["']?/i);
+            if (heredocMatch) {
+                inHeredoc = true;
+                heredocDelimiter = heredocMatch[1];
+            }
+
+            // Indentation adjustment
+            const closers = /^(fi|done|esac|\}|\]|\]\])\b|^(\)\s*$)/;
+            const intermediates = /^(then|do|else|elif|;;)\b/;
+
+            let currentIndent = indentLevel;
+            if (closers.test(trimmed) || intermediates.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation
+            formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+            // Calculate indent for NEXT line
+            const openers = /^(if|for|while|until|case)\b|(\{|\(|\[|\[\[)$/;
+            const isOpener = openers.test(trimmed);
+            const isCloser = closers.test(trimmed);
+
+            // Special check for 'then' or 'do' at end of line
+            const endsWithOpener = /[; \t](then|do)$/.test(trimmed);
+
+            if (isOpener || endsWithOpener || intermediates.test(trimmed)) {
+                indentLevel = currentIndent + 1;
+            } else if (isCloser) {
+                indentLevel = Math.max(0, currentIndent);
+            } else if (trimmed.endsWith(')')) {
+                // Potential case pattern
+                indentLevel = currentIndent + 1;
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Shell: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Shell Script has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Shell Script formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Shell validator
+ */
+function validateShell(text: string): string | undefined {
+    const stack: { word: string, line: number }[] = [];
+    const lines = text.split('\n');
+    let inString = false;
+    let stringChar = '';
+    let inHeredoc = false;
+    let heredocDelimiter = '';
+
+    const openers = ['if', 'for', 'while', 'until', 'case'];
+    const closers: { [key: string]: string } = {
+        'if': 'fi',
+        'for': 'done',
+        'while': 'done',
+        'until': 'done',
+        'case': 'esac'
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        let trimmed = line.trim();
+
+        if (inHeredoc) {
+            if (trimmed === heredocDelimiter) {
+                inHeredoc = false;
+            }
+            continue;
+        }
+
+        const heredocMatch = line.match(/<<-?\s*["']?([A-Z0-9_]+)["']?/i);
+        if (heredocMatch) {
+            inHeredoc = true;
+            heredocDelimiter = heredocMatch[1];
+        }
+
+        // Simple string tracking
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            if ((char === '"' || char === "'") && (j === 0 || line[j - 1] !== '\\')) {
+                if (!inString) {
+                    inString = true;
+                    stringChar = char;
+                } else if (char === stringChar) {
+                    inString = false;
+                }
+            }
+        }
+
+        if (inString) continue;
+
+        // Remove comments
+        const commentIdx = trimmed.indexOf('#');
+        if (commentIdx !== -1) {
+            trimmed = trimmed.substring(0, commentIdx).trim();
+        }
+
+        if (trimmed === '') continue;
+
+        const tokens = trimmed.split(/\s+|;/);
+        for (const token of tokens) {
+            if (openers.includes(token)) {
+                stack.push({ word: token, line: i + 1 });
+            } else if (Object.values(closers).includes(token)) {
+                if (stack.length === 0) {
+                    return `Unexpected '${token}' at line ${i + 1}`;
+                }
+                const last = stack.pop()!;
+                if (closers[last.word] !== token) {
+                    return `Mismatched '${token}' at line ${i + 1} (expected closure for '${last.word}' from line ${last.line})`;
+                }
+            } else if (token === '{' || token === '(') {
+                stack.push({ word: token, line: i + 1 });
+            } else if (token === '}' || token === ')') {
+                if (stack.length === 0) {
+                    // Ignore lone ')' as it might be a case pattern
+                    if (token === '}') return `Unexpected '}' at line ${i + 1}`;
+                    continue;
+                }
+                const last = stack.pop()!;
+                if ((token === '}' && last.word !== '{') || (token === ')' && last.word !== '(')) {
+                    // Again, if it's ')' it might be a case pattern, so be careful
+                    if (token === '}') return `Mismatched '}' at line ${i + 1}`;
+                    // If it was '(', then it's a mismatch. But if last was something else, maybe ignore?
+                    // Let's keep it simple.
+                }
+            }
+        }
+    }
+
+    if (inString) return "Unclosed string literal";
+    if (inHeredoc) return "Unclosed heredoc";
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.word}' from line ${last.line}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -3161,7 +3353,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -3243,6 +3435,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleDart(editor, text);
     } else if (format === 'dockerfile') {
         await handleDockerfile(editor, text);
+    } else if (format === 'shell') {
+        await handleShell(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -3283,7 +3477,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -3315,7 +3509,9 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'go') { return 'go'; }
     if (lang === 'ruby' || lang === 'rb') { return 'ruby'; }
     if (lang === 'swift') { return 'swift'; }
-    if (lang === 'dart' || lang === 'dockerfile') { return lang as any; }
+    if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
+        return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
+    }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -3572,6 +3768,15 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^\s*(FROM|RUN|COPY|ADD|WORKDIR|EXPOSE|ENTRYPOINT|CMD|ENV|ARG|LABEL|USER|VOLUME|STOPSIGNAL|HEALTHCHECK|ONBUILD|MAINTAINER|SHELL)\b/i.test(trimmed)
     ) {
         return 'dockerfile';
+    }
+
+    // Shell heuristic
+    if (
+        trimmed.startsWith('#!') ||
+        /^\s*(export|alias|source|unset|readonly|shopt)\b/m.test(trimmed) ||
+        /\b(if\s+\[\[|if\s+\[|case\s+\$.+\s+in)\b/.test(trimmed)
+    ) {
+        return 'shell';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
