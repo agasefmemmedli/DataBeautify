@@ -208,3 +208,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('cpp', 'c') with content-based heuristics. Looked for C++ specific markers: `#include` directives, standard library usage (`std::cout`, `std::vector`, etc.), `using namespace std;`, templates, access modifiers (`public:`, etc.), and class definitions ending with `};`. This provides high confidence while distinguishing C++ from other brace-based languages.
+
+## Go Support (v0.17.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for Go. This tracks balanced braces (`{}`), parentheses (`()`), and brackets (`[]`), while being state-aware for line comments (`//`), block comments (`/* */`), double-quoted strings (`\"`), and backtick raw strings (` ` `).
+- **Recovery:** Developed a custom resilient line-by-line formatter. This approach ensures that even with syntax errors, the tool can provide a structured output.
+- **Resilient Formatting:** The formatter tracks `indentLevel` based on braces and other opening/closing characters. It implements `extraIndent` logic for `case` and `default` labels to correctly indent subsequent code within `switch` and `select` blocks. It also normalizes spacing around the `:=` operator and ensures a space before opening braces, fulfilling the \"readability is king\" philosophy.
+- **Error Reporting:** Syntax errors identified by the validator (e.g., mismatched braces or unclosed strings) are reported as VS Code warning messages, surfacing the first identified issue while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('go') with content-based heuristics. Looked for Go-specific markers: `package` and `func` keywords at the start of lines, `import` blocks, `go func` goroutines, channel operations (`chan`), `select` blocks, and the `:=` assignment operator. This ensures high confidence in identifying Go files even without the correct extension.

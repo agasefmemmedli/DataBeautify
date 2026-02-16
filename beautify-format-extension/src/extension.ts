@@ -107,6 +107,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatCPPCommand = vscode.commands.registerCommand('beautify-format.formatCPP', () => {
         beautify('cpp');
     });
+    let formatGoCommand = vscode.commands.registerCommand('beautify-format.formatGo', () => {
+        beautify('go');
+    });
 
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
@@ -132,6 +135,137 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatJavaCommand);
     context.subscriptions.push(formatCSharpCommand);
     context.subscriptions.push(formatCPPCommand);
+    context.subscriptions.push(formatGoCommand);
+}
+
+/**
+ * Handle Go formatting and validation
+ */
+async function handleGo(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Go using custom resilient validator
+    validationMessage = validateGo(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let extraIndent = 0;
+        let inRawString = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inRawString) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle backtick raw strings
+            if (inRawString) {
+                formattedLines.push(line);
+                if (trimmed.includes('`')) {
+                    const matches = (trimmed.match(/`/g) || []).length;
+                    if (matches % 2 !== 0) {
+                        inRawString = false;
+                    }
+                }
+                continue;
+            }
+
+            if (trimmed.includes('`')) {
+                const matches = (trimmed.match(/`/g) || []).length;
+                if (matches % 2 !== 0) {
+                    inRawString = true;
+                }
+            }
+
+            // Indentation adjustment for closing braces at the START of the line
+            let leadingClosingCount = 0;
+            let j = 0;
+            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+                leadingClosingCount++;
+                j++;
+            }
+
+            if (leadingClosingCount > 0) {
+                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+                extraIndent = 0;
+            }
+
+            // Handle case and default labels
+            let currentExtraIndent = extraIndent;
+            if (trimmed.startsWith('case ') || trimmed.startsWith('default:')) {
+                currentExtraIndent = 0;
+                extraIndent = 1;
+            }
+
+            // Apply indentation (using 4 spaces as per Go standards often used in editors)
+            let currentLine = '    '.repeat(Math.max(0, indentLevel + currentExtraIndent)) + trimmed;
+
+            // Normalize := operator (ensure space around it)
+            if (currentLine.includes(':=')) {
+                currentLine = currentLine.replace(/\s*:=\s*/g, ' := ');
+            }
+
+            // Ensure space before {
+            if (currentLine.endsWith('{') && !currentLine.endsWith(' {')) {
+                currentLine = currentLine.replace(/\{$/, ' {');
+            }
+
+            formattedLines.push(currentLine);
+
+            // Calculate net brace change for NEXT line, excluding leading closing braces
+            let netChange = 0;
+            let inString = false;
+            let inChar = false;
+            const remaining = trimmed.substring(leadingClosingCount);
+
+            for (let k = 0; k < remaining.length; k++) {
+                const char = remaining[k];
+                if (char === '"' && (k === 0 || remaining[k-1] !== '\\')) {
+                    inString = !inString;
+                    continue;
+                }
+                if (inString) { continue; }
+
+                if (char === "'" && (k === 0 || remaining[k-1] !== '\\')) {
+                    inChar = !inChar;
+                    continue;
+                }
+                if (inChar) { continue; }
+
+                if (char === '/' && remaining[k+1] === '/') { break; }
+                if (char === '/' && remaining[k+1] === '*') { break; }
+
+                if (char === '{' || char === '(' || char === '[') {
+                    netChange++;
+                    extraIndent = 0;
+                }
+                if (char === '}' || char === ')' || char === ']') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Go: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Go has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Go formatted successfully!');
+    }
 }
 
 /**
@@ -260,6 +394,125 @@ function validateCPP(text: string): string | undefined {
                     j = openParenIdx;
                     continue;
                 }
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === "'") {
+                inChar = true;
+                continue;
+            }
+
+            // Braces
+            if (char === '{' || char === '(' || char === '[') {
+                stack.push({ char, line: i + 1, col: j + 1 });
+            } else if (char === '}' || char === ')' || char === ']') {
+                if (stack.length === 0) {
+                    return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
+                }
+                const last = stack.pop()!;
+                if ((char === '}' && last.char !== '{') ||
+                    (char === ')' && last.char !== '(') ||
+                    (char === ']' && last.char !== '[')) {
+                    return `Mismatched closing character '${char}' at line ${i + 1}, col ${j + 1} (expected closing for '${last.char}' from line ${last.line}, col ${last.col})`;
+                }
+            }
+        }
+        inLineComment = false;
+    }
+
+    if (inBlockComment) {
+        return "Unclosed block comment";
+    }
+    if (inRawString) {
+        return "Unclosed raw string literal";
+    }
+    if (inString) {
+        return "Unclosed string literal";
+    }
+    if (inChar) {
+        return "Unclosed character literal";
+    }
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed '${last.char}' from line ${last.line}, col ${last.col}`;
+    }
+
+    return undefined;
+}
+
+/**
+ * Custom resilient Go validator
+ */
+function validateGo(text: string): string | undefined {
+    const stack: { char: string, line: number, col: number }[] = [];
+    let inString = false;
+    let inRawString = false;
+    let inChar = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inLineComment) {
+                break;
+            }
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inRawString) {
+                if (char === '`') {
+                    inRawString = false;
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (char === '\\') {
+                    j++; // Escape sequence
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (inChar) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === "'") {
+                    inChar = false;
+                }
+                continue;
+            }
+
+            // Start of comment
+            if (char === '/' && nextChar === '/') {
+                inLineComment = true;
+                j++;
+                continue;
+            }
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                j++;
+                continue;
+            }
+
+            if (char === '`') {
+                inRawString = true;
+                continue;
             }
 
             if (char === '"') {
@@ -1704,7 +1957,7 @@ async function handleJS(editor: vscode.TextEditor, text: string) {
 /**
  * Main beautify function with auto-detection
  */
-async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp') {
+async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -1772,6 +2025,8 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
         await handleCSharp(editor, text);
     } else if (format === 'cpp') {
         await handleCPP(editor, text);
+    } else if (format === 'go') {
+        await handleGo(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -1812,7 +2067,7 @@ async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css'
 /**
  * Detect format based on language ID or content
  */
-function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'unknown' {
+function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'csharp' | 'cpp' | 'go' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -1839,6 +2094,7 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
     if (lang === 'java') { return 'java'; }
     if (lang === 'csharp') { return 'csharp'; }
     if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
+    if (lang === 'go') { return 'go'; }
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -2012,6 +2268,19 @@ function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml
         /\bConsole\.(WriteLine|Write)\b/.test(trimmed)
     ) {
         return 'csharp';
+    }
+
+    // Go heuristic
+    if (
+        /^\s*package\s+[a-z0-9_]+\b/m.test(trimmed) ||
+        /^\s*func\s+\b/m.test(trimmed) ||
+        /^\s*import\s+(\(|".+")/m.test(trimmed) ||
+        /\bgo\s+func\b/.test(trimmed) ||
+        /\bchan\s+[a-z0-9_]+\b/i.test(trimmed) ||
+        /\bselect\s*\{/.test(trimmed) ||
+        /:=/m.test(trimmed)
+    ) {
+        return 'go';
     }
 
     // C++ heuristic
