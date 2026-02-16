@@ -50,7 +50,8 @@ async function runTests() {
         'dart': 'dart',
         'dockerfile': 'dockerfile',
         'ps1': 'powershell',
-        'tf': 'terraform'
+        'tf': 'terraform',
+        'makefile': 'makefile'
     };
 
     let passed = 0;

@@ -322,3 +322,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('terraform', 'hcl', 'terraform-vars') with content-based heuristics. Looked for HCL-specific keywords (resource, variable, data, module, locals, terraform, provider) followed by block definitions. This ensures high confidence in identifying HCL files even without the correct extension.
+
+## Makefile Support (v0.27.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter and validator for Makefile. This avoids external dependencies and ensures strict adherence to Makefile's tab-based recipe requirements.
+- **Resilient Formatting:** The formatter normalizes targets and variable assignments (`=`, `?=`) to the start of the line with standardized spacing around operators. It ensures that recipe lines (identified by starting with a tab or following a target) start with exactly one tab character, fulfilling the "readability is king" philosophy.
+- **Error Reporting:** Structural issues like recipes starting with spaces instead of tabs or recipes defined before any target are reported as VS Code warnings, while the tool still attempts to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('makefile') with content-based heuristics. Looked for target definitions (`target: dependencies`), variable assignments (`VAR = value`), or lines starting with a tab followed by a command. This ensures high confidence in identifying Makefiles even without the standard name.
