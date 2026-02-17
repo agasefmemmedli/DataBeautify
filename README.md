@@ -1,5 +1,3 @@
-MDX (.mdx) — Markdown с компонентами React.
-
 Log Files (.log) — просмотр логов (форматирование по датам/уровням).
 
 Handlebars (.hbs) — шаблоны.

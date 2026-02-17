@@ -55,7 +55,8 @@ async function runTests() {
         'nginx': 'nginx',
         'sql': 'sql',
         'md': 'markdown',
-        'tex': 'latex'
+        'tex': 'latex',
+        'mdx': 'mdx'
     };
 
     let passed = 0;

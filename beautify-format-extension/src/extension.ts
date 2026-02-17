@@ -216,6 +216,257 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('latex');
     });
     context.subscriptions.push(formatLaTeXCommand);
+
+    let formatMDXCommand = vscode.commands.registerCommand('beautify-format.formatMDX', () => {
+        beautify('mdx');
+    });
+    context.subscriptions.push(formatMDXCommand);
+}
+
+/**
+ * Handle MDX formatting and validation
+ */
+async function handleMDX(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate MDX
+    validationMessage = validateMDX(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let inCodeBlock = false;
+        let inTable = false;
+        let tableRows: string[][] = [];
+        let inFrontmatter = false;
+        let jsxIndentLevel = 0;
+
+        const flushTable = (rows: string[][]) => {
+            if (rows.length === 0) return;
+            const maxWidths: number[] = [];
+            rows.forEach(row => {
+                row.forEach((cell, i) => {
+                    maxWidths[i] = Math.max(maxWidths[i] || 0, cell.trim().length);
+                });
+            });
+
+            rows.forEach((row, rowIndex) => {
+                const isSeparator = rowIndex === 1 && row.every(cell => /^\s*:?-+:?\s*$/.test(cell));
+                const formattedRow = row.map((cell, i) => {
+                    const trimmed = cell.trim();
+                    if (isSeparator) {
+                        const hasLeftColon = trimmed.startsWith(':');
+                        const hasRightColon = trimmed.endsWith(':');
+                        let content = '-'.repeat(Math.max(3, maxWidths[i]));
+                        if (hasLeftColon && hasRightColon) {
+                            content = ':' + '-'.repeat(Math.max(1, maxWidths[i] - 2)) + ':';
+                        } else if (hasLeftColon) {
+                            content = ':' + '-'.repeat(Math.max(2, maxWidths[i] - 1));
+                        } else if (hasRightColon) {
+                            content = '-'.repeat(Math.max(2, maxWidths[i] - 1)) + ':';
+                        }
+                        return content;
+                    }
+                    return ' ' + trimmed.padEnd(maxWidths[i]) + ' ';
+                }).join('|');
+                formattedLines.push('|' + formattedRow + '|');
+            });
+        };
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Frontmatter
+            if (i === 0 && trimmed === '---') {
+                inFrontmatter = true;
+                formattedLines.push(trimmed);
+                continue;
+            }
+            if (inFrontmatter) {
+                formattedLines.push(line);
+                if (trimmed === '---') {
+                    inFrontmatter = false;
+                }
+                continue;
+            }
+
+            // ESM imports/exports
+            if (!inCodeBlock && /^(import|export)\b/.test(trimmed)) {
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            // Code blocks
+            if (trimmed.startsWith('```')) {
+                if (inTable) {
+                    flushTable(tableRows);
+                    tableRows = [];
+                    inTable = false;
+                }
+                inCodeBlock = !inCodeBlock;
+                if (inCodeBlock && formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                formattedLines.push(trimmed);
+                continue;
+            }
+
+            if (inCodeBlock) {
+                formattedLines.push(line);
+                continue;
+            }
+
+            // Tables
+            if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
+                inTable = true;
+                const cells = trimmed.split('|').slice(1, -1);
+                tableRows.push(cells);
+                continue;
+            } else if (inTable) {
+                flushTable(tableRows);
+                tableRows = [];
+                inTable = false;
+            }
+
+            // Empty lines
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // JSX elements
+            if (trimmed.startsWith('<') || trimmed.startsWith('</') || jsxIndentLevel > 0) {
+                // Determine indentation for this line
+                let currentLineIndent = jsxIndentLevel;
+                if (trimmed.startsWith('</') || trimmed.startsWith('/>')) {
+                    currentLineIndent = Math.max(0, jsxIndentLevel - 1);
+                }
+
+                formattedLines.push('  '.repeat(currentLineIndent) + trimmed);
+
+                // Update indent level for next line
+                const openTags = (trimmed.match(/<[a-zA-Z][a-zA-Z0-9]*/g) || []).length;
+                const closeTags = (trimmed.match(/<\/[a-zA-Z][a-zA-Z0-9]*>|\/>/g) || []).length;
+                jsxIndentLevel = Math.max(0, jsxIndentLevel + openTags - closeTags);
+                continue;
+            }
+
+            // Headers
+            if (trimmed.startsWith('#')) {
+                const match = trimmed.match(/^(#+)(.*)$/);
+                if (match) {
+                    const level = match[1];
+                    const content = match[2].trim();
+                    if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                        formattedLines.push('');
+                    }
+                    formattedLines.push(`${level} ${content}`);
+                    continue;
+                }
+            }
+
+            // Lists
+            const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+            if (listMatch) {
+                const indent = listMatch[1];
+                let marker = listMatch[2];
+                if (marker === '*' || marker === '+') marker = '-';
+                const content = listMatch[3].trim();
+                formattedLines.push(`${indent}${marker} ${content}`);
+                continue;
+            }
+
+            // Blockquotes
+            if (trimmed.startsWith('>')) {
+                const content = trimmed.substring(1).trim();
+                formattedLines.push(`> ${content}`);
+                continue;
+            }
+
+            // Regular text
+            formattedLines.push(trimmed);
+        }
+
+        if (inTable) {
+            flushTable(tableRows);
+        }
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format MDX: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`MDX has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('MDX formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient MDX validator
+ */
+function validateMDX(text: string): string | undefined {
+    let inCodeBlock = false;
+    let codeBlockLine = 0;
+    const jsxStack: { tag: string, line: number }[] = [];
+    const lines = text.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('```')) {
+            if (!inCodeBlock) {
+                inCodeBlock = true;
+                codeBlockLine = i + 1;
+            } else {
+                inCodeBlock = false;
+            }
+            continue;
+        }
+
+        if (inCodeBlock) continue;
+
+        // Basic JSX tag tracking
+        const tagMatches = line.matchAll(/<(\/)?([a-zA-Z][a-zA-Z0-9]*)[^>]*(\/)?>/g);
+        for (const match of tagMatches) {
+            const isClosing = match[1] === '/';
+            const tagName = match[2];
+            const isSelfClosing = match[3] === '/';
+
+            if (isSelfClosing) continue;
+
+            if (isClosing) {
+                if (jsxStack.length === 0) {
+                    return `Unexpected closing tag </${tagName}> at line ${i + 1}`;
+                }
+                const last = jsxStack.pop()!;
+                if (last.tag !== tagName) {
+                    return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected </${last.tag}> from line ${last.line})`;
+                }
+            } else {
+                jsxStack.push({ tag: tagName, line: i + 1 });
+            }
+        }
+    }
+
+    if (inCodeBlock) {
+        return `Unclosed code block starting at line ${codeBlockLine}`;
+    }
+
+    if (jsxStack.length > 0) {
+        const last = jsxStack.pop()!;
+        return `Unclosed JSX tag <${last.tag}> starting at line ${last.line}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -5015,7 +5266,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5117,6 +5368,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleMarkdown(editor, text);
     } else if (format === 'latex') {
         await handleLaTeX(editor, text);
+    } else if (format === 'mdx') {
+        await handleMDX(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5157,7 +5410,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5197,6 +5450,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'prisma') { return 'prisma'; }
     if (lang === 'mongodb') { return 'mongodb'; }
     if (lang === 'markdown') { return 'markdown'; }
+    if (lang === 'mdx') { return 'mdx'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -5551,6 +5805,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /\\begin\{[^}]+\}/.test(trimmed)
     ) {
         return 'latex';
+    }
+
+    // MDX heuristic
+    if (
+        (trimmed.startsWith('import ') || trimmed.includes('export const ')) &&
+        (/#\s+.+/.test(trimmed) || /<[A-Z][a-zA-Z0-9]*/.test(trimmed))
+    ) {
+        return 'mdx';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
