@@ -1,0 +1,20 @@
+<div class="entry">
+  {{#if author}}
+    <h1>{{firstName}} {{lastName}}</h1>
+  {{else}}
+    <h1>Unknown Author</h1>
+  {{/if}}
+
+  <ul class="posts">
+    {{#each posts}}
+      <li>{{this.title}}</li>
+    {{/each}}
+  </ul>
+
+  <div class="body">
+    {{{body}}}
+  </div>
+
+  {{! This is a comment }}
+  {{!-- This is also a comment --}}
+</div>

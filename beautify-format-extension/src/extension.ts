@@ -226,6 +226,113 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('log');
     });
     context.subscriptions.push(formatLogCommand);
+
+    let formatHandlebarsCommand = vscode.commands.registerCommand('beautify-format.formatHandlebars', () => {
+        beautify('handlebars');
+    });
+    context.subscriptions.push(formatHandlebarsCommand);
+}
+
+/**
+ * Handle Handlebars formatting and validation
+ */
+async function handleHandlebars(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Handlebars
+    validationMessage = validateHandlebars(text);
+
+    /* eslint-disable */
+    try {
+        // Format Handlebars (using js-beautify's HTML formatter with handlebars templating)
+        const options: any = {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            indent_scripts: 'normal',
+            end_with_newline: false,
+            wrap_line_length: 0,
+            indent_inner_html: false,
+            templating: ['handlebars']
+        };
+        formatted = jsbeautify.html(text, options);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Handlebars: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Handlebars template has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Handlebars template formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Handlebars validator
+ */
+function validateHandlebars(text: string): string | undefined {
+    const stack: { block: string, line: number }[] = [];
+    let braceLevel = 0;
+    let braceStartLine = 0;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Track braces balance (simple check)
+        for (let j = 0; j < line.length; j++) {
+            if (line[j] === '{' && line[j + 1] === '{') {
+                if (braceLevel === 0) {
+                    braceStartLine = i + 1;
+                }
+                braceLevel++;
+                j++; // Skip next {
+            } else if (line[j] === '}' && line[j + 1] === '}') {
+                braceLevel--;
+                j++; // Skip next }
+            }
+        }
+
+        // Track blocks {{#block}} ... {{/block}}
+        // We use a regex that handles #, ^ and / for blocks
+        const matches = line.matchAll(/\{\{\s*([#^/])\s*([a-zA-Z0-9_-]+)/g);
+        for (const match of matches) {
+            const type = match[1];
+            const name = match[2];
+
+            if (type === '#' || type === '^') {
+                stack.push({ block: name, line: i + 1 });
+            } else if (type === '/') {
+                if (stack.length === 0) {
+                    return `Unexpected closing block {{/${name}}} at line ${i + 1}`;
+                }
+                const last = stack.pop()!;
+                if (last.block !== name) {
+                    return `Mismatched closing block {{/${name}}} at line ${i + 1} (expected {{/${last.block}}} from line ${last.line})`;
+                }
+            }
+        }
+    }
+
+    if (braceLevel > 0) {
+        return `Unclosed Handlebars braces starting at line ${braceStartLine}`;
+    }
+    if (braceLevel < 0) {
+        return `Extra closing Handlebars braces found`;
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed Handlebars block {{#${last.block}}} starting at line ${last.line}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -5357,7 +5464,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5463,6 +5570,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleMDX(editor, text);
     } else if (format === 'log') {
         await handleLog(editor, text);
+    } else if (format === 'handlebars') {
+        await handleHandlebars(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5503,7 +5612,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5545,6 +5654,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'markdown') { return 'markdown'; }
     if (lang === 'mdx') { return 'mdx'; }
     if (lang === 'log') { return 'log'; }
+    if (lang === 'handlebars') { return 'handlebars'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -5915,6 +6025,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|TRACE|CRITICAL)\b/i.test(trimmed)
     ) {
         return 'log';
+    }
+
+    // Handlebars heuristic
+    if (
+        (/\{\{\s*[#^/].*\}\}/.test(trimmed)) ||
+        (/\{\{\{?.*\}\}\}?/.test(trimmed))
+    ) {
+        return 'handlebars';
     }
 
     // JavaScript heuristic: common keywords or arrow functions

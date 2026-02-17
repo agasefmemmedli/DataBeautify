@@ -1,7 +1,7 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown and LaTeX files with keyboard shortcuts and context menu",
+  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX and Handlebars files with keyboard shortcuts and context menu",
   "version": "0.31.0",
   "publisher": "DataBeautify",
   "author": {
@@ -86,6 +86,7 @@
     "onCommand:beautify-format.formatLaTeX",
     "onCommand:beautify-format.formatMDX",
     "onCommand:beautify-format.formatLog",
+    "onCommand:beautify-format.formatHandlebars",
     "onLanguage:json",
     "onLanguage:jsonc",
     "onLanguage:xml",
@@ -136,7 +137,8 @@
     "onLanguage:latex",
     "onLanguage:tex",
     "onLanguage:mdx",
-    "onLanguage:log"
+    "onLanguage:log",
+    "onLanguage:handlebars"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -320,6 +322,10 @@
       {
         "command": "beautify-format.formatLog",
         "title": "Beautify Log"
+      },
+      {
+        "command": "beautify-format.formatHandlebars",
+        "title": "Beautify Handlebars"
       }
     ],
     "keybindings": [
@@ -334,7 +340,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log || editorLangId == handlebars",
           "group": "1_modification"
         }
       ]

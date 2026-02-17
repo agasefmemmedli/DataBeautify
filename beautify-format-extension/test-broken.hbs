@@ -1,0 +1,16 @@
+<div class="entry">
+  {{#if author}}
+    <h1>{{firstName}} {{lastName}}</h1>
+  {{! Missing /if }}
+
+  <ul class="posts">
+    {{#each posts}}
+      <li>{{this.title}}</li>
+    {{/each}}
+  </ul>
+
+  <div class="body">
+    {{! Unclosed braces }}
+    {{body
+  </div>
+</div>
