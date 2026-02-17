@@ -47,7 +47,7 @@
 ### Validation & Fault-Tolerance
 - **Decision:** Selected the `typescript` package for validation. Used `ts.createSourceFile` to obtain `parseDiagnostics`, which provides detailed syntax error information (message, line, column).
 - **Recovery:** Reused `js-beautify.js` for formatting. Since TypeScript is a superset of JavaScript, `js-beautify`'s JS formatter handles most TypeScript syntax gracefully and is highly resilient to syntax errors, allowing the tool to produce a readable output even when the input is broken.
-- **Error Reporting:** Syntax errors from `parseDiagnostics` are reported as VS Code warning messages. The first identified error with line/column information is surfaced to the user, fulfilling the fault-tolerant requirement.
+- **Error Reporting:** Syntax errors from `parseDiagnostics` are reported as VS Code warning messages, showing the first identified error's message and location.
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('typescript', 'typescriptreact') with content-based heuristics. Looked for TypeScript-specific keywords (`interface`, `namespace`, `type`, `enum`, `public`, `private`, `protected`, `readonly`, `as`, `implements`) and type annotations (e.g., `: string`, `: number`).
@@ -413,3 +413,35 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('handlebars') with content-based heuristics. Looked for the presence of `{{...}}` delimiters, specifically checking for block helpers like `{{#` and `{{/` to distinguish from simple template strings or other mustache-like dialects. This logic is prioritized to ensure Handlebars files are not misidentified as HTML.
+
+## Twig Support (v0.32.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient stack-based validator for Twig. It tracks balanced Twig blocks (`{% ... %}`) and HTML tags.
+- **Resilient Validation:** The validator reports the first mismatched or unclosed block/tag but allows the formatter to proceed. It distinguishes between Twig blocks and HTML tags to provide specific error messages.
+- **Recovery:** Developed a custom resilient line-by-line formatter. It handles indentation for both Twig blocks and HTML tags.
+- **Formatting Logic:**
+    - Indents on opening blocks (e.g., `{% block ... %}`, `{% if ... %}`).
+    - Dedents on closing blocks (e.g., `{% endblock %}`, `{% endif %}`).
+    - Special handling for `{% else %}` and `{% elseif ... %}`: temporarily dedents the current line to align with the parent block, then indents the subsequent content.
+    - Gracefully handles self-closing tags like `{% set ... = ... %}` and void HTML tags.
+- **Error Reporting:** Unclosed blocks or tags are reported as VS Code warnings, fulfilling the requirement to surface errors while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('twig') with content-based heuristics. Looked for the presence of `{% ... %}` delimiters and specific keywords (`block`, `if`, `for`, `extends`) to reliably distinguish Twig from other template languages like Jinja2 or Nunjucks (though they share similar syntax, the goal is "readability" so treating them as Twig often works).
+
+## Liquid Support (v0.33.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient stack-based validator for Liquid. It tracks balanced Liquid blocks (`{% ... %}`) and HTML tags.
+- **Resilient Validation:** The validator reports the first mismatched or unclosed block/tag but allows the formatter to proceed.
+- **Recovery:** Developed a custom resilient line-by-line formatter. It handles indentation for Liquid blocks (e.g., `{% if %}`, `{% for %}`, `{% capture %}`) and HTML tags.
+- **Formatting Logic:**
+    - Indents on opening blocks (e.g., `{% if %}`, `{% for %}`).
+    - Dedents on closing blocks (e.g., `{% endif %}`, `{% endfor %}`).
+    - Special handling for `{% else %}`, `{% elsif %}`, `{% when %}`: temporarily dedents the current line to align with the parent block, then indents the subsequent content.
+    - Correctly handles comments `{% comment %}...{% endcomment %}` and raw blocks.
+- **Error Reporting:** Unclosed blocks or tags are reported as VS Code warnings, ensuring the user is aware of structure issues while still receiving formatted output.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('liquid') with content-based heuristics. Looked for the presence of `{% ... %}` delimiters and specific Liquid keywords (`assign`, `capture`, `render`, `include`) or filters (`| date:`, `| strip_html`) to distinguish it from other template languages.

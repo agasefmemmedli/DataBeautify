@@ -1,0 +1,23 @@
+{% if user %}
+  Hello {{ user.name }}!
+{% else %}
+  Hello stranger!
+{% endif %}
+
+{% for product in collections.frontpage.products %}
+  {% if product.available %}
+    <h2>{{ product.title }}</h2>
+    <p>{{ product.description | strip_html }}</p>
+  {% endif %}
+{% endfor %}
+
+{% assign my_variable = "Hello World" %}
+{% capture my_content %}
+  This is captured content.
+{% endcapture %}
+
+<div class="product">
+  {% if product.featured_image %}
+    <img src="{{ product.featured_image | img_url: 'medium' }}" alt="{{ product.title }}">
+  {% endif %}
+</div>

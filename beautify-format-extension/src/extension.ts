@@ -236,6 +236,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('twig');
     });
     context.subscriptions.push(formatTwigCommand);
+
+    let formatLiquidCommand = vscode.commands.registerCommand('beautify-format.formatLiquid', () => {
+        beautify('liquid');
+    });
+    context.subscriptions.push(formatLiquidCommand);
 }
 
 /**
@@ -5798,7 +5803,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5908,6 +5913,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleHandlebars(editor, text);
     } else if (format === 'twig') {
         await handleTwig(editor, text);
+    } else if (format === 'liquid') {
+        await handleLiquid(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5948,7 +5955,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5992,6 +5999,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'log') { return 'log'; }
     if (lang === 'handlebars' || lang === 'hbs' || lang === 'mustache') { return 'handlebars'; }
     if (lang === 'twig') { return 'twig'; }
+    if (lang === 'liquid') { return 'liquid'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -6014,6 +6022,11 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     // Twig heuristic
     if (trimmed.includes('{%') && trimmed.includes('%}') && (trimmed.includes('{% block') || trimmed.includes('{% if') || trimmed.includes('{% for') || trimmed.includes('{% extends'))) {
         return 'twig';
+    }
+
+    // Liquid heuristic
+    if (trimmed.includes('{%') && trimmed.includes('%}') && (trimmed.includes('{% assign') || trimmed.includes('{% capture') || trimmed.includes('{% render') || trimmed.includes('{% include') || trimmed.includes('| date:') || trimmed.includes('| strip_html'))) {
+        return 'liquid';
     }
 
     // PHP heuristic
@@ -6686,6 +6699,205 @@ async function applyEdit(editor: vscode.TextEditor, newText: string) {
     await editor.edit(editBuilder => {
         editBuilder.replace(textRange, newText);
     });
+}
+
+/**
+ * Handle Liquid formatting and validation
+ */
+async function handleLiquid(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Liquid
+    validationMessage = validateLiquid(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+
+        // Void tags that don't need closing
+        const voidTags = [
+            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+            'link', 'meta', 'param', 'source', 'track', 'wbr'
+        ];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Check for dedentation triggers at the start of the line
+            let currentIndent = indentLevel;
+
+            // Closing Liquid block: {% endif %}, {% endfor %}, etc.
+            if (/^{%\s*end(if|unless|case|for|tablerow|capture|form|paginate|comment|schema|style|javascript|stylesheet)\b/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Middle Liquid block: {% else %}, {% elsif %}, {% when %}
+            else if (/^{%\s*(else|elsif|when)\b/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Closing HTML tag: </div>
+            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation
+            formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+            // Calculate indentation for the NEXT line
+            let netChange = 0;
+
+            // Remove comments for analysis
+            const lineNoComments = line.replace(/{% comment %}[\s\S]*?{% endcomment %}/g, '').replace(/<!--[\s\S]*?-->/g, '');
+
+            // Check for Liquid block openers/closers
+            // {% if ... %}, {% for ... %}, etc.
+            // Be careful with 'assign', 'increment', 'decrement', 'cycle', 'include', 'render', 'layout', 'section' (self-closing or inline)
+            // Block tags: if, unless, case, for, tablerow, capture, form, paginate, comment, raw, schema, style, javascript, stylesheet
+            const liquidTagRegex = /{%-?\s*([a-zA-Z0-9_]+)([^%]*?)-?%}/g;
+            let liquidMatch;
+            let liquidOpeners = 0;
+            let liquidClosers = 0;
+
+            while ((liquidMatch = liquidTagRegex.exec(lineNoComments)) !== null) {
+                const tagName = liquidMatch[1];
+
+                if (/^end/.test(tagName)) {
+                    liquidClosers++;
+                } else if (/^(if|unless|case|for|tablerow|capture|form|paginate|comment|schema|style|javascript|stylesheet)$/.test(tagName)) {
+                    liquidOpeners++;
+                }
+            }
+
+            // Check for HTML tag openers
+            let htmlOpeners = 0;
+            let htmlClosers = 0;
+
+            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
+            let match;
+            while ((match = tagRegex.exec(lineNoComments)) !== null) {
+                const fullTag = match[0];
+                const tagName = match[1].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isClosing) {
+                    htmlClosers++;
+                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
+                    htmlOpeners++;
+                }
+            }
+
+            netChange = (liquidOpeners - liquidClosers) + (htmlOpeners - htmlClosers);
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Liquid: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Liquid has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Liquid formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Liquid validator
+ */
+function validateLiquid(text: string): string | undefined {
+    const stack: { tag: string, line: number, type: 'liquid' | 'html' }[] = [];
+    const lines = text.split('\n');
+
+    const voidTags = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
+    ];
+
+    // Block tags that need closing
+    const blockTags = [
+        'if', 'unless', 'case', 'for', 'tablerow', 'capture', 'form',
+        'paginate', 'comment', 'schema', 'style', 'javascript', 'stylesheet'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Remove comments (simple heuristic)
+        const lineNoComments = line.replace(/<!--[\s\S]*?-->/g, '');
+
+        // Regex for tags
+        // ({%\s*(block_tag)\b)|({%\s*end(block_tag)\b)|(<\/?([a-zA-Z0-9]+)[^>]*>)
+        const regex = /({%-?\s*([a-zA-Z0-9_]+)[^%]*?-?%})|(<\/?([a-zA-Z0-9]+)[^>]*>)/g;
+        let match;
+
+        while ((match = regex.exec(lineNoComments)) !== null) {
+            if (match[1]) { // Liquid Tag
+                const tagName = match[2];
+
+                if (tagName.startsWith('end')) {
+                    const baseName = tagName.substring(3);
+                    if (stack.length === 0) {
+                        return `Unexpected closing block {% ${tagName} %} at line ${i + 1}`;
+                    }
+                    const last = stack.pop()!;
+                    if (last.type !== 'liquid' || last.tag !== baseName) {
+                        return `Mismatched closing block {% ${tagName} %} at line ${i + 1} (expected {% end${last.tag} %} for ${last.tag} from line ${last.line})`;
+                    }
+                } else if (blockTags.includes(tagName)) {
+                    stack.push({ tag: tagName, line: i + 1, type: 'liquid' });
+                }
+            } else if (match[3]) { // HTML Tag
+                const fullTag = match[3];
+                const tagName = match[4].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isSelfClosing || voidTags.includes(tagName)) {
+                    continue;
+                }
+
+                if (isClosing) {
+                    if (stack.length === 0) {
+                        return `Unexpected closing tag </${tagName}> at line ${i + 1}`;
+                    }
+                    const last = stack.pop()!;
+                    // If we find a Liquid block, it means invalid nesting
+                    if (last.type === 'liquid') {
+                         return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected {% end${last.tag} %} from line ${last.line})`;
+                    }
+                    if (last.tag !== tagName) {
+                        return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected </${last.tag}> from line ${last.line})`;
+                    }
+                } else {
+                    stack.push({ tag: tagName, line: i + 1, type: 'html' });
+                }
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        if (last.type === 'liquid') {
+            return `Unclosed block {% ${last.tag} %} starting at line ${last.line}`;
+        } else {
+            return `Unclosed tag <${last.tag}> starting at line ${last.line}`;
+        }
+    }
+
+    return undefined;
 }
 
 /**

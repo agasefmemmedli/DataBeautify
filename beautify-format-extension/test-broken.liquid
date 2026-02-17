@@ -1,0 +1,17 @@
+{% if user %}
+  Hello {{ user.name }}!
+{% else %}
+  Hello stranger!
+{% endif %}
+
+{% for product in collections.frontpage.products %}
+  {% if product.available %}
+    <h2>{{ product.title }}</h2>
+    <p>{{ product.description | strip_html }}</p>
+
+{% endfor %}
+
+{% assign my_variable = "Hello World" %}
+{% capture my_content %}
+  This is captured content.
+{% endcapture %}

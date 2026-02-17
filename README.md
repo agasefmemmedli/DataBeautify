@@ -1,5 +1,3 @@
-Liquid (.liquid) — шаблоны Shopify/Jekyll.
-
 Jupyter Notebook (.ipynb) — JSON-структура тетрадок Python.
 
 SVG (.svg) — по сути XML, но часто требует специфического сжатия/очистки.
