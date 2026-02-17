@@ -376,3 +376,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('mongodb') with content-based heuristics. Looked for shell-specific commands (`use `, `show collections`, `it`) or interaction with the `db` object (e.g., `db.collection.find`). Also included checks for MongoDB-specific constructors like `ObjectId()` and `ISODate()`. This ensures high confidence in identifying MongoDB scripts even in files without the `.mongodb` extension.
+
+## LaTeX Support (v0.31.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient character-by-character validator for LaTeX. This approach tracks balanced environments (`\begin{...}` and `\end{...}`) and braces (`{}`).
+- **Resilient Validation:** The validator identifies mismatched or unclosed environments and braces, providing clear error messages with line numbers while allowing the beautification process to continue.
+- **Recovery:** Developed a custom resilient line-by-line formatter (standardizing 4-space indentation). It tracks the nesting level of environments to apply proper indentation. It correctly handles lines starting with `\end{...}` by out-denting them for the current line and adjusting for subsequent lines.
+- **Comment Awareness:** Both the validator and formatter are state-aware of LaTeX comments (`%`), ensuring that commands or structural elements within comments do not affect the indentation or validation logic.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('latex', 'tex') with content-based heuristics. Looked for common LaTeX document markers like `\documentclass`, `\begin{document}`, `\usepackage`, or the presence of any `\begin{...}` environment definition. This ensures reliable identification of LaTeX files even without the correct extension.

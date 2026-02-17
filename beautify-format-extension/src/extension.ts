@@ -207,6 +207,154 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('markdown');
     });
     context.subscriptions.push(formatMarkdownCommand);
+
+    let formatLaTeXCommand = vscode.commands.registerCommand('beautify-format.formatLaTeX', () => {
+        beautify('latex');
+    });
+    context.subscriptions.push(formatLaTeXCommand);
+}
+
+/**
+ * Handle LaTeX formatting and validation
+ */
+async function handleLaTeX(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate LaTeX
+    validationMessage = validateLaTeX(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Indentation adjustment for closing environments at the START of the line
+            let currentLineIndent = indentLevel;
+            if (trimmed.startsWith('\\end{')) {
+                currentLineIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation (standard 4 spaces for LaTeX in many editors)
+            formattedLines.push('    '.repeat(Math.max(0, currentLineIndent)) + trimmed);
+
+            // Calculate indent for NEXT line
+            let lineWithoutComment = trimmed;
+            const commentIdx = trimmed.indexOf('%');
+            if (commentIdx !== -1) {
+                // Simple check for escaped %
+                let escaped = false;
+                let k = commentIdx - 1;
+                while (k >= 0 && trimmed[k] === '\\') {
+                    escaped = !escaped;
+                    k--;
+                }
+                if (!escaped) {
+                    lineWithoutComment = trimmed.substring(0, commentIdx);
+                }
+            }
+
+            const beginMatches = lineWithoutComment.match(/\\begin\{[^}]+\}/g) || [];
+            const endMatches = lineWithoutComment.match(/\\end\{[^}]+\}/g) || [];
+            const netChange = beginMatches.length - endMatches.length;
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format LaTeX: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`LaTeX has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('LaTeX formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient LaTeX validator
+ */
+function validateLaTeX(text: string): string | undefined {
+    const stack: { env: string, line: number, col: number }[] = [];
+    const braceStack: { line: number, col: number }[] = [];
+    const lines = text.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+
+            if (char === '%') {
+                break; // Comment starts
+            }
+
+            if (char === '\\') {
+                // Check if it's a structural command
+                const remaining = line.substring(j);
+                if (remaining.startsWith('\\begin{')) {
+                    const endIdx = line.indexOf('}', j + 7);
+                    if (endIdx !== -1) {
+                        const envName = line.substring(j + 7, endIdx);
+                        stack.push({ env: envName, line: i + 1, col: j + 1 });
+                        j = endIdx;
+                        continue;
+                    }
+                } else if (remaining.startsWith('\\end{')) {
+                    const endIdx = line.indexOf('}', j + 5);
+                    if (endIdx !== -1) {
+                        const envName = line.substring(j + 5, endIdx);
+                        if (stack.length === 0) {
+                            return `Unexpected \\end{${envName}} at line ${i + 1}, col ${j + 1}`;
+                        }
+                        const last = stack.pop()!;
+                        if (last.env !== envName) {
+                            return `Mismatched \\end{${envName}} at line ${i + 1}, col ${j + 1} (expected closure for \\begin{${last.env}} from line ${last.line})`;
+                        }
+                        j = endIdx;
+                        continue;
+                    }
+                }
+                // Otherwise it's just a command or escaped char, skip next char
+                j++;
+                continue;
+            }
+
+            // Braces
+            if (char === '{') {
+                braceStack.push({ line: i + 1, col: j + 1 });
+            } else if (char === '}') {
+                if (braceStack.length > 0) {
+                    braceStack.pop();
+                }
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed environment \\begin{${last.env}} starting at line ${last.line}`;
+    }
+
+    if (braceStack.length > 0) {
+        const last = braceStack.pop()!;
+        return `Unclosed brace '{' starting at line ${last.line}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4863,7 +5011,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4963,6 +5111,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleMongoDB(editor, text);
     } else if (format === 'markdown') {
         await handleMarkdown(editor, text);
+    } else if (format === 'latex') {
+        await handleLaTeX(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5003,7 +5153,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5043,6 +5193,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'prisma') { return 'prisma'; }
     if (lang === 'mongodb') { return 'mongodb'; }
     if (lang === 'markdown') { return 'markdown'; }
+    if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -5385,6 +5536,17 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /\bCREATE\s+TABLE\b/im.test(trimmed)
     ) {
         return 'sql';
+    }
+
+    // LaTeX heuristic
+    if (
+        /^\s*\\documentclass\b/m.test(trimmed) ||
+        /^\s*\\begin\{document\}/m.test(trimmed) ||
+        /^\s*\\section\{/m.test(trimmed) ||
+        /^\s*\\usepackage\{/m.test(trimmed) ||
+        /\\begin\{[^}]+\}/.test(trimmed)
+    ) {
+        return 'latex';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
