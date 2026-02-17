@@ -256,6 +256,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('gitconfig');
     });
     context.subscriptions.push(formatGitConfigCommand);
+
+    let formatEditorConfigCommand = vscode.commands.registerCommand('beautify-format.formatEditorConfig', () => {
+        beautify('editorconfig');
+    });
+    context.subscriptions.push(formatEditorConfigCommand);
 }
 
 /**
@@ -333,6 +338,123 @@ function validateIPYNB(text: string): string | undefined {
         }
     } catch (e: any) {
         return `Invalid JSON structure: ${e.message}`;
+    }
+    return undefined;
+}
+
+/**
+ * Handle EditorConfig formatting and validation
+ */
+async function handleEditorConfig(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate EditorConfig
+    validationMessage = validateEditorConfig(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let inSection = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                // Only push empty line if the previous one wasn't empty
+                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                continue;
+            }
+
+            // Comments
+            if (trimmed.startsWith('#') || trimmed.startsWith(';')) {
+                // Comments are usually aligned with the content
+                const indent = inSection ? '  ' : '';
+                formattedLines.push(indent + trimmed);
+                continue;
+            }
+
+            // Sections [section]
+            if (trimmed.startsWith('[')) {
+                // Ensure empty line before section if not at start
+                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                formattedLines.push(trimmed);
+                inSection = true;
+                continue;
+            }
+
+            // Key-Value pairs: key = value
+            const equalIndex = trimmed.indexOf('=');
+            if (equalIndex !== -1) {
+                const key = trimmed.substring(0, equalIndex).trim();
+                const value = trimmed.substring(equalIndex + 1).trim();
+                // Indent properties by 2 spaces if inside a section
+                const indent = inSection ? '  ' : '';
+                formattedLines.push(`${indent}${key} = ${value}`);
+                continue;
+            }
+
+            // Fallback
+            const indent = inSection ? '  ' : '';
+            formattedLines.push(indent + trimmed);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format EditorConfig: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`EditorConfig has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('EditorConfig formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient EditorConfig validator
+ */
+function validateEditorConfig(text: string): string | undefined {
+    const lines = text.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+
+        // Check for sections
+        if (line.startsWith('[')) {
+            if (!line.endsWith(']')) {
+                // Check if it has a comment at the end
+                // [section] # comment
+                const commentIdx = Math.min(
+                    line.indexOf('#') === -1 ? Infinity : line.indexOf('#'),
+                    line.indexOf(';') === -1 ? Infinity : line.indexOf(';')
+                );
+
+                if (commentIdx !== Infinity) {
+                    const beforeComment = line.substring(0, commentIdx).trim();
+                    if (!beforeComment.endsWith(']')) {
+                         return `Unclosed section header at line ${i + 1}`;
+                    }
+                } else {
+                    return `Unclosed section header at line ${i + 1}`;
+                }
+            }
+            continue;
+        }
+
+        // Check for key = value
+        if (line.indexOf('=') === -1) {
+             return `Invalid property definition at line ${i + 1} (missing '=')`;
+        }
     }
     return undefined;
 }
@@ -6040,7 +6162,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -6158,6 +6280,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
         await handleIPYNB(editor, text);
     } else if (format === 'gitconfig') {
         await handleGitConfig(editor, text);
+    } else if (format === 'editorconfig') {
+        await handleEditorConfig(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -6198,9 +6322,10 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
+    if (lang === 'editorconfig') { return 'editorconfig'; }
     if (lang === 'gitconfig' || lang === 'git-config') { return 'gitconfig'; }
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -6260,6 +6385,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^\s*repositoryformatversion\s*=\s*\d+/.test(trimmed)
     ) {
         return 'gitconfig';
+    }
+
+    // EditorConfig heuristic
+    if (
+        /^\s*root\s*=\s*true/.test(trimmed) ||
+        /^\s*\[\s*(\*|\*\.[a-z0-9]+)\s*\]/.test(trimmed)
+    ) {
+        return 'editorconfig';
     }
 
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
