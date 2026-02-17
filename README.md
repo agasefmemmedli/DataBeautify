@@ -1,1 +1,1 @@
-Astro (.astro) — современный фреймворк для контента.
+All planned formats implemented.
