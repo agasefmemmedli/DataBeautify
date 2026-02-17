@@ -58,7 +58,8 @@ async function runTests() {
         'tex': 'latex',
         'mdx': 'mdx',
         'log': 'log',
-        'hbs': 'handlebars'
+        'hbs': 'handlebars',
+        'gitconfig': 'gitconfig'
     };
 
     let passed = 0;

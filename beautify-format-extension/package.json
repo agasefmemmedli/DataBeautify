@@ -91,6 +91,7 @@
     "onCommand:beautify-format.formatLiquid",
     "onCommand:beautify-format.formatSVG",
     "onCommand:beautify-format.formatIPYNB",
+    "onCommand:beautify-format.formatGitConfig",
     "onLanguage:json",
     "onLanguage:jsonc",
     "onLanguage:xml",
@@ -146,7 +147,9 @@
     "onLanguage:twig",
     "onLanguage:liquid",
     "onLanguage:svg",
-    "onLanguage:ipynb"
+    "onLanguage:ipynb",
+    "onLanguage:gitconfig",
+    "onLanguage:properties"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -350,6 +353,10 @@
       {
         "command": "beautify-format.formatIPYNB",
         "title": "Beautify Jupyter Notebook"
+      },
+      {
+        "command": "beautify-format.formatGitConfig",
+        "title": "Beautify Git Config"
       }
     ],
     "keybindings": [
@@ -364,7 +371,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log || editorLangId == handlebars || editorLangId == twig || editorLangId == liquid || editorLangId == svg || editorLangId == ipynb",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log || editorLangId == handlebars || editorLangId == twig || editorLangId == liquid || editorLangId == svg || editorLangId == ipynb || editorLangId == gitconfig || editorLangId == properties",
           "group": "1_modification"
         }
       ]
