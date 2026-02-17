@@ -261,6 +261,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('editorconfig');
     });
     context.subscriptions.push(formatEditorConfigCommand);
+
+    let formatAstroCommand = vscode.commands.registerCommand('beautify-format.formatAstro', () => {
+        beautify('astro');
+    });
+    context.subscriptions.push(formatAstroCommand);
 }
 
 /**
@@ -6162,7 +6167,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -6282,6 +6287,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
         await handleGitConfig(editor, text);
     } else if (format === 'editorconfig') {
         await handleEditorConfig(editor, text);
+    } else if (format === 'astro') {
+        await handleAstro(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -6322,8 +6329,9 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro' | 'unknown' {
     const lang = languageId.toLowerCase();
+    if (lang === 'astro') { return 'astro'; }
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
     if (lang === 'editorconfig') { return 'editorconfig'; }
     if (lang === 'gitconfig' || lang === 'git-config') { return 'gitconfig'; }
@@ -6393,6 +6401,11 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^\s*\[\s*(\*|\*\.[a-z0-9]+)\s*\]/.test(trimmed)
     ) {
         return 'editorconfig';
+    }
+
+    // Astro heuristic
+    if (trimmed.startsWith('---') && (trimmed.includes('<html') || trimmed.includes('<style') || trimmed.includes('<script') || /<\s*[A-Z][a-zA-Z0-9]*/.test(trimmed))) {
+        return 'astro';
     }
 
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -7328,6 +7341,193 @@ function validateLiquid(text: string): string | undefined {
         } else {
             return `Unclosed tag <${last.tag}> starting at line ${last.line}`;
         }
+    }
+
+    return undefined;
+}
+
+/**
+ * Handle Astro formatting and validation
+ */
+async function handleAstro(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Astro
+    validationMessage = validateAstro(text);
+
+    // Resilient formatting logic
+    try {
+        // Astro structure:
+        // ---
+        // frontmatter (TS/JS)
+        // ---
+        // template (HTML/JSX-like)
+
+        const frontmatterRegex = /^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/m;
+        const match = text.match(frontmatterRegex);
+
+        let frontmatter = '';
+        let template = text;
+        let frontmatterRaw = '';
+
+        if (match) {
+            frontmatterRaw = match[0];
+            const content = match[1];
+            // Format frontmatter as TypeScript
+            // Use js-beautify.js
+            /* eslint-disable */
+            const formattedContent = jsbeautify.js(content, {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
+            /* eslint-enable */
+            frontmatter = `---\n${formattedContent}\n---`;
+            template = text.substring(frontmatterRaw.length).trim();
+        }
+
+        // Format template as HTML (with some JSX awareness)
+        // We use js-beautify.html, similar to Svelte/Vue
+        /* eslint-disable */
+        const options: any = {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            indent_scripts: 'normal',
+            end_with_newline: false,
+            wrap_line_length: 0,
+            indent_inner_html: false,
+            js: {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            },
+            css: {
+                indent_size: 2,
+                indent_char: ' ',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: false
+            }
+        };
+        const formattedTemplate = jsbeautify.html(template, options);
+        /* eslint-enable */
+
+        if (frontmatter) {
+            formatted = `${frontmatter}\n\n${formattedTemplate}`;
+        } else {
+            formatted = formattedTemplate;
+        }
+
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Astro: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Astro has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Astro formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Astro validator
+ */
+function validateAstro(text: string): string | undefined {
+    // Check for frontmatter
+    const trimmed = text.trim();
+    if (trimmed.startsWith('---')) {
+        const parts = text.split('---');
+        // Valid frontmatter should result in at least 3 parts (empty pre, content, post)
+        // Or if it's the only thing, 2 parts?
+        // text: "---\nfoo\n---" -> ["", "\nfoo\n", ""]
+        if (parts.length < 3) {
+            return "Unclosed frontmatter (missing closing '---')";
+        }
+    }
+
+    // Basic HTML validation for template
+    const lines = text.split('\n');
+    let inFrontmatter = false;
+    if (trimmed.startsWith('---')) {
+        inFrontmatter = true;
+    }
+
+    const stack: { tag: string, line: number }[] = [];
+    const voidTags = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (inFrontmatter) {
+            if (line.trim() === '---' && i > 0) {
+                inFrontmatter = false;
+            }
+            continue;
+        }
+
+        // Simple tag matching
+        // <Tag>, </Tag>, <Tag />, <Component />
+        const regex = /<\/?([a-zA-Z0-9.\-_]+)[^>]*>/g;
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+            const fullTag = match[0];
+            const tagName = match[1];
+            const isClosing = fullTag.startsWith('</');
+            const isSelfClosing = fullTag.endsWith('/>');
+
+            if (isSelfClosing || voidTags.includes(tagName.toLowerCase())) {
+                continue;
+            }
+
+            if (isClosing) {
+                if (stack.length === 0) {
+                    return `Unexpected closing tag </${tagName}> at line ${i + 1}`;
+                }
+                const last = stack.pop()!;
+                if (last.tag !== tagName) {
+                     return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected </${last.tag}> from line ${last.line})`;
+                }
+            } else {
+                stack.push({ tag: tagName, line: i + 1 });
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        return `Unclosed tag <${last.tag}> starting at line ${last.line}`;
     }
 
     return undefined;
