@@ -57,7 +57,8 @@ async function runTests() {
         'md': 'markdown',
         'tex': 'latex',
         'mdx': 'mdx',
-        'log': 'log'
+        'log': 'log',
+        'hbs': 'handlebars'
     };
 
     let passed = 0;

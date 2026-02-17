@@ -226,6 +226,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('log');
     });
     context.subscriptions.push(formatLogCommand);
+
+    let formatHandlebarsCommand = vscode.commands.registerCommand('beautify-format.formatHandlebars', () => {
+        beautify('handlebars');
+    });
+    context.subscriptions.push(formatHandlebarsCommand);
 }
 
 /**
@@ -5272,6 +5277,217 @@ function validateDockerfile(text: string): string | undefined {
  * Main beautify function with auto-detection
  */
 /**
+ * Handle Handlebars formatting and validation
+ */
+async function handleHandlebars(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Handlebars
+    validationMessage = validateHandlebars(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+
+        // Void tags that don't need closing
+        const voidTags = [
+            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+            'link', 'meta', 'param', 'source', 'track', 'wbr'
+        ];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Check for dedentation triggers at the start of the line
+            let currentIndent = indentLevel;
+
+            // Closing Handlebars block: {{/if}}, {{/each}}, etc.
+            if (/^{{\/[a-zA-Z0-9_.-]+/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Middle Handlebars block: {{else}}, {{^}}
+            else if (/^{{\s*(else|\^)/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Closing HTML tag: </div>
+            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation
+            formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+            // Calculate indentation for the NEXT line
+            let netChange = 0;
+
+            // Remove comments for analysis
+            const lineNoComments = line.replace(/{{!--[\s\S]*?--}}/g, '').replace(/{{![\s\S]*?}}/g, '').replace(/<!--[\s\S]*?-->/g, '');
+
+            // Check for Handlebars block openers
+            // {{#if ...}}, {{#each ...}}, {{#with ...}}, {{#block ...}}
+            // Excluding self-closing or inline usage if any (though standard block helpers are usually multiline)
+            const hbsOpeners = (lineNoComments.match(/{{#[a-zA-Z0-9_.-]+[^}]*}}/g) || []).length;
+            const hbsClosers = (lineNoComments.match(/{{\/[a-zA-Z0-9_.-]+}}/g) || []).length;
+
+            // Check for HTML tag openers
+            // <div ...> but not <img ...> or <div ... />
+            let htmlOpeners = 0;
+            let htmlClosers = 0;
+
+            // Simple regex for HTML tags - this is resilient/approximate
+            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
+            let match;
+            while ((match = tagRegex.exec(lineNoComments)) !== null) {
+                const fullTag = match[0];
+                const tagName = match[1].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isClosing) {
+                    htmlClosers++;
+                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
+                    htmlOpeners++;
+                }
+            }
+
+            // Middle blocks (else, ^) don't change net indent for next line relative to previous
+            // but effectively we dedented current line, so we need to indent back for content
+            if (/^{{\s*(else|\^)/.test(trimmed)) {
+                // If we had {{else}}, we printed it at indent-1.
+                // The next line should be at indent.
+                // So if currentIndent was indent-1, next indent is currentIndent + 1 = indent.
+                // No net change to the *base* indentLevel from the start of this line's processing perspective?
+                // Actually:
+                // if (cond)
+                //   stuff
+                // else
+                //   stuff
+                // /if
+                // Initial: 0.
+                // {{#if}}: current=0, next=1.
+                // stuff: current=1, next=1.
+                // {{else}}: current=0 (dedented), next=1 (indented back).
+                // stuff: current=1, next=1.
+                // {{/if}}: current=0 (dedented), next=0.
+
+                // So for {{else}}, we want netChange to be 0 relative to the state *before* the dedent logic?
+                // No, indentLevel is the state at start of loop.
+                // If line is {{else}}, we used indentLevel-1.
+                // Next line should be indentLevel.
+                // So indentLevel (next) = indentLevel (current).
+                // So netChange = 0.
+                // BUT, hbsOpeners/Closers might be 0.
+            }
+
+            netChange = (hbsOpeners - hbsClosers) + (htmlOpeners - htmlClosers);
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Handlebars: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Handlebars has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Handlebars formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Handlebars validator
+ */
+function validateHandlebars(text: string): string | undefined {
+    const stack: { tag: string, line: number, type: 'hbs' | 'html' }[] = [];
+    const lines = text.split('\n');
+
+    // Void tags that don't need closing
+    const voidTags = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Remove comments
+        const lineNoComments = line.replace(/{{!--[\s\S]*?--}}/g, '').replace(/{{![\s\S]*?}}/g, '').replace(/<!--[\s\S]*?-->/g, '');
+
+        // Find all tags in order
+        const regex = /({{#([a-zA-Z0-9_.-]+)[^}]*}})|({{\/([a-zA-Z0-9_.-]+)}})|(<\/?([a-zA-Z0-9]+)[^>]*>)/g;
+        let match;
+
+        while ((match = regex.exec(lineNoComments)) !== null) {
+            if (match[1]) { // Handlebars Open: {{#name ...}}
+                const tagName = match[2];
+                stack.push({ tag: tagName, line: i + 1, type: 'hbs' });
+            } else if (match[3]) { // Handlebars Close: {{/name}}
+                const tagName = match[4];
+                if (stack.length === 0) {
+                    return `Unexpected closing block {{/${tagName}}} at line ${i + 1}`;
+                }
+                const last = stack.pop()!;
+                if (last.type !== 'hbs' || last.tag !== tagName) {
+                    return `Mismatched closing block {{/${tagName}}} at line ${i + 1} (expected {{/${last.tag}}} from line ${last.line})`;
+                }
+            } else if (match[5]) { // HTML Tag
+                const fullTag = match[5];
+                const tagName = match[6].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isSelfClosing || voidTags.includes(tagName)) {
+                    continue;
+                }
+
+                if (isClosing) {
+                    // Try to match with the last HTML tag, skipping any HBS blocks that might be interleaved
+                    // (though valid HBS usually nests strictly)
+                    // But for resilience, let's just look at the stack top
+                    if (stack.length === 0) {
+                        return `Unexpected closing tag </${tagName}> at line ${i + 1}`;
+                    }
+                    const last = stack.pop()!;
+                    // If we find an HBS block, it means we have something like {{#if}} </div> {{/if}} which is invalid nesting
+                    if (last.type === 'hbs') {
+                         return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected {{/${last.tag}}} from line ${last.line})`;
+                    }
+                    if (last.tag !== tagName) {
+                        return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected </${last.tag}> from line ${last.line})`;
+                    }
+                } else {
+                    stack.push({ tag: tagName, line: i + 1, type: 'html' });
+                }
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        if (last.type === 'hbs') {
+            return `Unclosed block {{#${last.tag}}} starting at line ${last.line}`;
+        } else {
+            return `Unclosed tag <${last.tag}> starting at line ${last.line}`;
+        }
+    }
+
+    return undefined;
+}
+
+/**
  * Handle Log file formatting and validation
  */
 async function handleLog(editor: vscode.TextEditor, text: string) {
@@ -5357,7 +5573,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5463,6 +5679,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleMDX(editor, text);
     } else if (format === 'log') {
         await handleLog(editor, text);
+    } else if (format === 'handlebars') {
+        await handleHandlebars(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5503,7 +5721,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5545,6 +5763,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'markdown') { return 'markdown'; }
     if (lang === 'mdx') { return 'mdx'; }
     if (lang === 'log') { return 'log'; }
+    if (lang === 'handlebars' || lang === 'hbs' || lang === 'mustache') { return 'handlebars'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -5557,6 +5776,11 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
             return 'jsonc';
         }
         return 'json';
+    }
+
+    // Handlebars heuristic
+    if (trimmed.includes('{{') && trimmed.includes('}}') && (trimmed.includes('{{#') || trimmed.includes('{{/') || trimmed.includes('{{>'))) {
+        return 'handlebars';
     }
 
     // PHP heuristic

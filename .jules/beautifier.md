@@ -397,3 +397,19 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('log') with content-based heuristics. Looked for common timestamp patterns (ISO 8601, HH:MM:SS, or Month-based) or log level keywords (INFO, DEBUG, ERROR, etc.) at the start of lines. This ensures reliable identification of log files and snippets even without the `.log` extension.
+
+## Handlebars Support (v0.32.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient stack-based validator for Handlebars. It tracks balanced Handlebars blocks (`{{#...}} / {{/...}}`) and HTML tags.
+- **Resilient Validation:** The validator reports the first mismatched or unclosed block/tag but allows the formatter to proceed. It distinguishes between Handlebars blocks and HTML tags to provide specific error messages.
+- **Recovery:** Developed a custom resilient line-by-line formatter. It handles indentation for both Handlebars blocks and HTML tags.
+- **Formatting Logic:**
+    - Indents on opening blocks (`{{#...}}`) and opening HTML tags.
+    - Dedents on closing blocks (`{{/...}}`) and closing HTML tags.
+    - Special handling for `{{else}}` and `{{^}}`: temporarily dedents the current line to align with the parent block, then indents the subsequent content.
+    - Gracefully handles void HTML tags (e.g., `<br>`, `<img>`) which do not affect indentation.
+- **Error Reporting:** Unclosed blocks or tags are reported as VS Code warnings, fulfilling the requirement to surface errors while still attempting to format the rest of the file.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('handlebars') with content-based heuristics. Looked for the presence of `{{...}}` delimiters, specifically checking for block helpers like `{{#` and `{{/` to distinguish from simple template strings or other mustache-like dialects. This logic is prioritized to ensure Handlebars files are not misidentified as HTML.

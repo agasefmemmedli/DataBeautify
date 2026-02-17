@@ -1,5 +1,3 @@
-Handlebars (.hbs) — шаблоны.
-
 Twig (.twig) — шаблоны PHP.
 
 Liquid (.liquid) — шаблоны Shopify/Jekyll.
