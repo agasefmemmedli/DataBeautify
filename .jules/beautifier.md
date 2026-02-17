@@ -387,3 +387,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined `languageId` check ('latex', 'tex') with content-based heuristics. Looked for common LaTeX document markers like `\documentclass`, `\begin{document}`, `\usepackage`, or the presence of any `\begin{...}` environment definition. This ensures reliable identification of LaTeX files even without the correct extension.
+
+## Log Support (v0.31.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient structural validator for Log files. Since log files don't have a strict syntax, the validator focus on identifying recognized log entry patterns to provide confidence.
+- **Resilient Formatting:** Developed a custom line-by-line formatter that normalizes and aligns log levels (e.g., `[INFO   ]`) to 7 characters for consistency. It implements continuation-line awareness, automatically indenting lines that don't start with a timestamp (like stack traces) by 4 spaces. This ensures "readability is king" for log analysis.
+- **Error Reporting:** The validator checks the first few lines for recognized timestamp patterns. If none are found, it reports a warning while still allowing the tool to attempt formatting, helping users identify files that might not be logs.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('log') with content-based heuristics. Looked for common timestamp patterns (ISO 8601, HH:MM:SS, or Month-based) or log level keywords (INFO, DEBUG, ERROR, etc.) at the start of lines. This ensures reliable identification of log files and snippets even without the `.log` extension.

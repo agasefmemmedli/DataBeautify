@@ -221,6 +221,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('mdx');
     });
     context.subscriptions.push(formatMDXCommand);
+
+    let formatLogCommand = vscode.commands.registerCommand('beautify-format.formatLog', () => {
+        beautify('log');
+    });
+    context.subscriptions.push(formatLogCommand);
 }
 
 /**
@@ -5266,7 +5271,93 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx') {
+/**
+ * Handle Log file formatting and validation
+ */
+async function handleLog(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Log
+    validationMessage = validateLog(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+
+        // Common timestamp patterns
+        const timestampRegex = /^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?/;
+        const logLevelRegex = /\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|TRACE|CRITICAL)\b/i;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            const tsMatch = line.match(timestampRegex);
+            if (tsMatch) {
+                // It's a new log entry
+                let processedLine = line;
+
+                // Align log level if present
+                const levelMatch = processedLine.match(logLevelRegex);
+                if (levelMatch) {
+                    const level = levelMatch[1].toUpperCase();
+                    const paddedLevel = `[${level.padEnd(7)}]`;
+                    processedLine = processedLine.replace(levelMatch[0], paddedLevel);
+                }
+
+                formattedLines.push(processedLine.trimEnd());
+            } else {
+                // It's a continuation line (e.g., stack trace)
+                // Indent by 4 spaces if it's not already indented or doesn't look like a log start
+                if (!line.startsWith('    ') && !line.startsWith('\t')) {
+                    formattedLines.push('    ' + trimmed);
+                } else {
+                    formattedLines.push(line.trimEnd());
+                }
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Log: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Log file has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Log file formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Log validator
+ */
+function validateLog(text: string): string | undefined {
+    const lines = text.split('\n');
+    const timestampRegex = /\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?/;
+
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const line = lines[i].trim();
+        if (line === '') continue;
+
+        if (timestampRegex.test(line)) {
+            return undefined; // Found at least one valid log line
+        }
+    }
+
+    return 'No recognized timestamp patterns found in the first few lines.';
+}
+
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5370,6 +5461,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleLaTeX(editor, text);
     } else if (format === 'mdx') {
         await handleMDX(editor, text);
+    } else if (format === 'log') {
+        await handleLog(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5410,7 +5503,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5451,6 +5544,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'mongodb') { return 'mongodb'; }
     if (lang === 'markdown') { return 'markdown'; }
     if (lang === 'mdx') { return 'mdx'; }
+    if (lang === 'log') { return 'log'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -5813,6 +5907,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         (/#\s+.+/.test(trimmed) || /<[A-Z][a-zA-Z0-9]*/.test(trimmed))
     ) {
         return 'mdx';
+    }
+
+    // Log heuristic
+    if (
+        /^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?/i.test(trimmed) ||
+        /\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|TRACE|CRITICAL)\b/i.test(trimmed)
+    ) {
+        return 'log';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
