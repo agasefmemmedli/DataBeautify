@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell and Markdown files with keyboard shortcuts and context menu",
-  "version": "0.30.0",
+  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown and LaTeX files with keyboard shortcuts and context menu",
+  "version": "0.31.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -42,6 +42,48 @@
   ],
   "activationEvents": [
     "onCommand:beautify-format.beautify",
+    "onCommand:beautify-format.formatJSON",
+    "onCommand:beautify-format.formatXML",
+    "onCommand:beautify-format.formatHTML",
+    "onCommand:beautify-format.formatCSS",
+    "onCommand:beautify-format.formatSCSS",
+    "onCommand:beautify-format.formatSASS",
+    "onCommand:beautify-format.formatLESS",
+    "onCommand:beautify-format.formatJS",
+    "onCommand:beautify-format.formatTS",
+    "onCommand:beautify-format.formatJSX",
+    "onCommand:beautify-format.formatTSX",
+    "onCommand:beautify-format.formatVue",
+    "onCommand:beautify-format.formatSvelte",
+    "onCommand:beautify-format.formatPHP",
+    "onCommand:beautify-format.formatJSONC",
+    "onCommand:beautify-format.formatYAML",
+    "onCommand:beautify-format.formatTOML",
+    "onCommand:beautify-format.formatINI",
+    "onCommand:beautify-format.formatENV",
+    "onCommand:beautify-format.formatCSV",
+    "onCommand:beautify-format.formatGraphQL",
+    "onCommand:beautify-format.formatPython",
+    "onCommand:beautify-format.formatJava",
+    "onCommand:beautify-format.formatKotlin",
+    "onCommand:beautify-format.formatCSharp",
+    "onCommand:beautify-format.formatCPP",
+    "onCommand:beautify-format.formatGo",
+    "onCommand:beautify-format.formatRust",
+    "onCommand:beautify-format.formatRuby",
+    "onCommand:beautify-format.formatSwift",
+    "onCommand:beautify-format.formatDart",
+    "onCommand:beautify-format.formatDockerfile",
+    "onCommand:beautify-format.formatShell",
+    "onCommand:beautify-format.formatPowerShell",
+    "onCommand:beautify-format.formatHCL",
+    "onCommand:beautify-format.formatMakefile",
+    "onCommand:beautify-format.formatNginx",
+    "onCommand:beautify-format.formatSQL",
+    "onCommand:beautify-format.formatPrisma",
+    "onCommand:beautify-format.formatMongoDB",
+    "onCommand:beautify-format.formatMarkdown",
+    "onCommand:beautify-format.formatLaTeX",
     "onLanguage:json",
     "onLanguage:jsonc",
     "onLanguage:xml",
@@ -98,6 +140,22 @@
       {
         "command": "beautify-format.beautify",
         "title": "Beautify Format"
+      },
+      {
+        "command": "beautify-format.formatJSON",
+        "title": "Beautify JSON"
+      },
+      {
+        "command": "beautify-format.formatXML",
+        "title": "Beautify XML"
+      },
+      {
+        "command": "beautify-format.formatHTML",
+        "title": "Beautify HTML"
+      },
+      {
+        "command": "beautify-format.formatCSS",
+        "title": "Beautify CSS"
       },
       {
         "command": "beautify-format.formatSCSS",
