@@ -52,7 +52,8 @@ async function runTests() {
         'ps1': 'powershell',
         'tf': 'terraform',
         'makefile': 'makefile',
-        'nginx': 'nginx'
+        'nginx': 'nginx',
+        'sql': 'sql'
     };
 
     let passed = 0;

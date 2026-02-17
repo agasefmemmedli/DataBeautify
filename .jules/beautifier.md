@@ -343,3 +343,15 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('nginx') with content-based heuristics. Looked for Nginx-specific block starts (http, server, location, upstream, events followed by {) and common directives (listen, proxy_pass, root, index, server_name, include followed by a semicolon). This ensures high confidence in identifying Nginx configurations even without the .conf extension.
+
+## SQL Support (v0.29.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter and character-by-character validator for SQL.
+- **Resilient Formatting:** The formatter normalizes keyword casing to UPPERCASE and implements 4-space indentation based on parentheses depth. It is state-aware, correctly handling single-line comments (`--`), block comments (`/* */`), and string literals (`'`, `"`) to ensure that keywords inside them are not accidentally normalized.
+- **String Escaping:** Added support for SQL string escaping (doubled quotes like `''` or `""`) to prevent premature exit from the string state, ensuring correct parsing of the rest of the statement.
+- **Structural Awareness:** It tracks parentheses depth to apply proper indentation. Closing parentheses at the start of a line are out-dented for the current line, providing a clean and structured layout for subqueries and table definitions.
+- **Error Reporting:** Structural issues like mismatched parentheses, unclosed string literals, or unclosed block comments are reported as VS Code warnings, surfacing the first identified issue while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('sql') with content-based heuristics. Looked for common SQL starting keywords (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, etc.) and patterns like the combination of FROM and WHERE or the CREATE TABLE statement. This ensures reliable identification of SQL snippets even without an explicit language ID.
