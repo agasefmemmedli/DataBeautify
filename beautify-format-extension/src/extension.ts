@@ -187,6 +187,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('nginx');
     });
     context.subscriptions.push(formatNginxCommand);
+
+    let formatSQLCommand = vscode.commands.registerCommand('beautify-format.formatSQL', () => {
+        beautify('sql');
+    });
+    context.subscriptions.push(formatSQLCommand);
 }
 
 /**
@@ -282,6 +287,230 @@ async function handleNginx(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Nginx configuration formatted successfully!');
     }
+}
+
+/**
+ * Handle SQL formatting and validation
+ */
+async function handleSQL(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate SQL
+    validationMessage = validateSQL(text);
+
+    // Resilient formatting logic
+    try {
+        const keywords = [
+            'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
+            'INNER', 'OUTER', 'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT', 'SET', 'VALUES', 'CREATE',
+            'TABLE', 'DROP', 'ALTER', 'UNION', 'ALL', 'AND', 'OR', 'IN', 'EXISTS', 'BETWEEN', 'LIKE',
+            'IS', 'NULL', 'NOT', 'DISTINCT', 'AS', 'ON', 'USING', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+            'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'DEFAULT', 'UNIQUE', 'CHECK', 'INDEX', 'VIEW',
+            'DATABASE', 'SCHEMA', 'TRIGGER', 'PROCEDURE', 'FUNCTION', 'DECLARE', 'BEGIN', 'COMMIT', 'ROLLBACK'
+        ];
+
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inString = false;
+        let quoteChar = '';
+        let inBlockComment = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inString && !inBlockComment) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Keyword normalization and basic indentation
+            // We'll process the line to find keywords and upper-case them
+            let processedLine = '';
+            let currentWord = '';
+
+            for (let j = 0; j < line.length; j++) {
+                const char = line[j];
+                const nextChar = line[j + 1];
+
+                if (inBlockComment) {
+                    processedLine += char;
+                    if (char === '*' && nextChar === '/') {
+                        inBlockComment = false;
+                        processedLine += '/';
+                        j++;
+                    }
+                    continue;
+                }
+
+                if (inString) {
+                    processedLine += char;
+                    if (char === quoteChar && nextChar === quoteChar) {
+                        processedLine += nextChar;
+                        j++;
+                    } else if (char === '\\') {
+                        if (nextChar) {
+                            processedLine += nextChar;
+                            j++;
+                        }
+                    } else if (char === quoteChar) {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (char === '-' && nextChar === '-') {
+                    processedLine += line.substring(j);
+                    break;
+                }
+
+                if (char === '/' && nextChar === '*') {
+                    inBlockComment = true;
+                    processedLine += '/*';
+                    j++;
+                    continue;
+                }
+
+                if (char === '"' || char === "'") {
+                    inString = true;
+                    quoteChar = char;
+                    processedLine += char;
+                    continue;
+                }
+
+                if (/[a-zA-Z_]/.test(char)) {
+                    currentWord += char;
+                } else {
+                    if (currentWord) {
+                        if (keywords.includes(currentWord.toUpperCase())) {
+                            processedLine += currentWord.toUpperCase();
+                        } else {
+                            processedLine += currentWord;
+                        }
+                        currentWord = '';
+                    }
+                    processedLine += char;
+                }
+            }
+            if (currentWord) {
+                if (keywords.includes(currentWord.toUpperCase())) {
+                    processedLine += currentWord.toUpperCase();
+                } else {
+                    processedLine += currentWord;
+                }
+            }
+
+            const trimmedProcessed = processedLine.trim();
+
+            // Adjust indent for leading closing parenthesis
+            let currentLineIndent = indentLevel;
+            if (trimmedProcessed.startsWith(')')) {
+                // Peek at current state to decide if we should outdent
+                // Since we haven't updated indentLevel yet for this line,
+                // if it starts with ')', it should be outdented.
+                currentLineIndent--;
+            }
+
+            // Apply indentation
+            formattedLines.push('    '.repeat(Math.max(0, currentLineIndent)) + trimmedProcessed);
+
+            // Calculate indent for next line
+            if (!inBlockComment && !inString) {
+                const openParens = (trimmedProcessed.match(/\(/g) || []).length;
+                const closeParens = (trimmedProcessed.match(/\)/g) || []).length;
+                indentLevel += (openParens - closeParens);
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format SQL: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`SQL has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('SQL formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient SQL validator
+ */
+function validateSQL(text: string): string | undefined {
+    let parenLevel = 0;
+    let inString = false;
+    let quoteChar = '';
+    let inBlockComment = false;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (char === quoteChar && nextChar === quoteChar) {
+                    j++;
+                } else if (char === '\\') {
+                    j++;
+                } else if (char === quoteChar) {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (char === '-' && nextChar === '-') {
+                break; // Line comment
+            }
+
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                j++;
+                continue;
+            }
+
+            if (char === '"' || char === "'") {
+                inString = true;
+                quoteChar = char;
+                continue;
+            }
+
+            if (char === '(') {
+                parenLevel++;
+            } else if (char === ')') {
+                parenLevel--;
+                if (parenLevel < 0) {
+                    return `Extra closing parenthesis at line ${i + 1}, col ${j + 1}`;
+                }
+            }
+        }
+    }
+
+    if (parenLevel > 0) {
+        return `Missing ${parenLevel} closing parenthesis`;
+    }
+    if (inString) {
+        return `Unclosed string literal`;
+    }
+    if (inBlockComment) {
+        return `Unclosed block comment`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4167,7 +4396,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4259,6 +4488,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleMakefile(editor, text);
     } else if (format === 'nginx') {
         await handleNginx(editor, text);
+    } else if (format === 'sql') {
+        await handleSQL(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4299,7 +4530,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4335,6 +4566,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'terraform' || lang === 'hcl' || lang === 'terraform-vars') { return 'hcl'; }
     if (lang === 'makefile') { return 'makefile'; }
     if (lang === 'nginx') { return 'nginx'; }
+    if (lang === 'sql') { return 'sql'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4640,6 +4872,15 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^\s*(listen|proxy_pass|root|index|server_name|include)\s+[^;]+;/im.test(trimmed)
     ) {
         return 'nginx';
+    }
+
+    // SQL heuristic
+    if (
+        /^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|GRANT|REVOKE|USE)\b/im.test(trimmed) ||
+        (/\bFROM\b/im.test(trimmed) && /\bWHERE\b/im.test(trimmed)) ||
+        /\bCREATE\s+TABLE\b/im.test(trimmed)
+    ) {
+        return 'sql';
     }
 
     // JavaScript heuristic: common keywords or arrow functions
