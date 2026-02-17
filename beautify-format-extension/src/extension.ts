@@ -192,6 +192,173 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('sql');
     });
     context.subscriptions.push(formatSQLCommand);
+
+    let formatPrismaCommand = vscode.commands.registerCommand('beautify-format.formatPrisma', () => {
+        beautify('prisma');
+    });
+    context.subscriptions.push(formatPrismaCommand);
+}
+
+/**
+ * Handle Prisma formatting and validation
+ */
+async function handlePrisma(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Prisma
+    validationMessage = validatePrisma(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+        let inBlockComment = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '' && !inBlockComment) {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Handle block comments /* */
+            if (inBlockComment) {
+                formattedLines.push(line);
+                if (trimmed.includes('*/')) {
+                    inBlockComment = false;
+                }
+                continue;
+            }
+
+            if (trimmed.startsWith('/*')) {
+                inBlockComment = true;
+                formattedLines.push('  '.repeat(indentLevel) + trimmed);
+                if (trimmed.includes('*/')) {
+                    inBlockComment = false;
+                }
+                continue;
+            }
+
+            // Indentation adjustment for closing brace at the START of the line
+            let currentLineIndent = indentLevel;
+            if (trimmed.startsWith('}')) {
+                currentLineIndent--;
+            }
+
+            // Apply indentation (Prisma uses 2 spaces)
+            formattedLines.push('  '.repeat(Math.max(0, currentLineIndent)) + trimmed);
+
+            // Calculate net brace change for NEXT line
+            let netChange = 0;
+            let inString = false;
+
+            for (let k = 0; k < trimmed.length; k++) {
+                const char = trimmed[k];
+                if (char === '"' && (k === 0 || trimmed[k - 1] !== '\\')) {
+                    inString = !inString;
+                    continue;
+                }
+                if (inString) { continue; }
+
+                if (char === '/' && trimmed[k + 1] === '/') { break; } // Line comment
+
+                if (char === '{') {
+                    netChange++;
+                } else if (char === '}') {
+                    netChange--;
+                }
+            }
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Prisma: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Prisma schema has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Prisma schema formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Prisma validator
+ */
+function validatePrisma(text: string): string | undefined {
+    let braceLevel = 0;
+    let inString = false;
+    let inBlockComment = false;
+
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const nextChar = line[j + 1];
+
+            if (inBlockComment) {
+                if (char === '*' && nextChar === '/') {
+                    inBlockComment = false;
+                    j++;
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (char === '\\') {
+                    j++;
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (char === '/' && nextChar === '/') {
+                break; // Line comment
+            }
+
+            if (char === '/' && nextChar === '*') {
+                inBlockComment = true;
+                j++;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === '{') {
+                braceLevel++;
+            } else if (char === '}') {
+                braceLevel--;
+                if (braceLevel < 0) {
+                    return `Extra closing brace at line ${i + 1}, col ${j + 1}`;
+                }
+            }
+        }
+    }
+
+    if (braceLevel > 0) {
+        return `Missing ${braceLevel} closing brace(s)`;
+    }
+    if (inString) {
+        return `Unclosed string literal`;
+    }
+    if (inBlockComment) {
+        return `Unclosed block comment`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4396,7 +4563,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4490,6 +4657,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleNginx(editor, text);
     } else if (format === 'sql') {
         await handleSQL(editor, text);
+    } else if (format === 'prisma') {
+        await handlePrisma(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4530,7 +4699,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4567,6 +4736,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'makefile') { return 'makefile'; }
     if (lang === 'nginx') { return 'nginx'; }
     if (lang === 'sql') { return 'sql'; }
+    if (lang === 'prisma') { return 'prisma'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4621,6 +4791,15 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     // SCSS heuristic
     if (trimmed.includes('{') && (trimmed.includes('$') || trimmed.includes('@mixin') || trimmed.includes('@include'))) {
         return 'scss';
+    }
+
+    // Prisma heuristic
+    if (
+        /^\s*(datasource|generator|model|enum|type)\s+[a-z0-9_-]+\s*\{/im.test(trimmed) ||
+        /^\s*(model|enum|type)\s+[A-Z][a-zA-Z0-9]*\s*\{/m.test(trimmed) ||
+        /(@id|@unique|@default|@relation|@@id|@@unique|@@index|@@map)\b/.test(trimmed)
+    ) {
+        return 'prisma';
     }
 
     // SASS heuristic
