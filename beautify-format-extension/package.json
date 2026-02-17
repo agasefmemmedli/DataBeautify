@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx and SQL files with keyboard shortcuts and context menu",
-  "version": "0.29.0",
+  "description": "Beautify and format JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL and MongoDB Shell files with keyboard shortcuts and context menu",
+  "version": "0.30.0",
   "publisher": "DataBeautify",
   "author": {
     "name": "Aghasaf Mammadli"
@@ -86,7 +86,8 @@
     "onLanguage:makefile",
     "onLanguage:nginx",
     "onLanguage:sql",
-    "onLanguage:prisma"
+    "onLanguage:prisma",
+    "onLanguage:mongodb"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -234,6 +235,10 @@
       {
         "command": "beautify-format.formatPrisma",
         "title": "Beautify Prisma"
+      },
+      {
+        "command": "beautify-format.formatMongoDB",
+        "title": "Beautify MongoDB Shell"
       }
     ],
     "keybindings": [
@@ -248,7 +253,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb",
           "group": "1_modification"
         }
       ]

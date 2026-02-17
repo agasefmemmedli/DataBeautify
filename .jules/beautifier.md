@@ -366,3 +366,13 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('prisma') with content-based heuristics. Looked for Prisma-specific block starts (datasource, generator, model, enum, type followed by {) and common attributes like @id, @unique, @default, or @@map. This ensures reliable identification of Prisma schemas even without the .prisma extension.
+
+## MongoDB Shell Support (v0.30.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Reused `js-beautify.js` for formatting, as MongoDB Shell scripts are fundamentally JavaScript with minor shell-specific extensions.
+- **Recovery:** Implemented a "masking" technique in `validateMongoDB`. Since `acorn` (our JS validator) fails on non-standard JS commands like `use <db>` or `show collections`, these lines are automatically converted to comments (`//`) before being passed to the validator. This allows the tool to report genuine JS errors while remaining resilient to the shell's unique syntax.
+- **Error Reporting:** Syntax errors from the masked content are reported as VS Code warnings, identifying the location of the first issue while still allowing the beautification process to complete.
+
+### Auto-Detection
+- **Heuristic:** Combined `languageId` check ('mongodb') with content-based heuristics. Looked for shell-specific commands (`use `, `show collections`, `it`) or interaction with the `db` object (e.g., `db.collection.find`). Also included checks for MongoDB-specific constructors like `ObjectId()` and `ISODate()`. This ensures high confidence in identifying MongoDB scripts even in files without the `.mongodb` extension.
