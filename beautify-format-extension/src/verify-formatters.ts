@@ -56,7 +56,8 @@ async function runTests() {
         'sql': 'sql',
         'md': 'markdown',
         'tex': 'latex',
-        'mdx': 'mdx'
+        'mdx': 'mdx',
+        'log': 'log'
     };
 
     let passed = 0;
