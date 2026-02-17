@@ -53,7 +53,8 @@ async function runTests() {
         'tf': 'terraform',
         'makefile': 'makefile',
         'nginx': 'nginx',
-        'sql': 'sql'
+        'sql': 'sql',
+        'md': 'markdown'
     };
 
     let passed = 0;
