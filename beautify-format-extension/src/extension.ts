@@ -241,6 +241,90 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('liquid');
     });
     context.subscriptions.push(formatLiquidCommand);
+
+    let formatIPYNBCommand = vscode.commands.registerCommand('beautify-format.formatIPYNB', () => {
+        beautify('ipynb');
+    });
+    context.subscriptions.push(formatIPYNBCommand);
+}
+
+/**
+ * Handle Jupyter Notebook (.ipynb) formatting and validation
+ */
+async function handleIPYNB(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate IPYNB
+    validationMessage = validateIPYNB(text);
+
+    try {
+        let notebook: any;
+        try {
+            notebook = JSON.parse(text);
+        } catch (e) {
+            // Fault-tolerance: try to repair JSON if parsing fails
+            const repairedText = jsonrepair(text);
+            notebook = JSON.parse(repairedText);
+        }
+
+        if (notebook.cells && Array.isArray(notebook.cells)) {
+            notebook.cells.forEach((cell: any) => {
+                if (cell.cell_type === 'code' && cell.source) {
+                    let source: string;
+                    let isArray = false;
+                    if (Array.isArray(cell.source)) {
+                        source = cell.source.join('');
+                        isArray = true;
+                    } else {
+                        source = cell.source;
+                    }
+
+                    const formattedSource = formatPythonCore(source);
+
+                    if (isArray) {
+                        // Split back into array of strings, matching Jupyter standard
+                        const lines = formattedSource.split('\n');
+                        cell.source = lines.map((line, i) => i < lines.length - 1 ? line + '\n' : line);
+                    } else {
+                        cell.source = formattedSource;
+                    }
+                }
+            });
+        }
+
+        // Jupyter notebooks standardly use 1-space indentation for JSON
+        formatted = JSON.stringify(notebook, null, 1);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Jupyter Notebook: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Jupyter Notebook has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Jupyter Notebook formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Jupyter Notebook validator
+ */
+function validateIPYNB(text: string): string | undefined {
+    try {
+        const notebook = JSON.parse(text);
+        if (!notebook.cells || !Array.isArray(notebook.cells)) {
+            return "Missing 'cells' array in notebook structure.";
+        }
+        if (notebook.nbformat === undefined) {
+            return "Missing 'nbformat' in notebook metadata.";
+        }
+    } catch (e: any) {
+        return `Invalid JSON structure: ${e.message}`;
+    }
+    return undefined;
 }
 
 /**
@@ -4006,6 +4090,54 @@ async function handleJava(editor: vscode.TextEditor, text: string) {
 }
 
 /**
+ * Core Python formatting logic
+ */
+function formatPythonCore(text: string): string {
+    const lines = text.split('\n');
+    const formattedLines: string[] = [];
+    let indentLevel = 0;
+    let forceNextIndent = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '') {
+            formattedLines.push('');
+            continue;
+        }
+
+        // Heuristic for de-indenting keywords
+        const deindentKeywords = ['elif ', 'elif:', 'else:', 'except ', 'except:', 'finally:'];
+        const shouldDeindent = deindentKeywords.some(kw => trimmed.startsWith(kw));
+
+        if (shouldDeindent) {
+            indentLevel = Math.max(0, indentLevel - 1);
+        } else if (!forceNextIndent) {
+            // Calculate effective indentation for this line
+            // If the user has already de-indented more than we expected, follow them
+            const userIndent = line.length - line.trimStart().length;
+            const userLevel = Math.floor(userIndent / 4);
+
+            if (userLevel < indentLevel) {
+                indentLevel = userLevel;
+            }
+        }
+
+        formattedLines.push('    '.repeat(indentLevel) + trimmed);
+
+        // If this line starts a block, the next line should be indented
+        if (trimmed.endsWith(':')) {
+            indentLevel++;
+            forceNextIndent = true;
+        } else {
+            forceNextIndent = false;
+        }
+    }
+    return formattedLines.join('\n');
+}
+
+/**
  * Handle Python formatting and validation
  */
 async function handlePython(editor: vscode.TextEditor, text: string) {
@@ -4035,48 +4167,7 @@ async function handlePython(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let forceNextIndent = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Heuristic for de-indenting keywords
-            const deindentKeywords = ['elif ', 'elif:', 'else:', 'except ', 'except:', 'finally:'];
-            const shouldDeindent = deindentKeywords.some(kw => trimmed.startsWith(kw));
-
-            if (shouldDeindent) {
-                indentLevel = Math.max(0, indentLevel - 1);
-            } else if (!forceNextIndent) {
-                // Calculate effective indentation for this line
-                // If the user has already de-indented more than we expected, follow them
-                const userIndent = line.length - line.trimStart().length;
-                const userLevel = Math.floor(userIndent / 4);
-
-                if (userLevel < indentLevel) {
-                    indentLevel = userLevel;
-                }
-            }
-
-            formattedLines.push('    '.repeat(indentLevel) + trimmed);
-
-            // If this line starts a block, the next line should be indented
-            if (trimmed.endsWith(':')) {
-                indentLevel++;
-                forceNextIndent = true;
-            } else {
-                forceNextIndent = false;
-            }
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatPythonCore(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Python: ${error.message}`);
         return;
@@ -5803,7 +5894,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5915,6 +6006,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleTwig(editor, text);
     } else if (format === 'liquid') {
         await handleLiquid(editor, text);
+    } else if (format === 'ipynb') {
+        await handleIPYNB(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5955,8 +6048,9 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'unknown' {
     const lang = languageId.toLowerCase();
+    if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -6007,6 +6101,10 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
 
     const trimmed = text.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        // IPYNB heuristic
+        if (trimmed.includes('"cells"') && trimmed.includes('"nbformat"')) {
+            return 'ipynb';
+        }
         // Check if it contains comments, if so it's JSONC
         if (trimmed.includes('//') || trimmed.includes('/*')) {
             return 'jsonc';
