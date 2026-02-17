@@ -1,5 +1,3 @@
-Markdown (.md) — README и документация.
-
 MDX (.mdx) — Markdown с компонентами React.
 
 LaTeX (.tex) — научные статьи и формулы.

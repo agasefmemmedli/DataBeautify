@@ -202,6 +202,231 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('mongodb');
     });
     context.subscriptions.push(formatMongoDBCommand);
+
+    let formatMarkdownCommand = vscode.commands.registerCommand('beautify-format.formatMarkdown', () => {
+        beautify('markdown');
+    });
+    context.subscriptions.push(formatMarkdownCommand);
+}
+
+/**
+ * Handle Markdown formatting and validation
+ */
+async function handleMarkdown(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Markdown
+    validationMessage = validateMarkdown(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let inCodeBlock = false;
+        let inTable = false;
+        let tableRows: string[][] = [];
+
+        const flushTable = (rows: string[][]) => {
+            if (rows.length === 0) return;
+            const maxWidths: number[] = [];
+            rows.forEach(row => {
+                row.forEach((cell, i) => {
+                    maxWidths[i] = Math.max(maxWidths[i] || 0, cell.trim().length);
+                });
+            });
+
+            rows.forEach((row, rowIndex) => {
+                const isSeparator = rowIndex === 1 && row.every(cell => /^\s*:?-+:?\s*$/.test(cell));
+                const formattedRow = row.map((cell, i) => {
+                    const trimmed = cell.trim();
+                    if (isSeparator) {
+                        const hasLeftColon = trimmed.startsWith(':');
+                        const hasRightColon = trimmed.endsWith(':');
+                        let content = '-'.repeat(Math.max(3, maxWidths[i]));
+                        if (hasLeftColon && hasRightColon) {
+                            content = ':' + '-'.repeat(Math.max(1, maxWidths[i] - 2)) + ':';
+                        } else if (hasLeftColon) {
+                            content = ':' + '-'.repeat(Math.max(2, maxWidths[i] - 1));
+                        } else if (hasRightColon) {
+                            content = '-'.repeat(Math.max(2, maxWidths[i] - 1)) + ':';
+                        }
+                        return content;
+                    }
+                    return ' ' + trimmed.padEnd(maxWidths[i]) + ' ';
+                }).join('|');
+                formattedLines.push('|' + formattedRow + '|');
+            });
+        };
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Code blocks
+            if (trimmed.startsWith('```')) {
+                if (inTable) {
+                    flushTable(tableRows);
+                    tableRows = [];
+                    inTable = false;
+                }
+                inCodeBlock = !inCodeBlock;
+                // Ensure blank line before code block if not at start
+                if (inCodeBlock && formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                formattedLines.push(trimmed);
+                // Ensure blank line after code block if it just ended
+                if (!inCodeBlock && i < lines.length - 1 && lines[i + 1].trim() !== '') {
+                    // We'll handle this in the next iteration or by peeking,
+                    // but for simplicity, let's just push a blank line if next is not blank.
+                    // Actually, let's just push it now.
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                formattedLines.push(line);
+                continue;
+            }
+
+            // Tables
+            if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
+                inTable = true;
+                const cells = trimmed.split('|').slice(1, -1);
+                tableRows.push(cells);
+                continue;
+            } else if (inTable) {
+                flushTable(tableRows);
+                tableRows = [];
+                inTable = false;
+            }
+
+            // Empty lines
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Headers
+            if (trimmed.startsWith('#')) {
+                const match = trimmed.match(/^(#+)(.*)$/);
+                if (match) {
+                    const level = match[1];
+                    const content = match[2].trim();
+                    // Ensure blank line before header if not at start
+                    if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                        formattedLines.push('');
+                    }
+                    formattedLines.push(`${level} ${content}`);
+                    continue;
+                }
+            }
+
+            // Horizontal Rules
+            if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
+                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                formattedLines.push('---');
+                continue;
+            }
+
+            // Lists
+            const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+            if (listMatch) {
+                const indent = listMatch[1];
+                let marker = listMatch[2];
+                if (marker === '*' || marker === '+') marker = '-'; // Normalize
+                const content = listMatch[3].trim();
+                formattedLines.push(`${indent}${marker} ${content}`);
+                continue;
+            }
+
+            // Blockquotes
+            if (trimmed.startsWith('>')) {
+                const content = trimmed.substring(1).trim();
+                formattedLines.push(`> ${content}`);
+                continue;
+            }
+
+            // Regular text
+            formattedLines.push(trimmed);
+        }
+
+        if (inTable) {
+            flushTable(tableRows);
+        }
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Markdown: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Markdown has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Markdown formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Markdown validator
+ */
+function validateMarkdown(text: string): string | undefined {
+    let inCodeBlock = false;
+    let codeBlockLine = 0;
+    let inTable = false;
+    let tableStartLine = 0;
+    let tableColumnCount = 0;
+    const lines = text.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('```')) {
+            if (!inCodeBlock) {
+                inCodeBlock = true;
+                codeBlockLine = i + 1;
+            } else {
+                inCodeBlock = false;
+            }
+            continue;
+        }
+
+        if (inCodeBlock) continue;
+
+        if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
+            const cells = trimmed.split('|').slice(1, -1);
+            if (!inTable) {
+                inTable = true;
+                tableStartLine = i + 1;
+                tableColumnCount = cells.length;
+            } else {
+                if (cells.length !== tableColumnCount) {
+                    // Only report if it's not the separator line which might have different splitting if not careful
+                    // but usually it should have the same number of pipes.
+                    // Actually, let's be lenient on separators but strict on data rows.
+                    const isSeparator = cells.every(cell => /^\s*:?-+:?\s*$/.test(cell));
+                    if (!isSeparator) {
+                        return `Inconsistent column count in table at line ${i + 1} (expected ${tableColumnCount}, got ${cells.length})`;
+                    }
+                }
+            }
+        } else {
+            inTable = false;
+        }
+    }
+
+    if (inCodeBlock) {
+        return `Unclosed code block starting at line ${codeBlockLine}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4638,7 +4863,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4736,6 +4961,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handlePrisma(editor, text);
     } else if (format === 'mongodb') {
         await handleMongoDB(editor, text);
+    } else if (format === 'markdown') {
+        await handleMarkdown(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4776,7 +5003,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4815,6 +5042,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'sql') { return 'sql'; }
     if (lang === 'prisma') { return 'prisma'; }
     if (lang === 'mongodb') { return 'mongodb'; }
+    if (lang === 'markdown') { return 'markdown'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -5129,6 +5357,17 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /^[A-Z_]+ = /m.test(trimmed)
     ) {
         return 'makefile';
+    }
+
+    // Markdown heuristic
+    if (
+        /^\s*#\s+.+/m.test(trimmed) ||
+        /^\s*```[a-z]*\s*$/m.test(trimmed) ||
+        /^\s*\|.*\|.*\|/m.test(trimmed) ||
+        /^\s*[-*+]\s+.+/m.test(trimmed) ||
+        /\[.+\]\(.+\)/.test(trimmed)
+    ) {
+        return 'markdown';
     }
 
     // Nginx heuristic
