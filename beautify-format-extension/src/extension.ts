@@ -43,6 +43,9 @@ export function activate(context: vscode.ExtensionContext) {
     let formatCSSCommand = vscode.commands.registerCommand('beautify-format.formatCSS', () => {
         beautify('css');
     });
+    let formatHTMLCommand = vscode.commands.registerCommand('beautify-format.formatHTML', () => {
+        beautify('html');
+    });
 
     let formatSCSSCommand = vscode.commands.registerCommand('beautify-format.formatSCSS', () => {
         beautify('scss');
@@ -130,6 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(formatJSONCommand);
     context.subscriptions.push(formatXMLCommand);
     context.subscriptions.push(formatCSSCommand);
+    context.subscriptions.push(formatHTMLCommand);
     context.subscriptions.push(formatSCSSCommand);
     context.subscriptions.push(formatSASSCommand);
     context.subscriptions.push(formatLESSCommand);
