@@ -242,6 +242,11 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(formatLiquidCommand);
 
+    let formatSVGCommand = vscode.commands.registerCommand('beautify-format.formatSVG', () => {
+        beautify('svg');
+    });
+    context.subscriptions.push(formatSVGCommand);
+
     let formatIPYNBCommand = vscode.commands.registerCommand('beautify-format.formatIPYNB', () => {
         beautify('ipynb');
     });
@@ -5894,7 +5899,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5918,6 +5923,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleJSONC(editor, text);
     } else if (format === 'xml') {
         await handleXML(editor, text);
+    } else if (format === 'svg') {
+        await handleSVG(editor, text);
     } else if (format === 'html') {
         await handleHTML(editor, text);
     } else if (format === 'css') {
@@ -6048,12 +6055,13 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
+    if (lang === 'svg') { return 'svg'; }
     if (lang === 'html' || lang === 'htm') { return 'html'; }
     if (lang === 'css') { return 'css'; }
     if (lang === 'scss') { return 'scss'; }
@@ -6110,6 +6118,11 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
             return 'jsonc';
         }
         return 'json';
+    }
+
+    // SVG heuristic
+    if (trimmed.startsWith('<svg') || trimmed.includes('xmlns="http://www.w3.org/2000/svg"')) {
+        return 'svg';
     }
 
     // Handlebars heuristic
@@ -6782,6 +6795,41 @@ async function handleXML(editor: vscode.TextEditor, text: string) {
         vscode.window.showWarningMessage(`XML was invalid but beautified. Error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('XML formatted successfully!');
+    }
+}
+
+/**
+ * Handle SVG formatting and validation
+ */
+async function handleSVG(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate SVG (as XML)
+    const result = XMLValidator.validate(text);
+    if (result !== true) {
+        validationMessage = `${result.err.msg} at line ${result.err.line}, col ${result.err.col}`;
+    }
+
+    try {
+        // Format SVG using xml-formatter
+        formatted = xmlFormatter(text, {
+            indentation: '  ',
+            collapseContent: true,
+            lineSeparator: '\n',
+            whiteSpaceAtEndOfSelfclosingTag: true
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format SVG: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`SVG has syntax issues but was beautified. Error: ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('SVG formatted successfully!');
     }
 }
 

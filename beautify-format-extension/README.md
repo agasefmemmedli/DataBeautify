@@ -1,6 +1,6 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid and Jupyter Notebook files.
+A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, SVG, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid and Jupyter Notebook files.
 
 ## Features
 
@@ -47,12 +47,13 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 - 🎨 Format MongoDB Shell files with proper indentation
 - 🎨 Format Markdown files with proper indentation, list normalization and table alignment
 - 🎨 Format LaTeX files with proper indentation and environment nesting
+- 🎨 Format SVG files with proper indentation and self-closing tag normalization
 - 🎨 Format MDX files with proper indentation, JSX support and ESM integration
 - 🎨 Format Log files with timestamp alignment and level normalization
 - 🎨 Format Handlebars files with proper indentation for blocks and HTML
 - 🎨 Format Twig files with proper indentation
 - 🎨 Format Liquid files with proper indentation
-- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid or Jupyter Notebook)
+- 🔍 Automatic format detection (JSON, JSONC, XML, SVG, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, SVG, MDX, Log, Handlebars, Twig, Liquid or Jupyter Notebook)
 - 🛠️ Smart repair: Fixes minor errors in supported formats while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
