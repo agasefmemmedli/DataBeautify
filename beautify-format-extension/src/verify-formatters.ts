@@ -54,7 +54,8 @@ async function runTests() {
         'makefile': 'makefile',
         'nginx': 'nginx',
         'sql': 'sql',
-        'md': 'markdown'
+        'md': 'markdown',
+        'tex': 'latex'
     };
 
     let passed = 0;
