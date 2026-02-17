@@ -197,6 +197,81 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('prisma');
     });
     context.subscriptions.push(formatPrismaCommand);
+
+    let formatMongoDBCommand = vscode.commands.registerCommand('beautify-format.formatMongoDB', () => {
+        beautify('mongodb');
+    });
+    context.subscriptions.push(formatMongoDBCommand);
+}
+
+/**
+ * Handle MongoDB Shell formatting and validation
+ */
+async function handleMongoDB(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate MongoDB
+    validationMessage = validateMongoDB(text);
+
+    /* eslint-disable */
+    try {
+        // Format MongoDB (using js-beautify's JS formatter)
+        formatted = jsbeautify.js(text, {
+            indent_size: 2,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format MongoDB Shell: ${error.message}`);
+        return;
+    }
+    /* eslint-enable */
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`MongoDB Shell script has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('MongoDB Shell script formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient MongoDB Shell validator
+ */
+function validateMongoDB(text: string): string | undefined {
+    // MongoDB Shell supports some specific commands like 'use', 'show', 'it', 'exit', 'quit', 'cls'
+    // We'll comment them out for validation to avoid false positives with acorn
+    const lines = text.split('\n');
+    const processedLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (/^\s*(use|show|it|exit|quit|cls)\b/i.test(trimmed)) {
+            return '// ' + line;
+        }
+        return line;
+    });
+    const processedText = processedLines.join('\n');
+
+    try {
+        acorn.parse(processedText, { ecmaVersion: 'latest', sourceType: 'module' });
+    } catch (e: any) {
+        return `${e.message} at line ${e.loc?.line}, col ${e.loc?.column}`;
+    }
+
+    return undefined;
 }
 
 /**
@@ -4563,7 +4638,7 @@ function validateDockerfile(text: string): string | undefined {
 /**
  * Main beautify function with auto-detection
  */
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -4659,6 +4734,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleSQL(editor, text);
     } else if (format === 'prisma') {
         await handlePrisma(editor, text);
+    } else if (format === 'mongodb') {
+        await handleMongoDB(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -4699,7 +4776,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -4737,6 +4814,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'nginx') { return 'nginx'; }
     if (lang === 'sql') { return 'sql'; }
     if (lang === 'prisma') { return 'prisma'; }
+    if (lang === 'mongodb') { return 'mongodb'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
     }
@@ -4800,6 +4878,14 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         /(@id|@unique|@default|@relation|@@id|@@unique|@@index|@@map)\b/.test(trimmed)
     ) {
         return 'prisma';
+    }
+
+    // MongoDB Shell heuristic
+    if (
+        /^\s*(db\.|sh\.|rs\.|use\s+|show\s+(collections|dbs|databases|users|roles))\b/m.test(trimmed) ||
+        /\b(ObjectId|ISODate|Timestamp|NumberInt|NumberLong|Decimal128|DBRef)\s*\(/.test(trimmed)
+    ) {
+        return 'mongodb';
     }
 
     // SASS heuristic
