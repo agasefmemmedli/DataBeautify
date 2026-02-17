@@ -251,6 +251,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('ipynb');
     });
     context.subscriptions.push(formatIPYNBCommand);
+
+    let formatGitConfigCommand = vscode.commands.registerCommand('beautify-format.formatGitConfig', () => {
+        beautify('gitconfig');
+    });
+    context.subscriptions.push(formatGitConfigCommand);
 }
 
 /**
@@ -5383,6 +5388,142 @@ function validateDockerfile(text: string): string | undefined {
  * Main beautify function with auto-detection
  */
 /**
+ * Handle Git Config formatting and validation
+ */
+async function handleGitConfig(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Git Config
+    validationMessage = validateGitConfig(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i].trim();
+
+            if (line === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Comments
+            if (line.startsWith('#') || line.startsWith(';')) {
+                formattedLines.push(line);
+                continue;
+            }
+
+            // Sections [section "subsection"]
+            if (line.startsWith('[')) {
+                formattedLines.push(line);
+                continue;
+            }
+
+            // Key-Value pairs
+            // Handle multiline values (ending with \)
+            // We need to check if the previous line ended with \ to know if we are in a multiline value?
+            // But here we are processing line by line.
+            // Wait, if we just trim and indent, we might break multiline values if we indent the continuation lines blindly.
+            // Git config continuation lines are usually indented.
+
+            // Let's refine the loop to handle multiline.
+            // But first, let's just handle simple key = value indentation.
+
+            // Check if it looks like a property: key = value
+            if (/^[a-z0-9-]+\s*=/i.test(line)) {
+                formattedLines.push('\t' + line);
+            } else {
+                // Continuation or unknown?
+                // If it's not a comment, not a section, and not a key=value start, it might be a continuation.
+                // Or it might be a broken line.
+                // We'll indent it to be safe, assuming it belongs to the previous property.
+                formattedLines.push('\t' + line);
+            }
+        }
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Git Config: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Git Config has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Git Config formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Git Config validator
+ */
+function validateGitConfig(text: string): string | undefined {
+    const lines = text.split('\n');
+    let inSection = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+
+        if (line.startsWith('[')) {
+            if (!line.endsWith(']')) {
+                // Check if it has a comment at the end
+                // [section] # comment
+                const commentIdx = Math.min(
+                    line.indexOf('#') === -1 ? Infinity : line.indexOf('#'),
+                    line.indexOf(';') === -1 ? Infinity : line.indexOf(';')
+                );
+
+                if (commentIdx !== Infinity) {
+                    const beforeComment = line.substring(0, commentIdx).trim();
+                    if (!beforeComment.endsWith(']')) {
+                         return `Unclosed section header at line ${i + 1}`;
+                    }
+                } else {
+                    return `Unclosed section header at line ${i + 1}`;
+                }
+            }
+            inSection = true;
+            continue;
+        }
+
+        // Check for key = value
+        // But multiline values exist.
+        // Simple check: if it has `=`, check quotes.
+
+        let quoteCount = 0;
+        let escape = false;
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            if (escape) {
+                escape = false;
+                continue;
+            }
+            if (char === '\\') {
+                escape = true;
+                continue;
+            }
+            if (char === '"') {
+                quoteCount++;
+            }
+        }
+
+        if (quoteCount % 2 !== 0) {
+            // Multiline string?
+            // If line ends with \, it continues.
+            if (!line.endsWith('\\')) {
+                 return `Unclosed quote at line ${i + 1}`;
+            }
+        }
+    }
+    return undefined;
+}
+
+/**
  * Handle Handlebars formatting and validation
  */
 async function handleHandlebars(editor: vscode.TextEditor, text: string) {
@@ -5899,7 +6040,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -6015,6 +6156,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
         await handleLiquid(editor, text);
     } else if (format === 'ipynb') {
         await handleIPYNB(editor, text);
+    } else if (format === 'gitconfig') {
+        await handleGitConfig(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -6055,9 +6198,10 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
+    if (lang === 'gitconfig' || lang === 'git-config') { return 'gitconfig'; }
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
     if (lang === 'xml' || lang === 'xsl') { return 'xml'; }
@@ -6108,6 +6252,16 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     }
 
     const trimmed = text.trim();
+
+    // Git Config heuristic
+    if (
+        /^\s*\[(core|remote|branch|user|alias|include|diff|merge|pull|push|init|credential)\]/.test(trimmed) ||
+        /^\s*\[(remote|branch|submodule)\s+".+"\]/.test(trimmed) ||
+        /^\s*repositoryformatversion\s*=\s*\d+/.test(trimmed)
+    ) {
+        return 'gitconfig';
+    }
+
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         // IPYNB heuristic
         if (trimmed.includes('"cells"') && trimmed.includes('"nbformat"')) {
