@@ -87,6 +87,7 @@
     "onCommand:beautify-format.formatMDX",
     "onCommand:beautify-format.formatLog",
     "onCommand:beautify-format.formatHandlebars",
+    "onCommand:beautify-format.formatTwig",
     "onLanguage:json",
     "onLanguage:jsonc",
     "onLanguage:xml",
@@ -138,7 +139,8 @@
     "onLanguage:tex",
     "onLanguage:mdx",
     "onLanguage:log",
-    "onLanguage:handlebars"
+    "onLanguage:handlebars",
+    "onLanguage:twig"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -326,6 +328,10 @@
       {
         "command": "beautify-format.formatHandlebars",
         "title": "Beautify Handlebars"
+      },
+      {
+        "command": "beautify-format.formatTwig",
+        "title": "Beautify Twig"
       }
     ],
     "keybindings": [
@@ -340,7 +346,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log || editorLangId == handlebars",
+          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml || editorLangId == html || editorLangId == css || editorLangId == scss || editorLangId == sass || editorLangId == less || editorLangId == javascript || editorLangId == typescript || editorLangId == javascriptreact || editorLangId == typescriptreact || editorLangId == vue || editorLangId == svelte || editorLangId == php || editorLangId == yaml || editorLangId == yml || editorLangId == toml || editorLangId == ini || editorLangId == dotenv || editorLangId == env || editorLangId == csv || editorLangId == graphql || editorLangId == python || editorLangId == java || editorLangId == kotlin || editorLangId == csharp || editorLangId == cpp || editorLangId == c || editorLangId == go || editorLangId == rust || editorLangId == ruby || editorLangId == swift || editorLangId == dart || editorLangId == dockerfile || editorLangId == shellscript || editorLangId == sh || editorLangId == powershell || editorLangId == terraform || editorLangId == hcl || editorLangId == terraform-vars || editorLangId == makefile || editorLangId == nginx || editorLangId == sql || editorLangId == prisma || editorLangId == mongodb || editorLangId == markdown || editorLangId == latex || editorLangId == tex || editorLangId == mdx || editorLangId == log || editorLangId == handlebars || editorLangId == twig",
           "group": "1_modification"
         }
       ]

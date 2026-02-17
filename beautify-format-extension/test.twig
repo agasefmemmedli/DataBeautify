@@ -1,0 +1,19 @@
+{# This is a comment #}
+{% extends "base.html" %}
+
+{% block content %}
+    {% set active_page = "home" %}
+    <h1>{{ title }}</h1>
+    {% if user.is_logged_in %}
+        <p>Welcome, {{ user.name }}!</p>
+        <ul>
+        {% for item in items %}
+            <li>{{ item.name }}</li>
+        {% else %}
+            <li>No items found.</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>Please log in.</p>
+    {% endif %}
+{% endblock %}

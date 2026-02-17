@@ -231,6 +231,11 @@ export function activate(context: vscode.ExtensionContext) {
         beautify('handlebars');
     });
     context.subscriptions.push(formatHandlebarsCommand);
+
+    let formatTwigCommand = vscode.commands.registerCommand('beautify-format.formatTwig', () => {
+        beautify('twig');
+    });
+    context.subscriptions.push(formatTwigCommand);
 }
 
 /**
@@ -5488,6 +5493,226 @@ function validateHandlebars(text: string): string | undefined {
 }
 
 /**
+ * Handle Twig formatting and validation
+ */
+async function handleTwig(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Twig
+    validationMessage = validateTwig(text);
+
+    // Resilient formatting logic
+    try {
+        const lines = text.split('\n');
+        const formattedLines: string[] = [];
+        let indentLevel = 0;
+
+        // Void tags that don't need closing
+        const voidTags = [
+            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+            'link', 'meta', 'param', 'source', 'track', 'wbr'
+        ];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed === '') {
+                formattedLines.push('');
+                continue;
+            }
+
+            // Check for dedentation triggers at the start of the line
+            let currentIndent = indentLevel;
+
+            // Closing Twig block: {% endif %}, {% endblock %}, etc.
+            if (/^{%\s*end(if|for|block|macro|embed|apply|sandbox|autoescape|verbatim|set|with|filter|trans)\b/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Middle Twig block: {% else %}, {% elseif %}
+            else if (/^{%\s*(else|elseif)\b/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Closing HTML tag: </div>
+            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+            // Closing brace } or ]
+            else if (trimmed.startsWith('}') || trimmed.startsWith(']')) {
+                 currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            // Apply indentation
+            formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+            // Calculate indentation for the NEXT line
+            let netChange = 0;
+
+            // Remove comments for analysis
+            const lineNoComments = line.replace(/{#[\s\S]*?#}/g, '').replace(/<!--[\s\S]*?-->/g, '');
+
+            // Check for Twig block openers/closers
+            const twigTagRegex = /{%-?\s*([a-zA-Z0-9_]+)([^%]*?)-?%}/g;
+            let twigMatch;
+            let twigOpeners = 0;
+            let twigClosers = 0;
+
+            while ((twigMatch = twigTagRegex.exec(lineNoComments)) !== null) {
+                const tagName = twigMatch[1];
+                const content = twigMatch[2];
+
+                if (/^end/.test(tagName)) {
+                    twigClosers++;
+                } else if (/^(block|if|for|macro|embed|apply|sandbox|autoescape|verbatim|with|filter|trans)$/.test(tagName)) {
+                    twigOpeners++;
+                } else if (tagName === 'set') {
+                    // Only count as opener if it's a block set (no '=' assignment)
+                    if (!content.includes('=')) {
+                        twigOpeners++;
+                    }
+                }
+            }
+
+            // Check for HTML tag openers
+            let htmlOpeners = 0;
+            let htmlClosers = 0;
+
+            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
+            let match;
+            while ((match = tagRegex.exec(lineNoComments)) !== null) {
+                const fullTag = match[0];
+                const tagName = match[1].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isClosing) {
+                    htmlClosers++;
+                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
+                    htmlOpeners++;
+                }
+            }
+
+            // Check for brace openers/closers (approximate for objects/arrays)
+            const braceOpeners = (lineNoComments.match(/\{|\[/g) || []).length;
+            const braceClosers = (lineNoComments.match(/\}|\]/g) || []).length;
+            // Ignore double braces used for Twig {{ }}
+            const variableOpeners = (lineNoComments.match(/{{/g) || []).length;
+            const variableClosers = (lineNoComments.match(/}}/g) || []).length;
+
+            // Adjust brace count by removing variable braces
+            // Each {{ is 2 {, each }} is 2 }
+            const realBraceOpeners = braceOpeners - (variableOpeners * 2);
+            const realBraceClosers = braceClosers - (variableClosers * 2);
+
+            // Only count if positive (simple heuristic)
+            const netBraceChange = Math.max(0, realBraceOpeners) - Math.max(0, realBraceClosers);
+
+            netChange = (twigOpeners - twigClosers) + (htmlOpeners - htmlClosers) + netBraceChange;
+
+            // Special handling for intermediate tags: they essentially reset indent for themselves but keep it for content
+            // Logic handled by dedent at start, so just ensure we don't double count if we consider them openers?
+            // No, 'else' is not in the openers regex above. So it's fine.
+
+            indentLevel = Math.max(0, indentLevel + netChange);
+        }
+
+        formatted = formattedLines.join('\n');
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Twig: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Twig has syntax issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Twig formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Twig validator
+ */
+function validateTwig(text: string): string | undefined {
+    const stack: { tag: string, line: number, type: 'twig' | 'html' }[] = [];
+    const lines = text.split('\n');
+
+    const voidTags = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Remove comments
+        const lineNoComments = line.replace(/{#[\s\S]*?#}/g, '').replace(/<!--[\s\S]*?-->/g, '');
+
+        // Regex for tags
+        const regex = /({%\s*(block|if|for|macro|embed|apply|sandbox|autoescape|verbatim|set|with|filter|trans)\b)|({%\s*end(block|if|for|macro|embed|apply|sandbox|autoescape|verbatim|set|with|filter|trans)\b)|(<\/?([a-zA-Z0-9]+)[^>]*>)/g;
+        let match;
+
+        while ((match = regex.exec(lineNoComments)) !== null) {
+            if (match[1]) { // Twig Open
+                const tagName = match[2];
+                // 'set' can be self-closing (assignment) or block
+                if (tagName === 'set' && lineNoComments.includes('=')) {
+                    continue;
+                }
+                stack.push({ tag: tagName, line: i + 1, type: 'twig' });
+            } else if (match[3]) { // Twig Close
+                const tagName = match[4];
+                if (stack.length === 0) {
+                    return `Unexpected closing block {% end${tagName} %} at line ${i + 1}`;
+                }
+                const last = stack.pop()!;
+                if (last.type !== 'twig' || last.tag !== tagName) {
+                    return `Mismatched closing block {% end${tagName} %} at line ${i + 1} (expected {% end${last.tag} %} for ${last.tag} from line ${last.line})`;
+                }
+            } else if (match[5]) { // HTML Tag
+                const fullTag = match[5];
+                const tagName = match[6].toLowerCase();
+                const isClosing = fullTag.startsWith('</');
+                const isSelfClosing = fullTag.endsWith('/>');
+
+                if (isSelfClosing || voidTags.includes(tagName)) {
+                    continue;
+                }
+
+                if (isClosing) {
+                    if (stack.length === 0) {
+                        return `Unexpected closing tag </${tagName}> at line ${i + 1}`;
+                    }
+                    const last = stack.pop()!;
+                    // If we find a Twig block, it means invalid nesting
+                    if (last.type === 'twig') {
+                         return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected {% end${last.tag} %} from line ${last.line})`;
+                    }
+                    if (last.tag !== tagName) {
+                        return `Mismatched closing tag </${tagName}> at line ${i + 1} (expected </${last.tag}> from line ${last.line})`;
+                    }
+                } else {
+                    stack.push({ tag: tagName, line: i + 1, type: 'html' });
+                }
+            }
+        }
+    }
+
+    if (stack.length > 0) {
+        const last = stack.pop()!;
+        if (last.type === 'twig') {
+            return `Unclosed block {% ${last.tag} %} starting at line ${last.line}`;
+        } else {
+            return `Unclosed tag <${last.tag}> starting at line ${last.line}`;
+        }
+    }
+
+    return undefined;
+}
+
+/**
  * Handle Log file formatting and validation
  */
 async function handleLog(editor: vscode.TextEditor, text: string) {
@@ -5573,7 +5798,7 @@ function validateLog(text: string): string | undefined {
     return 'No recognized timestamp patterns found in the first few lines.';
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -5681,6 +5906,8 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
         await handleLog(editor, text);
     } else if (format === 'handlebars') {
         await handleHandlebars(editor, text);
+    } else if (format === 'twig') {
+        await handleTwig(editor, text);
     } else {
         // If unknown, try JSON first then CSS/XML/HTML
         try {
@@ -5721,7 +5948,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'html' 
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'json') { return 'json'; }
     if (lang === 'jsonc') { return 'jsonc'; }
@@ -5764,6 +5991,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'mdx') { return 'mdx'; }
     if (lang === 'log') { return 'log'; }
     if (lang === 'handlebars' || lang === 'hbs' || lang === 'mustache') { return 'handlebars'; }
+    if (lang === 'twig') { return 'twig'; }
     if (lang === 'latex' || lang === 'tex') { return 'latex'; }
     if (lang === 'dart' || lang === 'dockerfile' || lang === 'shellscript' || lang === 'sh') {
         return lang === 'shellscript' || lang === 'sh' ? 'shell' : lang as any;
@@ -5781,6 +6009,11 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     // Handlebars heuristic
     if (trimmed.includes('{{') && trimmed.includes('}}') && (trimmed.includes('{{#') || trimmed.includes('{{/') || trimmed.includes('{{>'))) {
         return 'handlebars';
+    }
+
+    // Twig heuristic
+    if (trimmed.includes('{%') && trimmed.includes('%}') && (trimmed.includes('{% block') || trimmed.includes('{% if') || trimmed.includes('{% for') || trimmed.includes('{% extends'))) {
+        return 'twig';
     }
 
     // PHP heuristic
