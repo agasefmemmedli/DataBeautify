@@ -1,9 +1,10 @@
 # Beautify Format
 
-A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig and Liquid files.
+A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid and Jupyter Notebook files.
 
 ## Features
 
+- 🎨 Format Jupyter Notebook (.ipynb) files with nested Python code formatting
 - 🎨 Format JSON files with proper indentation
 - 🎨 Format JSONC files with comments preserved
 - 🎨 Format XML files with proper indentation
@@ -51,7 +52,7 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 - 🎨 Format Handlebars files with proper indentation for blocks and HTML
 - 🎨 Format Twig files with proper indentation
 - 🎨 Format Liquid files with proper indentation
-- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig or Liquid)
+- 🔍 Automatic format detection (JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid or Jupyter Notebook)
 - 🛠️ Smart repair: Fixes minor errors in supported formats while beautifying
 - 📍 Error reporting: Highlights the line with syntax errors if found
 - ⌨️ Keyboard shortcuts for quick formatting
@@ -61,7 +62,7 @@ A Visual Studio Code extension that beautifully formats JSON, JSONC, XML, HTML, 
 
 ### Formatting Supported Languages
 
-1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig or Liquid file
+1. Open a JSON, JSONC, XML, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown, LaTeX, MDX, Log, Handlebars, Twig, Liquid or Jupyter Notebook file
 2. Use one of the following methods:
    - Press `Ctrl+Alt+B` (Windows/Linux) or `Cmd+Alt+B` (Mac)
    - Open the Command Palette (`Ctrl+Shift+P`) and select "Beautify Format"

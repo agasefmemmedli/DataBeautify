@@ -1,5 +1,3 @@
-Jupyter Notebook (.ipynb) — JSON-структура тетрадок Python.
-
 SVG (.svg) — по сути XML, но часто требует специфического сжатия/очистки.
 
 Git Config (.gitconfig) — локальные настройки Git.
