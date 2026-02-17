@@ -355,3 +355,14 @@
 
 ### Auto-Detection
 - **Heuristic:** Combined languageId check ('sql') with content-based heuristics. Looked for common SQL starting keywords (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, etc.) and patterns like the combination of FROM and WHERE or the CREATE TABLE statement. This ensures reliable identification of SQL snippets even without an explicit language ID.
+
+## Prisma Support (v0.30.0)
+
+### Validation & Fault-Tolerance
+- **Decision:** Implemented a custom resilient line-by-line formatter and character-by-character validator for Prisma schema files.
+- **Resilient Formatting:** The formatter normalizes indentation to 2 spaces. It is state-aware, handling single-line comments (//, ///) and block comments (/* */) to ensure that braces inside them do not affect indentation.
+- **Structural Awareness:** It tracks brace depth ({ }) to apply proper indentation. Closing braces at the start of a line are out-dented for the current line, providing a clean and structured layout for datasource, generator, model, and enum blocks.
+- **Error Reporting:** Structural issues like mismatched braces, unclosed string literals, or unclosed block comments are reported as VS Code warnings, surfacing the first identified issue while still completing the beautification process.
+
+### Auto-Detection
+- **Heuristic:** Combined languageId check ('prisma') with content-based heuristics. Looked for Prisma-specific block starts (datasource, generator, model, enum, type followed by {) and common attributes like @id, @unique, @default, or @@map. This ensures reliable identification of Prisma schemas even without the .prisma extension.
