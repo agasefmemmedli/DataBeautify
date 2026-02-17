@@ -12,6 +12,7 @@ async function build() {
             external: ['vscode'],
             sourcemap: true,
             format: 'cjs',
+            mainFields: ['module', 'main'], // Prefer ESM to avoid UMD issues
         });
         console.log('Build complete');
     } catch (e) {
