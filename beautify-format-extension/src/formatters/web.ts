@@ -150,28 +150,48 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
     const jsbeautify = require('js-beautify');
 
     // Validate CSS
+    let ast: any;
     try {
-        const obj = css.parse(text, { silent: true });
-        if (obj.stylesheet && obj.stylesheet.parsingErrors && obj.stylesheet.parsingErrors.length > 0) {
-            const firstError = obj.stylesheet.parsingErrors[0];
+        ast = css.parse(text, { silent: true });
+        if (ast.stylesheet && ast.stylesheet.parsingErrors && ast.stylesheet.parsingErrors.length > 0) {
+            const firstError = ast.stylesheet.parsingErrors[0];
             validationMessage = `${firstError.reason} at line ${firstError.line}, col ${firstError.column}`;
-            if (obj.stylesheet.parsingErrors.length > 1) {
-                validationMessage += ` (and ${obj.stylesheet.parsingErrors.length - 1} more errors)`;
+            if (ast.stylesheet.parsingErrors.length > 1) {
+                validationMessage += ` (and ${ast.stylesheet.parsingErrors.length - 1} more errors)`;
             }
         }
     } catch (e: any) {
         validationMessage = e.message;
     }
 
+    let cssTextToFormat = text;
+
+    // If no errors, normalize with css.stringify to add semicolons and fix structure
+    if (!validationMessage && ast && (!ast.stylesheet.parsingErrors || ast.stylesheet.parsingErrors.length === 0)) {
+        try {
+            const stringified = css.stringify(ast, { compress: false });
+            if (stringified) {
+                cssTextToFormat = stringified;
+            }
+        } catch (e) {
+            // If stringify fails, fallback to original text
+            console.error('CSS stringify failed:', e);
+        }
+    }
+
     /* eslint-disable */
     try {
         // Format CSS
-        formatted = jsbeautify.css(text, {
+        formatted = jsbeautify.css(cssTextToFormat, {
             indent_size: 2,
             indent_char: ' ',
             selector_separator_newline: true,
             newline_between_rules: true,
-            end_with_newline: false
+            end_with_newline: true,
+            preserve_newlines: true,
+            max_preserve_newlines: 1,
+            space_around_combinator: true,
+            space_around_selector_separator: true
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
