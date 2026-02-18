@@ -1,5 +1,3 @@
-Vue (.vue) — однофайловые компоненты Vue.
-
 Svelte (.svelte) — компоненты Svelte.
 
 PHP (.php) — все еще лидер в backend-разработке сайтов.
