@@ -150,13 +150,14 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
     const jsbeautify = require('js-beautify');
 
     // Validate CSS
+    let ast: any;
     try {
-        const obj = css.parse(text, { silent: true });
-        if (obj.stylesheet && obj.stylesheet.parsingErrors && obj.stylesheet.parsingErrors.length > 0) {
-            const firstError = obj.stylesheet.parsingErrors[0];
+        ast = css.parse(text, { silent: true });
+        if (ast.stylesheet && ast.stylesheet.parsingErrors && ast.stylesheet.parsingErrors.length > 0) {
+            const firstError = ast.stylesheet.parsingErrors[0];
             validationMessage = `${firstError.reason} at line ${firstError.line}, col ${firstError.column}`;
-            if (obj.stylesheet.parsingErrors.length > 1) {
-                validationMessage += ` (and ${obj.stylesheet.parsingErrors.length - 1} more errors)`;
+            if (ast.stylesheet.parsingErrors.length > 1) {
+                validationMessage += ` (and ${ast.stylesheet.parsingErrors.length - 1} more errors)`;
             }
         }
     } catch (e: any) {
@@ -165,17 +166,30 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
 
     /* eslint-disable */
     try {
-        // Format CSS
-        formatted = jsbeautify.css(text, {
-            indent_size: 2,
-            indent_char: ' ',
-            selector_separator_newline: true,
-            newline_between_rules: true,
-            end_with_newline: false
-        });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
-        return;
+        // Strict Formatting: Try to use css.stringify for valid CSS (enforces semicolons, etc.)
+        if (!validationMessage && ast) {
+            formatted = css.stringify(ast, { indent: '  ' });
+        } else {
+            // Fallback: Use js-beautify for resilient formatting of invalid CSS or if strict failed
+            throw new Error('Validation failed');
+        }
+    } catch (strictError) {
+        try {
+            // Format CSS with js-beautify
+            formatted = jsbeautify.css(text, {
+                indent_size: 2,
+                indent_char: ' ',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: true,
+                preserve_newlines: true,
+                max_preserve_newlines: 1,
+                space_around_combinator: true
+            });
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
+            return;
+        }
     }
     /* eslint-enable */
 
