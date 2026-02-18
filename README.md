@@ -1,5 +1,3 @@
-TypeScript (.ts) — типизированный JS.
-
 JSX (.jsx) — React компоненты.
 
 TSX (.tsx) — React компоненты на TypeScript.

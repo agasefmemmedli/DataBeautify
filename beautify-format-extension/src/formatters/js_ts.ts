@@ -46,11 +46,14 @@ export async function handleJS(editor: vscode.TextEditor, text: string) {
             useTabs: !insertSpaces,
             semi: true,
             singleQuote: true,
+            quoteProps: 'as-needed',
+            jsxSingleQuote: false,
             trailingComma: 'es5',
             bracketSpacing: true,
             arrowParens: 'always',
             printWidth: 120,
-            endOfLine: 'lf'
+            endOfLine: 'lf',
+            embeddedLanguageFormatting: 'auto'
         });
     } catch (prettierError: any) {
         // Fallback to js-beautify
@@ -73,7 +76,10 @@ export async function handleJS(editor: vscode.TextEditor, text: string) {
                 e4x: true,
                 indent_empty_lines: false,
                 space_after_anon_function: true,
-                indent_inner_html: true
+                indent_inner_html: true,
+                space_in_empty_paren: false,
+                space_in_paren: false,
+                selector_separator_newline: true
             });
             if (!validationMessage) {
                  validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
@@ -135,11 +141,14 @@ export async function handleTS(editor: vscode.TextEditor, text: string) {
             useTabs: !insertSpaces,
             semi: true,
             singleQuote: true,
+            quoteProps: 'as-needed',
+            jsxSingleQuote: false,
             trailingComma: 'es5',
             bracketSpacing: true,
             arrowParens: 'always',
             printWidth: 120,
-            endOfLine: 'lf'
+            endOfLine: 'lf',
+            embeddedLanguageFormatting: 'auto'
         });
     } catch (prettierError: any) {
         // Fallback to js-beautify
@@ -162,7 +171,10 @@ export async function handleTS(editor: vscode.TextEditor, text: string) {
                 e4x: true,
                 indent_empty_lines: false,
                 space_after_anon_function: true,
-                indent_inner_html: true
+                indent_inner_html: true,
+                space_in_empty_paren: false,
+                space_in_paren: false,
+                selector_separator_newline: true
             });
             if (!validationMessage) {
                  validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
