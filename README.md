@@ -1,5 +1,3 @@
-JavaScript (.js, .mjs, .cjs) — логика на стороне клиента и сервера.
-
 TypeScript (.ts) — типизированный JS.
 
 JSX (.jsx) — React компоненты.
