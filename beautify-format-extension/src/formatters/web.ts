@@ -19,11 +19,18 @@ export async function handleXML(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        // Get indentation options from editor
+        const tabSize = editor.options.tabSize;
+        const insertSpaces = editor.options.insertSpaces;
+        const indentation = insertSpaces ? ' '.repeat(Number(tabSize) || 2) : '\t';
+
         // Format XML (xml-formatter is somewhat lenient and will try to fix issues)
         formatted = xmlFormatter(text, {
-            indentation: '  ',
+            indentation,
             collapseContent: true,
-            lineSeparator: '\n'
+            lineSeparator: '\n',
+            whiteSpaceAtEndOfSelfclosingTag: true,
+            forceSelfClosingEmptyTag: true
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format XML: ${error.message}`);

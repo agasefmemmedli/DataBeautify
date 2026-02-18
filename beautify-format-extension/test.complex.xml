@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <item id="1"   active="true">  text content  </item>
+    <empty></empty>
+    <selfclosing/>
+    <nested>
+        <child>value</child>
+    </nested>
+    <long attr1="value1" attr2="value2" attr3="value3" attr4="value4" attr5="value5" />
+    <mixed>
+        Some text
+        <inline>more text</inline>
+    </mixed>
+    <comment><!-- This is a comment --></comment>
+    <cdata><![CDATA[ <not>xml</not> ]]></cdata>
+</root>
