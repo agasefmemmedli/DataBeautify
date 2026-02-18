@@ -236,11 +236,15 @@ export async function handleTSX(editor: vscode.TextEditor, text: string) {
             useTabs: !insertSpaces,
             semi: true,
             singleQuote: true,
+            quoteProps: 'as-needed',
+            jsxSingleQuote: false,
             trailingComma: 'es5',
             bracketSpacing: true,
+            bracketSameLine: false,
             arrowParens: 'always',
             printWidth: 120,
-            endOfLine: 'lf'
+            endOfLine: 'lf',
+            embeddedLanguageFormatting: 'auto'
         });
     } catch (prettierError: any) {
          // Fallback to js-beautify

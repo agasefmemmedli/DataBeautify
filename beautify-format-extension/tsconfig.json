@@ -23,6 +23,7 @@
     "test.jsx",
     "test-broken.jsx",
     "test.tsx",
-    "test.complex.ts"
+    "test.complex.ts",
+    "test.complex.tsx"
   ]
 }
