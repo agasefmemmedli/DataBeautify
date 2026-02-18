@@ -76,6 +76,10 @@ async function runTests() {
         // Mock editor
         let formattedText = '';
         const mockEditor = {
+            options: {
+                tabSize: 2,
+                insertSpaces: true
+            },
             document: {
                 getText: () => content,
                 lineCount: lines.length,

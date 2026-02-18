@@ -1,5 +1,3 @@
-XML
-
 JSON
 
 HTML (.html, .htm) — основа веба.
