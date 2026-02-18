@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit } from '../utils';
+import { applyEdit, loadESM } from '../utils';
 
 /**
  * Handle XML formatting and validation
@@ -362,9 +362,19 @@ export async function handleVue(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const { HTMLHint } = require('htmlhint');
     const jsbeautify = require('js-beautify');
+    let prettier: any;
+    try {
+        prettier = await loadESM('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate Vue (using HTMLHint but ignoring doctype-first)
     /* eslint-disable @typescript-eslint/naming-convention */
@@ -378,54 +388,81 @@ export async function handleVue(editor: vscode.TextEditor, text: string) {
         }
     }
 
-    /* eslint-disable */
     try {
-        // Format Vue (using js-beautify's HTML formatter)
-        const options: any = {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            indent_scripts: 'normal',
-            end_with_newline: false,
-            wrap_line_length: 0,
-            indent_inner_html: false,
-            js: {
-                indent_size: 2,
-                indent_char: ' ',
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        // Format Vue with Prettier (Deep Formatting)
+        // Use prettier.format (preferred) or prettier.default.format (fallback/legacy)
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        formatted = await format(text, {
+            parser: 'vue',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false, // Vue standard is usually double quotes in template
+            htmlWhitespaceSensitivity: 'ignore', // To fix indentation
+            vueIndentScriptAndStyle: false, // Standard Vue style guide: script and style tags content not indented relative to tag
+            endOfLine: 'lf',
+            bracketSameLine: false
+        });
+    } catch (prettierError: any) {
+         // Fallback to js-beautify
+        try {
+            // Format Vue (using js-beautify's HTML formatter)
+            const options: any = {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
                 max_preserve_newlines: 2,
                 preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
+                indent_scripts: 'normal',
                 end_with_newline: false,
                 wrap_line_length: 0,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            },
-            css: {
-                indent_size: 2,
-                indent_char: ' ',
-                selector_separator_newline: true,
-                newline_between_rules: true,
-                end_with_newline: false
+                indent_inner_html: false,
+                js: {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: false,
+                    wrap_line_length: 0,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false
+                },
+                css: {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    selector_separator_newline: true,
+                    newline_between_rules: true,
+                    end_with_newline: false
+                }
+            };
+            formatted = jsbeautify.html(text, options);
+             if (!validationMessage) {
+                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
             }
-        };
-        formatted = jsbeautify.html(text, options);
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Vue: ${error.message}`);
-        return;
+        } catch (beautifyError: any) {
+            vscode.window.showErrorMessage(`Failed to format Vue: ${beautifyError.message}`);
+            return;
+        }
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
     if (validationMessage) {
-        vscode.window.showWarningMessage(`Vue has syntax issues but was beautified. First error: ${validationMessage}`);
+        vscode.window.showWarningMessage(`Vue has syntax issues but was beautified. Error: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('Vue formatted successfully!');
     }
