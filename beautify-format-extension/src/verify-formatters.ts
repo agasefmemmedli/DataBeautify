@@ -31,10 +31,11 @@ Module.prototype.require = function(id: string) {
     return originalRequire.apply(this, arguments);
 };
 
-import { beautify, detectFormat } from './extension';
+// Import extension AFTER mocking
+const { beautify, detectFormat } = require('./extension');
 
 async function runTests() {
-    const testFiles = fs.readdirSync('.').filter(f => f.startsWith('test.') && !f.endsWith('.map'));
+    const testFiles = fs.readdirSync('.').filter(f => f.startsWith('test.') && !f.endsWith('.map') && !f.endsWith('.ts')); // Exclude .ts files to avoid testing source files
     console.log(`Found ${testFiles.length} test files.`);
 
     const mapping: {[key: string]: string} = {
