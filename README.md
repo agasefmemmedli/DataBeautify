@@ -1,5 +1,3 @@
-TSX (.tsx) — React компоненты на TypeScript.
-
 Vue (.vue) — однофайловые компоненты Vue.
 
 Svelte (.svelte) — компоненты Svelte.
