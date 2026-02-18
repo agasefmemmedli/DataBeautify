@@ -1,11 +1,5 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const react_1 = __importDefault(require("react"));
-const Greet = ({ name }) => {
-    return <div>Hello {name}!</div>;
-};
-exports.default = Greet;
-//# sourceMappingURL=test.js.map
+import { b } from './b';
+import { a } from './a';
+import React from 'react';
+
+console.log("Hello");
