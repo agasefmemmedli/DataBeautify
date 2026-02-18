@@ -594,9 +594,23 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const phpParser = require('php-parser');
     const jsbeautify = require('js-beautify');
+
+    // Lazy load Prettier and plugin
+    let prettier: any;
+    let phpPlugin: any;
+    try {
+        prettier = await loadESM('prettier');
+        phpPlugin = await loadESM('@prettier/plugin-php');
+    } catch (e) {
+        console.warn('Prettier or PHP plugin failed to load:', e);
+    }
 
     // Validate PHP using php-parser
     try {
@@ -618,31 +632,57 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
         }
     }
 
-    /* eslint-disable */
     try {
-        // Format PHP (using js-beautify's HTML formatter which handles PHP tags)
-        const options: any = {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            indent_scripts: 'normal',
-            end_with_newline: false,
-            wrap_line_length: 0,
-            indent_inner_html: false,
-            templating: ['php']
-        };
-        formatted = jsbeautify.html(text, options);
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format PHP: ${error.message}`);
-        return;
+        if (!prettier || !phpPlugin) {
+            throw new Error('Prettier or PHP plugin not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier (PSR-12 compliant)
+        formatted = await format(text, {
+            parser: 'php',
+            plugins: [phpPlugin],
+            tabWidth: tabSize || 4,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false
+        });
+
+    } catch (prettierError: any) {
+        /* eslint-disable */
+        try {
+            // Fallback to js-beautify's HTML formatter
+            const options: any = {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                indent_scripts: 'normal',
+                end_with_newline: false,
+                wrap_line_length: 0,
+                indent_inner_html: false,
+                templating: ['php']
+            };
+            formatted = jsbeautify.html(text, options);
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (beautifyError: any) {
+            vscode.window.showErrorMessage(`Failed to format PHP: ${beautifyError.message}`);
+            return;
+        }
+        /* eslint-enable */
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
     if (validationMessage) {
-        vscode.window.showWarningMessage(`PHP has syntax issues but was beautified. First error: ${validationMessage}`);
+        vscode.window.showWarningMessage(`PHP has syntax issues but was beautified. Message: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('PHP formatted successfully!');
     }
