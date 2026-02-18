@@ -1,0 +1,32 @@
+// Variables
+@width:10px;
+@height:@width+10px;
+
+// Mixins
+.bordered(@color:black){
+border:1px solid @color;
+&:hover{
+border-color:white;
+}
+}
+
+// Nested rules
+#header{
+color:black;
+.navigation{
+font-size:12px;
+}
+.logo{
+width:300px;
+}
+}
+
+// Loops
+.generate-columns(4);
+
+.generate-columns(@n,@i:1) when (@i=<@n){
+.column-@{i}{
+width:(@i * 100% / @n);
+}
+.generate-columns(@n,(@i + 1));
+}
