@@ -1,0 +1,39 @@
+// Variables
+$font-stack: Helvetica, sans-serif
+$primary-color: #333
+
+// Mixin
+@mixin theme($theme: DarkGray)
+  background: $theme
+  box-shadow: 0 0 1px rgba($theme, .25)
+  color: #fff
+
+// Nesting & Extend
+.message
+  border: 1px solid #ccc
+  padding: 10px
+  color: $primary-color
+
+  .header
+    font-weight: bold
+    font-family: $font-stack
+
+  .body
+    font-size: 14px
+    a
+      text-decoration: none
+      &:hover
+        text-decoration: underline
+
+  &.success
+    @include theme(Green)
+    border-color: Green
+
+  &.error
+    @include theme(Red)
+    border-color: Red
+
+// Math
+.container
+  width: 100% - 20px
+  padding: 10px + 5px

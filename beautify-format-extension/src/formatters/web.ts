@@ -238,7 +238,11 @@ export async function handleSCSS(editor: vscode.TextEditor, text: string) {
             indent_char: ' ',
             selector_separator_newline: true,
             newline_between_rules: true,
-            end_with_newline: false
+            end_with_newline: true,
+            preserve_newlines: true,
+            max_preserve_newlines: 1,
+            space_around_combinator: true,
+            space_around_selector_separator: true
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format SCSS: ${error.message}`);
@@ -281,7 +285,10 @@ export async function handleSASS(editor: vscode.TextEditor, text: string) {
         // Format SASS
         formatted = SassFormatter.Format(text, {
             tabSize: 2,
-            insertSpaces: true
+            insertSpaces: true,
+            setPropertySpace: true,
+            deleteEmptyRows: false,
+            lineEnding: 'LF'
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format SASS: ${error.message}`);
