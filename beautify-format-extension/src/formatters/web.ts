@@ -475,9 +475,23 @@ export async function handleSvelte(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const svelte = require('svelte/compiler');
     const jsbeautify = require('js-beautify');
+
+    // Lazy load Prettier and plugin
+    let prettier: any;
+    let sveltePlugin: any;
+    try {
+        prettier = await loadESM('prettier');
+        sveltePlugin = await loadESM('prettier-plugin-svelte');
+    } catch (e) {
+        console.warn('Prettier or Svelte plugin failed to load:', e);
+    }
 
     // Validate Svelte
     try {
@@ -490,54 +504,84 @@ export async function handleSvelte(editor: vscode.TextEditor, text: string) {
         }
     }
 
-    /* eslint-disable */
     try {
-        // Format Svelte (using js-beautify's HTML formatter)
-        const options: any = {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            indent_scripts: 'normal',
-            end_with_newline: false,
-            wrap_line_length: 0,
-            indent_inner_html: false,
-            js: {
-                indent_size: 2,
-                indent_char: ' ',
+        if (!prettier || !sveltePlugin) {
+            throw new Error('Prettier or Svelte plugin not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier
+        formatted = await format(text, {
+            parser: 'svelte',
+            plugins: [sveltePlugin],
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false,
+            svelteSortOrder: 'options-scripts-markup-styles',
+            svelteStrictMode: false,
+            svelteAllowShorthand: true,
+            svelteIndentScriptAndStyle: true
+        });
+
+    } catch (prettierError: any) {
+        /* eslint-disable */
+        try {
+            // Fallback to js-beautify's HTML formatter
+            const options: any = {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
                 max_preserve_newlines: 2,
                 preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
+                indent_scripts: 'normal',
                 end_with_newline: false,
                 wrap_line_length: 0,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            },
-            css: {
-                indent_size: 2,
-                indent_char: ' ',
-                selector_separator_newline: true,
-                newline_between_rules: true,
-                end_with_newline: false
+                indent_inner_html: false,
+                js: {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: false,
+                    wrap_line_length: 0,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false
+                },
+                css: {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    selector_separator_newline: true,
+                    newline_between_rules: true,
+                    end_with_newline: false
+                }
+            };
+            formatted = jsbeautify.html(text, options);
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
             }
-        };
-        formatted = jsbeautify.html(text, options);
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Svelte: ${error.message}`);
-        return;
+        } catch (beautifyError: any) {
+            vscode.window.showErrorMessage(`Failed to format Svelte: ${beautifyError.message}`);
+            return;
+        }
+        /* eslint-enable */
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
     if (validationMessage) {
-        vscode.window.showWarningMessage(`Svelte has syntax issues but was beautified. First error: ${validationMessage}`);
+        vscode.window.showWarningMessage(`Svelte has syntax issues but was beautified. Message: ${validationMessage}`);
     } else {
         vscode.window.showInformationMessage('Svelte formatted successfully!');
     }

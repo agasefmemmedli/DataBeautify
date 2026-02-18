@@ -1,5 +1,3 @@
-Svelte (.svelte) — компоненты Svelte.
-
 PHP (.php) — все еще лидер в backend-разработке сайтов.
 
 YAML / YML (.yaml, .yml) — конфиги Docker, CI/CD, Kubernetes.
