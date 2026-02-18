@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit, detectDelimiter, splitCSVLine } from '../utils';
+import { applyEdit, detectDelimiter, splitCSVLine, loadESM } from '../utils';
 
 /**
  * Handle YAML formatting and validation
@@ -10,7 +10,42 @@ export async function handleYAML(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const YAML = require('yaml');
+    let prettier: any;
 
+    try {
+        prettier = await loadESM('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
+
+    // Try Deep Formatting with Prettier first
+    try {
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        formatted = await format(text, {
+            parser: 'yaml',
+            tabWidth: 2,
+            singleQuote: true,
+            printWidth: 120,
+            bracketSpacing: true
+        });
+
+        await applyEdit(editor, formatted);
+        vscode.window.showInformationMessage('YAML formatted successfully!');
+        return;
+
+    } catch (prettierError: any) {
+        // Fallback to YAML package if Prettier fails
+    }
+
+    // Fallback: Resilient formatting using 'yaml' package
     try {
         const doc = YAML.parseDocument(text);
         if (doc.errors.length > 0) {
@@ -36,7 +71,7 @@ export async function handleYAML(editor: vscode.TextEditor, text: string) {
     if (validationMessage) {
         vscode.window.showWarningMessage(`YAML has syntax issues but was beautified. First error: ${validationMessage}`);
     } else {
-        vscode.window.showInformationMessage('YAML formatted successfully!');
+        vscode.window.showInformationMessage('YAML formatted successfully (resilient mode)!');
     }
 }
 
