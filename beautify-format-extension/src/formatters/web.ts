@@ -112,12 +112,16 @@ export async function handleHTML(editor: vscode.TextEditor, text: string) {
         formatted = jsbeautify.html(text, {
             indent_size: 2,
             indent_char: ' ',
-            max_preserve_newlines: 2,
+            max_preserve_newlines: 1, // Stricter vertical spacing
             preserve_newlines: true,
-            indent_scripts: 'normal',
-            end_with_newline: false,
-            wrap_line_length: 0,
-            indent_inner_html: false
+            indent_scripts: 'normal', // Indent script content
+            end_with_newline: true, // Ensure file ends with newline (standard)
+            wrap_line_length: 120, // Enforce line length
+            indent_inner_html: true, // Indent <head> and <body> content
+            extra_liners: ['head', 'body', '/html', 'html', 'doctype'], // Ensure structural tags are on new lines
+            unformatted: ['a', 'span', 'img', 'code', 'pre', 'sub', 'sup', 'em', 'strong', 'b', 'i', 'u', 'strike', 'big', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], // Inline elements
+            wrap_attributes: 'force-aligned', // Wrap attributes if line is too long
+            wrap_attributes_indent_size: 2
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format HTML: ${error.message}`);
