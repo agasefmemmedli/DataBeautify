@@ -329,7 +329,9 @@ export async function handleJSX(editor: vscode.TextEditor, text: string) {
             bracketSpacing: true,
             arrowParens: 'always',
             printWidth: 120,
-            endOfLine: 'lf'
+            endOfLine: 'lf',
+            jsxSingleQuote: false,
+            bracketSameLine: false
         });
     } catch (prettierError: any) {
          // Fallback to js-beautify
