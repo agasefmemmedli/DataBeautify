@@ -334,7 +334,11 @@ export async function handleLESS(editor: vscode.TextEditor, text: string) {
             indent_char: ' ',
             selector_separator_newline: true,
             newline_between_rules: true,
-            end_with_newline: false
+            end_with_newline: true,
+            preserve_newlines: true,
+            max_preserve_newlines: 1,
+            space_around_combinator: true,
+            space_around_selector_separator: true
         });
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format LESS: ${error.message}`);
