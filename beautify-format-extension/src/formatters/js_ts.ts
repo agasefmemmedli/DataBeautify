@@ -238,6 +238,10 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const { parse, ParseError } = require('jsonc-parser');
     const jsbeautify = require('js-beautify');
@@ -255,8 +259,9 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
     try {
         // Format JSONC using js-beautify's JS formatter (preserves comments)
         formatted = jsbeautify.js(text, {
-            indent_size: 2,
-            indent_char: ' ',
+            indent_size: tabSize,
+            indent_char: insertSpaces ? ' ' : '\t',
+            indent_with_tabs: !insertSpaces,
             max_preserve_newlines: 2,
             preserve_newlines: true,
             keep_array_indentation: false,
@@ -293,19 +298,50 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let repairMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const { jsonrepair } = require('jsonrepair');
+    const jsbeautify = require('js-beautify');
 
     try {
         // Try standard JSON parse
-        const parsed = JSON.parse(text);
-        formatted = JSON.stringify(parsed, null, 2);
+        JSON.parse(text);
+        // If successful, use js-beautify for deep formatting (indentation, style)
+        formatted = jsbeautify.js(text, {
+            indent_size: tabSize,
+            indent_char: insertSpaces ? ' ' : '\t',
+            indent_with_tabs: !insertSpaces,
+            max_preserve_newlines: 2,
+            preserve_newlines: false, // Strict JSON usually collapses whitespace unless string
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: false,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
     } catch (originalError: any) {
         // If it fails, try to repair
         try {
             const repairedText = jsonrepair(text);
+            // Verify repair worked by parsing
             const parsed = JSON.parse(repairedText);
-            formatted = JSON.stringify(parsed, null, 2);
+            // Format the repaired JSON
+            const minified = JSON.stringify(parsed);
+            formatted = jsbeautify.js(minified, {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
+                indent_with_tabs: !insertSpaces,
+                preserve_newlines: false,
+                brace_style: 'collapse',
+                wrap_line_length: 0
+            });
             repairMessage = originalError.message;
         } catch (repairError: any) {
             vscode.window.showErrorMessage(`Failed to format JSON. Original error: ${originalError.message}`);

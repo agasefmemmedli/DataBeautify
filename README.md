@@ -1,5 +1,3 @@
-JSON
-
 HTML (.html, .htm) — основа веба.
 
 CSS (.css) — стили.
@@ -21,8 +19,6 @@ Vue (.vue) — однофайловые компоненты Vue.
 Svelte (.svelte) — компоненты Svelte.
 
 PHP (.php) — все еще лидер в backend-разработке сайтов.
-
-JSONC (.jsonc) — JSON с комментариями (как в настройках VS Code).
 
 YAML / YML (.yaml, .yml) — конфиги Docker, CI/CD, Kubernetes.
 
