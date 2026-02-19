@@ -1702,24 +1702,132 @@ export async function handleCSharp(editor: vscode.TextEditor, text: string) {
 
     /* eslint-disable */
     try {
+        // --- PRE-PROCESSING ---
+        // 1. Mask strings and comments to prevent interfering with them
+        const masks: string[] = [];
+        const maskPrefix = '___CS_MASK_';
+
+        // Regex to capture strings (verbatim @"" and normal "") and comments
+        // Note: This simple regex might struggle with complex nested structures but serves as a resilient first pass
+        let maskedText = text.replace(/(@"(?:[^"]|"")*"|"(?:\\.|[^\\"])*")|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)/g, (match) => {
+            const placeholder = `${maskPrefix}${masks.length}___`;
+            masks.push(match);
+            return placeholder;
+        });
+
+        // 2. Normalize C# specific syntax before beautifying
+
+        // Ensure space around lambda arrow '=>'
+        maskedText = maskedText.replace(/([^\s])=>/g, '$1 =>');
+        maskedText = maskedText.replace(/=>([^\s])/g, '=> $1');
+
+        // Ensure attributes are on their own lines (basic heuristic)
+        // This looks for [Attribute] followed by public/private/protected/internal/class/void/struct/enum/interface/return type
+        maskedText = maskedText.replace(/(\[[^\]\n]+\])\s*(public|private|protected|internal|static|class|void|struct|enum|interface|async|override|virtual|abstract|sealed|readonly|const|event|delegate)/g, '$1\n$2');
+
+        // Protect auto-properties from being expanded
+        const propMasks: string[] = [];
+        const propMaskPrefix = '___CS_PROP_';
+        maskedText = maskedText.replace(/\{\s*get;\s*(?:private\s+|protected\s+|internal\s+)?(?:set|init);\s*\}/g, (match) => {
+             const placeholder = `${propMaskPrefix}${propMasks.length}___`;
+             propMasks.push(match.replace(/\s+/g, ' ')); // Normalize to single line
+             return placeholder;
+        });
+
+        // --- CORE FORMATTING ---
         // Format C# (using js-beautify's JS formatter which handles C# well)
-        formatted = jsbeautify.js(text, {
+        let beautified = jsbeautify.js(maskedText, {
             indent_size: 4,
             indent_char: ' ',
             max_preserve_newlines: 2,
             preserve_newlines: true,
-            keep_array_indentation: false,
+            keep_array_indentation: true,
             break_chained_methods: false,
-            brace_style: 'collapse',
+            brace_style: 'expand', // Allman style is standard for C#
             space_before_conditional: true,
             unescape_strings: false,
             jslint_happy: false,
-            end_with_newline: false,
+            end_with_newline: true,
             wrap_line_length: 0,
             comma_first: false,
             e4x: true,
             indent_empty_lines: false
         });
+
+        // --- POST-PROCESSING ---
+
+        // 1. Fix Generic Type spacing: List < string > -> List<string>
+        // Strategy: Only fix generics in safe contexts to avoid breaking comparison operators (e.g. if (a < b))
+
+        // Context 1: Keywords that precede types (new List<T>, public class<T>, etc.)
+        beautified = beautified.replace(/\b(new|public|private|protected|internal|class|struct|interface|record|void|return|delegate|event)\s+([a-zA-Z0-9_]+)\s+<\s+/g, '$1 $2<');
+
+        // Context 2: Known generic collection types (List<T>, Dictionary<K,V>, etc.)
+        beautified = beautified.replace(/\b(List|Dictionary|IEnumerable|ICollection|HashSet|Queue|Stack|LinkedList|SortedList|ObservableCollection|Task|Func|Action|Tuple|ValueTuple|Lazy|Nullable)\s+<\s+/g, '$1<');
+
+        // Context 3: PascalCase identifiers followed by <...> and then ( (Method call) or Identifier (Variable decl)
+        // Matches: Method<T>(), Type<T> var
+        // This regex looks for PascalCase ID, <, content without operators, >, then ( or ID.
+        // Note: We use \s*< because Context 1/2 might have already removed the space before <
+        beautified = beautified.replace(/\b([A-Z][a-zA-Z0-9_]*)\s*<\s+([a-zA-Z0-9_,\s\[\]\?]+?)\s+>\s*([\(a-zA-Z0-9_])/g, (match: string, id: string, content: string, suffix: string) => {
+             const separator = suffix === '(' ? '' : ' ';
+             return `${id}<${content.trim()}>${separator}${suffix}`;
+        });
+
+        // Cleanup spaces inside known generics (if partially fixed)
+        // This targets < T > -> <T> only if we have already attached the < to the identifier
+        beautified = beautified.replace(/([a-zA-Z0-9_]+)< ([^>]+?) >/g, '$1<$2>');
+        beautified = beautified.replace(/([a-zA-Z0-9_]+)< ([^>]+?)(?=>)/g, '$1<$2'); // < T>
+        beautified = beautified.replace(/([a-zA-Z0-9_]+)<([^>]+?) >/g, '$1<$2>'); // <T >
+
+        // 2. Fix Nullable types: int ? -> int?
+        beautified = beautified.replace(/\b(int|string|bool|double|float|decimal|long|short|byte|char|object|uint|ulong|ushort|sbyte)\s+\?/g, '$1?');
+
+        // 3. Restore auto-properties
+        beautified = beautified.replace(new RegExp(`${propMaskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return propMasks[parseInt(index)];
+        });
+
+        // 4. Ensure space after control flow keywords if missing (foreach, etc)
+        beautified = beautified.replace(/\b(foreach|catch|using|lock)\s*\(/g, '$1 (');
+
+        // 5. Fix switch expression indentation (naive fix)
+        // If 'switch' is on a new line but follows a variable, bring it up?
+        // Or at least ensure the block inside is indented.
+        // js-beautify handles switch statement well, but switch expression 'var x = y switch { ... }' might be split.
+        // We will try to rejoin 'variable \n switch'
+        beautified = beautified.replace(/([a-zA-Z0-9_\]\)])\n\s*switch\s*$/gm, '$1 switch');
+
+        // 6. LINQ indentation fix
+        // If 'from' is indented, ensure subsequent clauses are indented +1 level or aligned.
+        // This is hard to do perfectly with regex, but we can try to fix the worst cases where they are flat.
+        // We will assume 4 space indent.
+        const lines = beautified.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            if (trimmed.startsWith('where ') || trimmed.startsWith('orderby ') || trimmed.startsWith('select ') || trimmed.startsWith('group ') || trimmed.startsWith('join ')) {
+                // Check if previous line was a 'from' or another LINQ clause
+                if (i > 0) {
+                    const prevLine = lines[i-1];
+                    const prevIndent = prevLine.match(/^\s*/)?.[0] || '';
+                    if (prevLine.trim().startsWith('from ') || prevLine.trim().startsWith('var query = from ')) {
+                        // Indent relative to previous line
+                        lines[i] = prevIndent + '    ' + trimmed;
+                    } else if (prevLine.trim().startsWith('where ') || prevLine.trim().startsWith('orderby ')) {
+                        // Maintain indentation
+                        lines[i] = prevIndent + trimmed;
+                    }
+                }
+            }
+        }
+        beautified = lines.join('\n');
+
+        // 7. Restore strings and comments
+        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return masks[parseInt(index)];
+        });
+
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format C#: ${error.message}`);
         return;
