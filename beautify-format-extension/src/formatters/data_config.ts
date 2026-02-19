@@ -722,6 +722,30 @@ export async function handleSQL(editor: vscode.TextEditor, text: string) {
     // Validate SQL
     validationMessage = validateSQL(text);
 
+    // Try Deep Formatting with sql-formatter
+    try {
+        const { format } = await import('sql-formatter');
+
+        formatted = format(text, {
+            language: 'sql',
+            keywordCase: 'upper',
+            tabWidth: 4,
+            linesBetweenQueries: 2
+        });
+
+        await applyEdit(editor, formatted);
+
+        if (validationMessage) {
+            vscode.window.showWarningMessage(`SQL has syntax issues but was beautified. ${validationMessage}`);
+        } else {
+            vscode.window.showInformationMessage('SQL formatted successfully!');
+        }
+        return;
+    } catch (e: any) {
+        console.warn('sql-formatter failed:', e);
+        // Fallback to resilient formatting logic
+    }
+
     // Resilient formatting logic
     try {
         const keywords = [

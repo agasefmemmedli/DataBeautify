@@ -1,5 +1,3 @@
-SQL (.sql) — структурированные запросы.
-
 Prisma (.prisma) — схемы баз данных.
 
 MongoDB Shell (.mongodb) — скрипты для NoSQL.
