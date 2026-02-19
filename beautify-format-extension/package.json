@@ -72,6 +72,7 @@
     "onCommand:beautify-format.formatJava",
     "onCommand:beautify-format.formatKotlin",
     "onCommand:beautify-format.formatCSharp",
+    "onCommand:beautify-format.formatC",
     "onCommand:beautify-format.formatCPP",
     "onCommand:beautify-format.formatGo",
     "onCommand:beautify-format.formatRust",
@@ -274,6 +275,10 @@
       {
         "command": "beautify-format.formatCSharp",
         "title": "Beautify C#"
+      },
+      {
+        "command": "beautify-format.formatC",
+        "title": "Beautify C"
       },
       {
         "command": "beautify-format.formatCPP",
