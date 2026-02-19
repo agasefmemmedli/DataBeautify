@@ -70,7 +70,7 @@ Module.prototype.require = function (id) {
 };
 async function runTest() {
     // Load extension after mock
-    const { beautify } = require('./src/extension');
+    const { beautify } = require('./out/extension');
     const testFile = 'test.deep.cs';
     console.log(`Testing ${testFile}...`);
     const filePath = path.join(__dirname, testFile);
@@ -86,7 +86,24 @@ async function runTest() {
             getText: () => content,
             lineCount: content.split('\n').length,
             languageId: 'csharp',
-            uri: { fsPath: filePath }
+            uri: { fsPath: filePath },
+            lineAt: (line) => {
+                const lines = content.split('\n');
+                const text = lines[line] || '';
+                return {
+                    text: text,
+                    range: {
+                        start: new mockVscode.Position(line, 0),
+                        end: new mockVscode.Position(line, text.length)
+                    },
+                    rangeIncludingLineBreak: {
+                         start: new mockVscode.Position(line, 0),
+                         end: new mockVscode.Position(line + 1, 0)
+                    },
+                    lineNumber: line,
+                    isEmptyOrWhitespace: text.trim().length === 0
+                };
+            }
         },
         edit: async (callback) => {
             const eb = {
