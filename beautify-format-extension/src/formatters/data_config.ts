@@ -409,16 +409,75 @@ export async function handleENV(editor: vscode.TextEditor, text: string) {
 
             // Handle export KEY=VALUE or KEY=VALUE
             // KEY must start with letter or underscore, followed by letters, numbers or underscores
-            const exportMatch = trimmed.match(/^(export\s+)?([a-z_][a-z0-9_]*)\s*=\s*(.*)$/i);
-            if (exportMatch) {
-                const isExport = exportMatch[1] ? 'export ' : '';
-                const key = exportMatch[2];
-                const value = exportMatch[3];
-                formattedLines.push(`${isExport}${key} = ${value}`);
+            const match = trimmed.match(/^(export\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*)$/);
+
+            if (match) {
+                const prefix = match[1] ? 'export ' : '';
+                const key = match[2];
+                let remainder = match[3].trim();
+                let value = '';
+                let comment = '';
+
+                // Value parsing logic
+                if (remainder.length > 0) {
+                    const firstChar = remainder[0];
+                    if (firstChar === '"' || firstChar === "'") {
+                        // Quoted value
+                        const quoteChar = firstChar;
+                        let endQuoteIdx = -1;
+                        for (let j = 1; j < remainder.length; j++) {
+                            if (remainder[j] === quoteChar && remainder[j-1] !== '\\') {
+                                endQuoteIdx = j;
+                                break;
+                            }
+                        }
+
+                        if (endQuoteIdx !== -1) {
+                            value = remainder.substring(0, endQuoteIdx + 1);
+                            const afterValue = remainder.substring(endQuoteIdx + 1).trim();
+                            if (afterValue.startsWith('#')) {
+                                comment = afterValue;
+                            }
+                        } else {
+                            // Unclosed quote, treat as raw value
+                             if (!validationMessage) {
+                                validationMessage = `Unclosed quote at line ${i + 1}`;
+                            }
+                            value = remainder;
+                        }
+                    } else {
+                        // Unquoted value
+                        // Find comment start
+                        let commentIdx = -1;
+                        for (let j = 0; j < remainder.length; j++) {
+                            // Basic check for comment start (space followed by #)
+                            if (remainder[j] === '#' && (j === 0 || /\s/.test(remainder[j-1]))) {
+                                commentIdx = j;
+                                break;
+                            }
+                        }
+
+                        if (commentIdx !== -1) {
+                            value = remainder.substring(0, commentIdx).trim();
+                            comment = remainder.substring(commentIdx).trim();
+                        } else {
+                            value = remainder;
+                        }
+
+                        // Apply quoting if needed (contains spaces or special chars)
+                        // Special chars: # (handled above), =, $, spaces
+                        // If value is empty, leave empty.
+                        if (value.length > 0 && (/\s/.test(value) || value.includes('='))) {
+                             value = `"${value}"`;
+                        }
+                    }
+                }
+
+                formattedLines.push(`${prefix}${key}=${value}${comment ? ' ' + comment : ''}`);
             } else {
                 // If it doesn't match the pattern, it's a potential syntax error
-                if (!validationMessage) {
-                    validationMessage = `Potential issue at line ${i + 1}: "${trimmed}"`;
+                if (!validationMessage && trimmed.length > 0) {
+                     validationMessage = `Potential issue at line ${i + 1}: "${trimmed}"`;
                 }
                 formattedLines.push(trimmed);
             }
