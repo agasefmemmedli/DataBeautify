@@ -2482,136 +2482,105 @@ export async function handleSwift(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Lazy load dependencies
+    const jsbeautify = require('js-beautify');
+
     // Validate Swift using custom resilient validator
     validationMessage = validateSwift(text);
 
-    // Resilient formatting logic
+    /* eslint-disable */
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let stateStack: ('STRING' | 'MULTILINE_STRING' | 'NORMAL')[] = ['NORMAL'];
-        let blockCommentLevel = 0;
-        // Tracking interpolation braces to return to STRING state
-        const interpBraceStack: number[] = [];
-        let currentTotalBraceDepth = 0;
+        // --- PRE-PROCESSING ---
+        const masks: string[] = [];
+        const maskPrefix = '___SWIFT_MASK_';
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+        // 1. Mask strings and comments
+        let maskedText = text.replace(/("""[\s\S]*?""")|("(?:\\.|[^\\"])*")|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)/g, (match) => {
+            const placeholder = `${maskPrefix}${masks.length}___`;
+            masks.push(match);
+            return placeholder;
+        });
 
-            if (trimmed === '' && stateStack[stateStack.length - 1] === 'NORMAL' && blockCommentLevel === 0) {
-                formattedLines.push('');
-                continue;
-            }
+        // 2. Normalize Swift Syntax for js-beautify
 
-            // Indentation adjustment for closing braces at the START of the line
-            let leadingClosingCount = 0;
-            if (blockCommentLevel === 0 && stateStack[stateStack.length - 1] === 'NORMAL') {
-                let j = 0;
-                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                    leadingClosingCount++;
-                    j++;
-                }
-            }
+        // Mask Operators to protect them from splitting
+        maskedText = maskedText.replace(/->/g, '___ARROW___');
+        maskedText = maskedText.replace(/\.\.\./g, '___RANGE_CLOSED___');
+        maskedText = maskedText.replace(/\.\.<|…/g, '___RANGE_HALF___');
+        maskedText = maskedText.replace(/\?\?/g, '___NIL_COALESCING___');
 
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
-            }
+        // Attributes: @available(...) -> @available(...) \n
+        // Ensure attributes are separated from the next word if it's a keyword
+        maskedText = maskedText.replace(/(@[a-zA-Z0-9_]+(?:\([^)]*\))?)\s*(func|class|struct|enum|protocol|extension|var|let|init)/g, '$1\n$2');
 
-            // Apply indentation (Swift uses 4 spaces)
-            let currentLine = (blockCommentLevel > 0 || stateStack[stateStack.length - 1] !== 'NORMAL')
-                ? line
-                : '    '.repeat(Math.max(0, indentLevel)) + trimmed;
+        // --- CORE FORMATTING ---
+        let beautified = jsbeautify.js(maskedText, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: true,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: true,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
 
-            formattedLines.push(currentLine);
+        // --- POST-PROCESSING ---
 
-            // Calculate net brace change for NEXT line and track state
-            let netChange = 0;
-            const textToProcess = (blockCommentLevel > 0 || stateStack[stateStack.length - 1] !== 'NORMAL')
-                ? line
-                : trimmed.substring(leadingClosingCount);
+        // Restore Operators (remove extra spaces added by js-beautify around "identifiers")
+        beautified = beautified.replace(/\s*___ARROW___\s*/g, ' -> ');
+        beautified = beautified.replace(/\s*___RANGE_CLOSED___\s*/g, '...');
+        beautified = beautified.replace(/\s*___RANGE_HALF___\s*/g, '..<');
+        beautified = beautified.replace(/\s*___NIL_COALESCING___\s*/g, ' ?? ');
 
-            for (let k = 0; k < textToProcess.length; k++) {
-                const char = textToProcess[k];
-                const nextChar = textToProcess[k + 1];
-                const nextNextChar = textToProcess[k + 2];
-                const currentState = stateStack[stateStack.length - 1];
-
-                if (blockCommentLevel > 0) {
-                    if (char === '*' && nextChar === '/') {
-                        blockCommentLevel--;
-                        k++;
-                    } else if (char === '/' && nextChar === '*') {
-                        blockCommentLevel++;
-                        k++;
-                    }
-                    continue;
-                }
-
-                if (currentState === 'MULTILINE_STRING') {
-                    if (char === '"' && nextChar === '"' && nextNextChar === '"') {
-                        stateStack.pop();
-                        k += 2;
-                    }
-                    continue;
-                }
-
-                if (currentState === 'STRING') {
-                    if (char === '\\') {
-                        if (nextChar === '(') {
-                            stateStack.push('NORMAL');
-                            interpBraceStack.push(currentTotalBraceDepth - leadingClosingCount + netChange);
-                            netChange++;
-                            k++;
-                        } else {
-                            k++; // Escape sequence
-                        }
-                    } else if (char === '"') {
-                        stateStack.pop();
-                    }
-                    continue;
-                }
-
-                // NORMAL state
-                if (char === '/' && nextChar === '/') {
-                    // Line comment
-                    break;
-                }
-                if (char === '/' && nextChar === '*') {
-                    blockCommentLevel++;
-                    k++;
-                    continue;
-                }
-                if (char === '"' && nextChar === '"' && nextNextChar === '"') {
-                    stateStack.push('MULTILINE_STRING');
-                    k += 2;
-                    continue;
-                }
-                if (char === '"') {
-                    stateStack.push('STRING');
-                    continue;
-                }
-
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
-                } else if (char === '}' || char === ')' || char === ']') {
-                    if (char === ')' && interpBraceStack.length > 0 && (currentTotalBraceDepth - leadingClosingCount + netChange - 1) === interpBraceStack[interpBraceStack.length - 1]) {
-                        interpBraceStack.pop();
-                        stateStack.pop();
-                    }
-                    netChange--;
-                }
-            }
-
-            currentTotalBraceDepth += (netChange - leadingClosingCount);
-            indentLevel = Math.max(0, indentLevel + netChange);
+        // Fix Generics: Array < String > -> Array<String>
+        // Supports one level of nesting: Dictionary < String, Array < Int > > -> Dictionary<String, Array<Int>>
+        for (let k = 0; k < 2; k++) {
+             beautified = beautified.replace(/\b([a-zA-Z0-9_]+)\s*<\s+((?:[^<>\n]|(?:[a-zA-Z0-9_]+\s*<\s*[^<>\n]+\s*>))+?)\s+>/g, (match: string, id: string, content: string) => {
+                 // Avoid comparison operators
+                 if (/[{}=;]/.test(content) || /&&|\|\||==|!=|<=|>=/.test(content)) return match;
+                 return `${id}<${content.trim()}>`;
+             });
         }
-        formatted = formattedLines.join('\n');
+
+        // Fix Optionals: Type ? -> Type?
+        beautified = beautified.replace(/([a-zA-Z0-9_>\]\)])\s+([?!])(?=[,\)\]\}\s=\.])/g, '$1$2');
+
+        // Fix Argument Labels: label : Type -> label: Type
+        beautified = beautified.replace(/([^\s?])\s+:\s+/g, '$1: ');
+
+        // Fix space after keyword 'guard', 'if', 'switch' if missing
+        beautified = beautified.replace(/\b(guard|if|switch|while|for)\(/g, '$1 (');
+
+        // Fix guard/if let splitting
+        beautified = beautified.replace(/\b(guard|if)\s*\n\s*let\b/g, '$1 let');
+        // Pull 'else' up to same line
+        beautified = beautified.replace(/\n\s*else/g, ' else');
+
+        // Fix try/await splitting
+        beautified = beautified.replace(/=\s*\n\s*try\b/g, '= try');
+        beautified = beautified.replace(/try\s*\n\s*await\b/g, 'try await');
+
+        // Fix [weak self] in spacing
+        beautified = beautified.replace(/{\s*\[\s*weak\s+self\s*\]\s*in/g, '{ [weak self] in');
+
+        // 7. Restore Masks
+        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return masks[parseInt(index)];
+        });
+
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Swift: ${error.message}`);
         return;
     }
+    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
