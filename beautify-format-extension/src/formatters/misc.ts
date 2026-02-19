@@ -349,75 +349,7 @@ export async function handleMakefile(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let inRecipe = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmedLine = line.trim();
-
-            if (trimmedLine === '') {
-                formattedLines.push('');
-                inRecipe = false;
-                continue;
-            }
-
-            if (trimmedLine.startsWith('#')) {
-                // Keep comments as they are but trim trailing whitespace
-                formattedLines.push(line.trimEnd());
-                continue;
-            }
-
-            // In Makefiles, any line starting with a tab is part of a recipe
-            if (line.startsWith('\t')) {
-                formattedLines.push('\t' + trimmedLine);
-                inRecipe = true;
-                continue;
-            }
-
-            // Not starting with a tab, so it's a top-level construct
-
-            // Check for assignment: KEY op VALUE
-            // ops: =, :=, ::=, +=, ?=, !=
-            const assignmentMatch = trimmedLine.match(/^([a-zA-Z0-9._-]+)\s*(\?=|:=|::=|\+=|!=|=)\s*(.*)$/);
-            if (assignmentMatch) {
-                const [, key, op, value] = assignmentMatch;
-                formattedLines.push(`${key} ${op} ${value.trim()}`);
-                inRecipe = false;
-                continue;
-            }
-
-            // Check for target definition: target: dependencies
-            if (trimmedLine.includes(':')) {
-                const colonIdx = trimmedLine.indexOf(':');
-                const targetPart = trimmedLine.substring(0, colonIdx).trim();
-                const depsPart = trimmedLine.substring(colonIdx + 1).trim();
-                formattedLines.push(`${targetPart}: ${depsPart}`);
-                inRecipe = true; // Subsequent indented lines are recipes
-                continue;
-            }
-
-            // Directives (include, ifeq, etc.) or unknown
-            // If it was indented but not with a tab, and we were in a recipe, maybe force it?
-            // "Readability is King" - if it looks like a recipe line but missing a tab
-            if (inRecipe && (line.startsWith(' ') || /^[a-z0-9]/i.test(trimmedLine))) {
-                // This is risky if it's actually another target but without a colon (unlikely)
-                // or a directive that the user forgot to unindent.
-                // Let's stick to being safe: if it doesn't have a colon and we were in a recipe,
-                // and it's not a known directive, assume it's a recipe.
-                const directives = /^(include|sinclude|-include|ifdef|ifndef|ifeq|ifneq|else|endif|vpath|export|unexport|override|undefine|define|endef)\b/;
-                if (!directives.test(trimmedLine)) {
-                    formattedLines.push('\t' + trimmedLine);
-                    continue;
-                }
-            }
-
-            // Default fallback
-            formattedLines.push(trimmedLine);
-            inRecipe = false;
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatMakefileDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Makefile: ${error.message}`);
         return;
@@ -430,6 +362,190 @@ export async function handleMakefile(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Makefile formatted successfully!');
     }
+}
+
+/**
+ * Helper: Format Makefile Logic (Deep Formatting)
+ */
+function formatMakefileDeep(text: string): string {
+    const lines = text.split('\n');
+    const formattedLines: string[] = [];
+
+    // State
+    let indentLevel = 0;
+    let blockBuffer: { text: string, indent: number }[] = []; // For aligning assignments
+    let inRecipe = false;
+    let lastLineWasEmpty = false;
+
+    // Helper to flush assignment buffer
+    function flushBuffer() {
+        if (blockBuffer.length === 0) return;
+
+        // Find max key length
+        let maxKeyLen = 0;
+        const parsed = blockBuffer.map(item => {
+            const trimmed = item.text.trim();
+            // Regex for assignment: key op value
+            // Ignore comments for key calculation if they are full line comments
+            if (trimmed.startsWith('#')) return { item, isAssignment: false, key: '', op: '', val: '' };
+
+            // We need to match key op value from the FIRST line of item.text (if continuations exist)
+            const firstLine = item.text.split('\n')[0];
+            const match = firstLine.trim().match(/^([a-zA-Z0-9._-]+)\s*(\?=|:=|::=|\+=|!=|=)\s*(.*)$/);
+            if (match) {
+                return { item, isAssignment: true, key: match[1], op: match[2], val: match[3] };
+            }
+            return { item, isAssignment: false, key: '', op: '', val: '' };
+        });
+
+        parsed.forEach(p => {
+            if (p.isAssignment && p.key.length > maxKeyLen) {
+                maxKeyLen = p.key.length;
+            }
+        });
+
+        // Output lines
+        parsed.forEach(p => {
+            const indentStr = '  '.repeat(p.item.indent);
+            if (p.isAssignment) {
+                const padding = ' '.repeat(maxKeyLen - p.key.length);
+
+                // Reconstruct assignment with alignment
+                const parts = p.item.text.split('\n');
+                const firstLine = parts[0];
+                const rest = parts.slice(1);
+
+                const match = firstLine.trim().match(/^([a-zA-Z0-9._-]+)\s*(\?=|:=|::=|\+=|!=|=)\s*(.*)$/);
+                if (match) {
+                    const val = match[3].trim();
+                    let result = `${indentStr}${p.key}${padding} ${p.op} ${val}`;
+                    if (rest.length > 0) {
+                        result += '\n' + rest.join('\n');
+                    }
+                    formattedLines.push(result);
+                } else {
+                    formattedLines.push(p.item.text);
+                }
+            } else {
+                formattedLines.push(`${indentStr}${p.item.text.trim()}`);
+            }
+        });
+
+        blockBuffer = [];
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Handle empty lines
+        if (trimmed === '') {
+            flushBuffer();
+            if (!lastLineWasEmpty && formattedLines.length > 0) {
+                formattedLines.push('');
+                lastLineWasEmpty = true;
+            }
+            inRecipe = false;
+            continue;
+        }
+        lastLineWasEmpty = false;
+
+        // Handle Comments
+        if (trimmed.startsWith('#')) {
+            flushBuffer();
+            // Align comment with current indentation
+            formattedLines.push('  '.repeat(indentLevel) + trimmed);
+            continue;
+        }
+
+        // Handle Recipes (must start with tab)
+        if (line.startsWith('\t')) {
+            flushBuffer();
+            formattedLines.push('\t' + trimmed);
+            inRecipe = true;
+            continue;
+        }
+
+        // Handle Directives
+        const directiveMatch = trimmed.match(/^(ifeq|ifneq|ifdef|ifndef|else|endif|define|endef|include|-include|sinclude|vpath|export|unexport|override|undefine)\b/);
+
+        if (directiveMatch) {
+            flushBuffer();
+            const directive = directiveMatch[1];
+
+            if (directive === 'else') {
+                const currentIndent = Math.max(0, indentLevel - 1);
+                formattedLines.push('  '.repeat(currentIndent) + trimmed);
+            } else if (directive === 'endif' || directive === 'endef') {
+                indentLevel = Math.max(0, indentLevel - 1);
+                formattedLines.push('  '.repeat(indentLevel) + trimmed);
+            } else {
+                formattedLines.push('  '.repeat(indentLevel) + trimmed);
+                if (directive.startsWith('if') || directive === 'define') {
+                    indentLevel++;
+                }
+            }
+            inRecipe = false;
+            continue;
+        }
+
+        // Handle Targets (target: ...)
+        if (trimmed.includes(':') && !trimmed.includes('=')) {
+            flushBuffer();
+
+            // Ensure empty line before target if not first line AND previous line was NOT a comment
+            if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                const lastLine = formattedLines[formattedLines.length - 1];
+                if (!lastLine.trim().startsWith('#')) {
+                    formattedLines.push('');
+                }
+            }
+
+            formattedLines.push('  '.repeat(indentLevel) + trimmed);
+            inRecipe = true;
+            continue;
+        }
+
+        // Handle Assignments (buffer for alignment)
+        const assignmentMatch = trimmed.match(/^([a-zA-Z0-9._-]+)\s*(\?=|:=|::=|\+=|!=|=)\s*(.*)$/);
+        if (assignmentMatch) {
+            // Buffer it
+            let currentText = line;
+
+            // Check for line continuation
+            if (trimmed.endsWith('\\')) {
+                let j = i + 1;
+                while (j < lines.length) {
+                    const nextLine = lines[j];
+                    const nextTrimmed = nextLine.trim();
+                    // Indent continuation relative to variable (usually 4 spaces)
+                    currentText += '\n' + (indentLevel > 0 ? '  '.repeat(indentLevel + 2) : '    ') + nextTrimmed;
+                    i++;
+                    if (!nextTrimmed.endsWith('\\')) {
+                        break;
+                    }
+                    j++;
+                }
+            }
+
+            blockBuffer.push({ text: currentText, indent: indentLevel });
+            inRecipe = false;
+            continue;
+        }
+
+        // Fallback (Recipe without tab? Continuation?)
+        if (inRecipe) {
+            flushBuffer();
+            formattedLines.push('\t' + trimmed);
+            continue;
+        }
+
+        flushBuffer();
+        formattedLines.push('  '.repeat(indentLevel) + trimmed);
+    }
+
+    flushBuffer();
+    return formattedLines.join('\n');
 }
 
 /**
@@ -446,8 +562,33 @@ function validateMakefile(text: string): string | undefined {
         if (trimmed === '' || trimmed.startsWith('#')) continue;
 
         if (line.startsWith(' ')) {
-            // Makefile recipes MUST start with a TAB, not spaces
-            return `Line ${i + 1} starts with spaces. Makefile recipes must start with a TAB character.`;
+            // We relax this check because continuations start with space
+            // Only check if it looks like a recipe start (no colon, no assignment)
+            if (!trimmed.includes(':') && !trimmed.includes('=')) {
+                // Might be continuation?
+                if (i > 0 && lines[i-1].trim().endsWith('\\')) continue;
+
+                // Also check if we are inside define/endef which allows anything
+                // But that requires state tracking.
+                // Let's assume if it doesn't look like target or assignment, and has spaces, it MIGHT be a recipe error.
+                // But standard makefile allows spaces for directives/comments indentation (which we support now).
+                // So strictly enforcing TAB for recipes is good, but complaining about ANY space start line is bad if it's not a recipe.
+
+                // If the previous line was a target, then this line expects a TAB.
+                // But we don't track previous line here easily.
+
+                // Let's keep the original check but be aware it might flag indented conditionals as errors?
+                // "Line X starts with spaces..."
+                // If I indent `ifeq`, it starts with spaces.
+                // So I MUST update validateMakefile to allow indented directives.
+
+                const directives = /^(ifeq|ifneq|ifdef|ifndef|else|endif|define|endef|include|-include|sinclude|vpath|export|unexport|override|undefine)\b/;
+                if (directives.test(trimmed)) {
+                    continue; // Allowed to be indented
+                }
+
+                return `Line ${i + 1} starts with spaces. Makefile recipes must start with a TAB character.`;
+            }
         }
 
         if (trimmed.includes(':')) {

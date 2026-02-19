@@ -1,0 +1,49 @@
+# Deep Formatting Test for Makefile
+
+# Variable Assignments (should align)
+CC = gcc
+CFLAGS = -Wall -O2
+LDFLAGS = -lm
+SOURCES = main.c utils.c \
+          helper.c
+
+# Conditionals (should indent)
+ifeq ($(DEBUG), 1)
+CFLAGS += -g -DDEBUG
+else
+CFLAGS += -O3
+endif
+
+# Target Definitions (should have spacing)
+all: $(SOURCES)
+	$(CC) $(CFLAGS) -o myapp $(SOURCES) $(LDFLAGS)
+
+clean:
+	rm -f *.o myapp
+
+# Phony Targets
+.PHONY: all clean
+
+# Complex Recipe with Continuations
+install:
+	@echo "Installing..."
+	@mkdir -p $(DESTDIR)/bin
+	@cp myapp $(DESTDIR)/bin/
+	@echo "Done."
+
+# Include Directive
+include config.mk
+
+# Function Call
+SRCS := $(wildcard *.c)
+OBJS := $(SRCS:.c=.o)
+
+# Nested Conditionals
+ifdef WIN32
+    EXT = .exe
+    ifdef MSVC
+        CC = cl
+    endif
+else
+    EXT =
+endif
