@@ -1,5 +1,3 @@
-Makefile (Makefile) — автоматизация сборки.
-
 Nginx Config (.conf, .nginx) — настройки серверов.
 
 SQL (.sql) — структурированные запросы.
