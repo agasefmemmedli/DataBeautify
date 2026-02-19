@@ -1,53 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
-
-/**
- * Core Python formatting logic
- */
-function formatPythonCore(text: string): string {
-    const lines = text.split('\n');
-    const formattedLines: string[] = [];
-    let indentLevel = 0;
-    let forceNextIndent = false;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        if (trimmed === '') {
-            formattedLines.push('');
-            continue;
-        }
-
-        // Heuristic for de-indenting keywords
-        const deindentKeywords = ['elif ', 'elif:', 'else:', 'except ', 'except:', 'finally:'];
-        const shouldDeindent = deindentKeywords.some(kw => trimmed.startsWith(kw));
-
-        if (shouldDeindent) {
-            indentLevel = Math.max(0, indentLevel - 1);
-        } else if (!forceNextIndent) {
-            // Calculate effective indentation for this line
-            // If the user has already de-indented more than we expected, follow them
-            const userIndent = line.length - line.trimStart().length;
-            const userLevel = Math.floor(userIndent / 4);
-
-            if (userLevel < indentLevel) {
-                indentLevel = userLevel;
-            }
-        }
-
-        formattedLines.push('    '.repeat(indentLevel) + trimmed);
-
-        // If this line starts a block, the next line should be indented
-        if (trimmed.endsWith(':')) {
-            indentLevel++;
-            forceNextIndent = true;
-        } else {
-            forceNextIndent = false;
-        }
-    }
-    return formattedLines.join('\n');
-}
+import { formatPythonDeep } from './python_deep_formatter';
 
 /**
  * Handle Python formatting and validation
@@ -82,7 +35,7 @@ export async function handlePython(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        formatted = formatPythonCore(text);
+        formatted = formatPythonDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Python: ${error.message}`);
         return;
