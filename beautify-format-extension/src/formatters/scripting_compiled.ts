@@ -776,131 +776,34 @@ export async function handlePowerShell(editor: vscode.TextEditor, text: string) 
     // Validate PowerShell using custom resilient validator
     validationMessage = validatePowerShell(text);
 
-    // Resilient formatting logic
+    // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inHereString = false;
-        let hereStringMarker = '';
-        let blockCommentLevel = 0;
+        const prettier = await loadESM('prettier');
+        const pluginPowerShellMod = await loadESM('prettier-plugin-powershell');
+        const pluginPowerShell = pluginPowerShellMod.default || pluginPowerShellMod;
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+        formatted = await prettier.format(text, {
+            parser: "powershell",
+            plugins: [pluginPowerShell],
+            tabWidth: 4,
+            printWidth: 100,
+            useTabs: false,
+            trailingComma: "none",
+        });
+    } catch (prettierError: any) {
+        console.warn('Prettier PowerShell formatting failed, falling back to custom formatter', prettierError);
 
-            if (trimmed === '' && !inHereString && blockCommentLevel === 0) {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Handle Here-Strings and Block Comments
-            if (inHereString) {
-                formattedLines.push(line);
-                if (trimmed === hereStringMarker) {
-                    inHereString = false;
-                }
-                continue;
-            }
-
-            if (blockCommentLevel > 0) {
-                formattedLines.push(line);
-                // Check for end of block comment
-                let pos = 0;
-                while ((pos = line.indexOf('#>', pos)) !== -1) {
-                    blockCommentLevel--;
-                    pos += 2;
-                    if (blockCommentLevel === 0) break;
-                }
-                continue;
-            }
-
-            // Check for start of Here-String (must be at the end of the line)
-            if (trimmed.endsWith('@"') || trimmed.endsWith("@'")) {
-                inHereString = true;
-                hereStringMarker = trimmed.endsWith('@"') ? '"@' : "'@";
-                formattedLines.push('    '.repeat(indentLevel) + trimmed);
-                continue;
-            }
-
-            // Check for start of Block Comment
-            if (trimmed.startsWith('<#')) {
-                blockCommentLevel++;
-                formattedLines.push('    '.repeat(indentLevel) + trimmed);
-                // Check if it ends on the same line
-                let pos = 2;
-                while ((pos = line.indexOf('#>', pos)) !== -1) {
-                    blockCommentLevel--;
-                    pos += 2;
-                    if (blockCommentLevel === 0) break;
-                }
-                continue;
-            }
-
-            // Indentation adjustment for closing characters at the START of the line
-            let leadingClosingCount = 0;
-            let j = 0;
-            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                leadingClosingCount++;
-                j++;
-            }
-
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
-            }
-
-            // Apply indentation
-            formattedLines.push('    '.repeat(Math.max(0, indentLevel)) + trimmed);
-
-            // Calculate net brace change for NEXT line
-            let netChange = 0;
-            let inString = false;
-            let stringChar = '';
-
-            for (let k = leadingClosingCount; k < trimmed.length; k++) {
-                const char = trimmed[k];
-                const nextChar = trimmed[k+1];
-
-                if (inString) {
-                    if (char === '`') { // PowerShell escape character
-                        k++;
-                    } else if (char === stringChar) {
-                        if (nextChar === stringChar) {
-                            k++; // Escaped quote "" or ''
-                        } else {
-                            inString = false;
-                        }
-                    }
-                    continue;
-                }
-
-                if (char === '"' || char === "'") {
-                    inString = true;
-                    stringChar = char;
-                    continue;
-                }
-
-                if (char === '#') break; // Line comment
-
-                if (char === '<' && nextChar === '#') {
-                    blockCommentLevel++;
-                    k++;
-                    continue;
-                }
-
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
-                } else if (char === '}' || char === ')' || char === ']') {
-                    netChange--;
-                }
-            }
-
-            indentLevel = Math.max(0, indentLevel + netChange);
+        // Resilient fallback logic
+        try {
+            formatted = formatPowerShellCustom(text);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format PowerShell: ${error.message}`);
+            return;
         }
-        formatted = formattedLines.join('\n');
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format PowerShell: ${error.message}`);
-        return;
+
+        if (!validationMessage) {
+             validationMessage = "Deep formatting (Prettier) failed. Applied basic formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);
@@ -910,6 +813,132 @@ export async function handlePowerShell(editor: vscode.TextEditor, text: string) 
     } else {
         vscode.window.showInformationMessage('PowerShell formatted successfully!');
     }
+}
+
+/**
+ * Custom resilient PowerShell formatter (Fallback)
+ */
+function formatPowerShellCustom(text: string): string {
+    const lines = text.split('\n');
+    const formattedLines: string[] = [];
+    let indentLevel = 0;
+    let inHereString = false;
+    let hereStringMarker = '';
+    let blockCommentLevel = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '' && !inHereString && blockCommentLevel === 0) {
+            formattedLines.push('');
+            continue;
+        }
+
+        // Handle Here-Strings and Block Comments
+        if (inHereString) {
+            formattedLines.push(line);
+            if (trimmed === hereStringMarker) {
+                inHereString = false;
+            }
+            continue;
+        }
+
+        if (blockCommentLevel > 0) {
+            formattedLines.push(line);
+            // Check for end of block comment
+            let pos = 0;
+            while ((pos = line.indexOf('#>', pos)) !== -1) {
+                blockCommentLevel--;
+                pos += 2;
+                if (blockCommentLevel === 0) break;
+            }
+            continue;
+        }
+
+        // Check for start of Here-String (must be at the end of the line)
+        if (trimmed.endsWith('@"') || trimmed.endsWith("@'")) {
+            inHereString = true;
+            hereStringMarker = trimmed.endsWith('@"') ? '"@' : "'@";
+            formattedLines.push('    '.repeat(indentLevel) + trimmed);
+            continue;
+        }
+
+        // Check for start of Block Comment
+        if (trimmed.startsWith('<#')) {
+            blockCommentLevel++;
+            formattedLines.push('    '.repeat(indentLevel) + trimmed);
+            // Check if it ends on the same line
+            let pos = 2;
+            while ((pos = line.indexOf('#>', pos)) !== -1) {
+                blockCommentLevel--;
+                pos += 2;
+                if (blockCommentLevel === 0) break;
+            }
+            continue;
+        }
+
+        // Indentation adjustment for closing characters at the START of the line
+        let leadingClosingCount = 0;
+        let j = 0;
+        while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
+            leadingClosingCount++;
+            j++;
+        }
+
+        if (leadingClosingCount > 0) {
+            indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+        }
+
+        // Apply indentation
+        formattedLines.push('    '.repeat(Math.max(0, indentLevel)) + trimmed);
+
+        // Calculate net brace change for NEXT line
+        let netChange = 0;
+        let inString = false;
+        let stringChar = '';
+
+        for (let k = leadingClosingCount; k < trimmed.length; k++) {
+            const char = trimmed[k];
+            const nextChar = trimmed[k+1];
+
+            if (inString) {
+                if (char === '`') { // PowerShell escape character
+                    k++;
+                } else if (char === stringChar) {
+                    if (nextChar === stringChar) {
+                        k++; // Escaped quote "" or ''
+                    } else {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+
+            if (char === '"' || char === "'") {
+                inString = true;
+                stringChar = char;
+                continue;
+            }
+
+            if (char === '#') break; // Line comment
+
+            if (char === '<' && nextChar === '#') {
+                blockCommentLevel++;
+                k++;
+                continue;
+            }
+
+            if (char === '{' || char === '(' || char === '[') {
+                netChange++;
+            } else if (char === '}' || char === ')' || char === ']') {
+                netChange--;
+            }
+        }
+
+        indentLevel = Math.max(0, indentLevel + netChange);
+    }
+    return formattedLines.join('\n');
 }
 
 /**

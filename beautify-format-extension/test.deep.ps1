@@ -1,0 +1,46 @@
+function Test-DeepFormatting {
+[CmdletBinding()]
+param (
+[Parameter(Mandatory=$true)]
+[string]$Name,
+
+[int]$Count = 10
+)
+
+begin {
+Write-Verbose "Starting..."
+}
+
+process {
+try {
+if ($Count -gt 5) {
+Get-ChildItem -Path . | Where-Object {
+$_.Name -match "^test"
+} | Select-Object Name, Length | ForEach-Object {
+Write-Host "Found: $($_.Name)"
+}
+}
+
+$hashTable = @{
+Key1 = "Value1"
+Key2 = 123
+Nested = @{
+Inner = "Deep"
+}
+}
+
+$hereString = @"
+This is a here-string
+    with indentation inside
+that should be preserved.
+"@
+}
+catch {
+Write-Error $_
+}
+}
+
+end {
+Write-Verbose "Done."
+}
+}
