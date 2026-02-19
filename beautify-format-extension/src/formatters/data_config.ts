@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit, detectDelimiter, splitCSVLine, loadESM } from '../utils';
+import { applyEdit, detectDelimiter, parseCSV, loadESM } from '../utils';
 
 /**
  * Handle YAML formatting and validation
@@ -506,63 +506,48 @@ export async function handleCSV(editor: vscode.TextEditor, text: string) {
 
     try {
         const delimiter = detectDelimiter(text);
-        const lines = text.split('\n');
-        const rows: string[][] = [];
-        let hasUnclosedQuotes = false;
+        const rows = parseCSV(text, delimiter);
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.trim() === '') {
-                rows.push([]);
-                continue;
-            }
-
-            // Split and check for unclosed quotes
-            let inQuotes = false;
-            for (let j = 0; j < line.length; j++) {
-                if (line[j] === '"') {
-                    if (inQuotes && j + 1 < line.length && line[j + 1] === '"') {
-                        j++;
-                    } else {
-                        inQuotes = !inQuotes;
+        // Validation: Check for inconsistent column count
+        const meaningfulRows = rows.filter(r => r.length > 0 && (r.length > 1 || r[0].trim() !== ''));
+        if (meaningfulRows.length > 0) {
+            const headerCount = meaningfulRows[0].length;
+            for (let i = 0; i < meaningfulRows.length; i++) {
+                if (meaningfulRows[i].length !== headerCount) {
+                    if (!validationMessage) {
+                        validationMessage = `Inconsistent column count (expected ${headerCount}, got ${meaningfulRows[i].length})`;
                     }
                 }
             }
-            if (inQuotes) {
-                hasUnclosedQuotes = true;
-                if (!validationMessage) {
-                    validationMessage = `Unclosed quotes at line ${i + 1}`;
-                }
-            }
-
-            rows.push(splitCSVLine(line, delimiter));
         }
+
+        // Deep Formatting
+        const formattedRows: string[][] = rows.map(row => {
+            return row.map(cell => {
+                const trimmed = cell.trim();
+                if (trimmed.includes(delimiter) || trimmed.includes('"') || trimmed.includes('\n') || trimmed.includes('\r')) {
+                    return `"${trimmed.replace(/"/g, '""')}"`;
+                }
+                return trimmed;
+            });
+        });
 
         // Calculate max widths
         const maxWidths: number[] = [];
-        for (const row of rows) {
+        for (const row of formattedRows) {
             for (let i = 0; i < row.length; i++) {
                 maxWidths[i] = Math.max(maxWidths[i] || 0, row[i].length);
             }
         }
 
-        // Check for inconsistent column count
-        const headerRow = rows.find(r => r.length > 0);
-        const headerCount = headerRow ? headerRow.length : 0;
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i].length > 0 && rows[i].length !== headerCount && !validationMessage) {
-                validationMessage = `Inconsistent column count at line ${i + 1} (expected ${headerCount}, got ${rows[i].length})`;
-            }
-        }
-
         // Format
-        const formattedLines = rows.map(row => {
-            if (row.length === 0) {
+        const formattedLines = formattedRows.map(row => {
+            if (row.length === 0 || (row.length === 1 && row[0] === '')) {
                 return '';
             }
             return row.map((cell, i) => {
                 if (i === row.length - 1) {
-                    return cell; // Don't pad last column
+                    return cell;
                 }
                 return cell.padEnd(maxWidths[i]);
             }).join(` ${delimiter} `);
