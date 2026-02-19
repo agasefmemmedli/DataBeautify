@@ -482,7 +482,7 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
     // Validate HCL using custom resilient validator
     validationMessage = validateHCL(text);
 
-    // Resilient formatting logic
+    // Resilient Deep Formatting logic
     try {
         const lines = text.split('\n');
         const formattedLines: string[] = [];
@@ -492,26 +492,111 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
         let heredocDelimiter = '';
         let stateStack: ('STRING' | 'NORMAL')[] = ['NORMAL'];
 
+        // Structure to hold lines for alignment
+        let blockBuffer: { lineIndex: number, text: string, indent: number }[] = [];
+
+        function flushBlockBuffer() {
+            if (blockBuffer.length === 0) return;
+
+            // Group by indentation level
+            // This is crucial: we align only lines with the same indentation level
+            // But we must process them in order.
+            // If the indentation level changes, we break the alignment group.
+
+            let currentGroup: { lineIndex: number, text: string, indent: number }[] = [];
+            let currentIndent = -1;
+
+            // Helper to process a group
+            const processGroup = (group: typeof currentGroup) => {
+                if (group.length === 0) return;
+
+                // Find max key length for alignment
+                let maxKeyLen = 0;
+                const parsedGroup = group.map(item => {
+                    const trimmed = item.text.trim();
+                    if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+                        return { ...item, key: null, value: trimmed, isAssignment: false };
+                    }
+
+                    // Regex for assignment: key = value
+                    // Handles quoted keys: "key" = val
+                    // Handles unquoted keys: key = val
+                    const assignmentMatch = trimmed.match(/^((?:"[^"]+")|(?:[a-zA-Z0-9_-]+))\s*=([\s\S]*)$/);
+
+                    if (assignmentMatch) {
+                        const key = assignmentMatch[1];
+                        return { ...item, key: key, value: assignmentMatch[2].trim(), isAssignment: true };
+                    }
+
+                    return { ...item, key: null, value: trimmed, isAssignment: false };
+                });
+
+                // Calculate max key length
+                for (const p of parsedGroup) {
+                    if (p.isAssignment && p.key) {
+                        if (p.key.length > maxKeyLen) {
+                            maxKeyLen = p.key.length;
+                        }
+                    }
+                }
+
+                // Format lines
+                for (const p of parsedGroup) {
+                    const indentStr = '  '.repeat(p.indent);
+                    if (p.isAssignment && p.key) {
+                        const padding = ' '.repeat(maxKeyLen - p.key.length);
+                        formattedLines.push(`${indentStr}${p.key}${padding} = ${p.value}`);
+                    } else {
+                        formattedLines.push(`${indentStr}${p.value}`);
+                    }
+                }
+            };
+
+            for (const item of blockBuffer) {
+                if (currentIndent === -1) {
+                    currentIndent = item.indent;
+                }
+
+                if (item.indent !== currentIndent) {
+                    processGroup(currentGroup);
+                    currentGroup = [];
+                    currentIndent = item.indent;
+                }
+                currentGroup.push(item);
+            }
+            processGroup(currentGroup);
+            blockBuffer = [];
+        }
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
-            if (trimmed === '' && !inMultilineComment && !inHeredoc && stateStack[stateStack.length - 1] === 'NORMAL') {
-                formattedLines.push('');
-                continue;
-            }
+            // If inside a multiline string (from previous lines), preserve indentation
+            if (stateStack[stateStack.length - 1] === 'STRING') {
+                if (blockBuffer.length > 0) {
+                     blockBuffer[blockBuffer.length - 1].text += '\n' + line;
+                } else {
+                     formattedLines.push(line);
+                }
 
-            // Handle Multiline Comments
-            if (inMultilineComment) {
-                formattedLines.push(line);
-                if (trimmed.includes('*/')) {
-                    inMultilineComment = false;
+                // Check for end of string
+                // Need to parse character by character to handle escapes
+                for (let k = 0; k < line.length; k++) {
+                    const char = line[k];
+                    if (char === '\\') {
+                        k++;
+                    } else if (char === '"') {
+                        stateStack.pop();
+                        // If stack empty (unlikely with just STRING/NORMAL, usually base is NORMAL), revert to NORMAL
+                        if (stateStack.length === 0) stateStack.push('NORMAL');
+                    }
                 }
                 continue;
             }
 
-            // Handle Heredocs
             if (inHeredoc) {
+                flushBlockBuffer(); // Ensure previous assignment is written
                 formattedLines.push(line);
                 if (trimmed === heredocDelimiter) {
                     inHeredoc = false;
@@ -519,9 +604,48 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
                 continue;
             }
 
-            // Indentation adjustment for closing characters at the START of the line
+            if (inMultilineComment) {
+                flushBlockBuffer();
+                formattedLines.push(line);
+                if (trimmed.includes('*/')) {
+                    inMultilineComment = false;
+                }
+                continue;
+            }
+
+            if (trimmed === '') {
+                flushBlockBuffer();
+                formattedLines.push('');
+                continue;
+            }
+
+            // Check for multiline comment start
+            if (trimmed.startsWith('/*')) {
+                flushBlockBuffer();
+                formattedLines.push(line); // Preserve as is
+                if (!trimmed.includes('*/')) {
+                    inMultilineComment = true;
+                }
+                continue;
+            }
+
+            // Check for heredoc start in this line
+            // Only if not a comment
+            if (!trimmed.startsWith('#') && !trimmed.startsWith('//')) {
+                const heredocMatch = trimmed.match(/<<-?\s*([A-Z0-9_]+)/i);
+                if (heredocMatch) {
+                    inHeredoc = true;
+                    heredocDelimiter = heredocMatch[1];
+                }
+            }
+
+            // Calculate indentation changes
+            // Scan line for braces, taking care of strings
+            let netChange = 0;
+
+            // Pre-calculate indent for this line (closing braces de-indent immediately)
             let leadingClosingCount = 0;
-            if (stateStack[stateStack.length - 1] === 'NORMAL') {
+            if (!trimmed.startsWith('#') && !trimmed.startsWith('//')) {
                 let j = 0;
                 while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ']' || trimmed[j] === ')')) {
                     leadingClosingCount++;
@@ -529,15 +653,50 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
                 }
             }
 
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            const currentIndent = Math.max(0, indentLevel - leadingClosingCount);
+
+            // Buffer the line for alignment processing
+
+            let isBlockStart = false;
+            // Check if line ends with { (ignoring comments)
+            let codePart = trimmed;
+            const commentIdx = Math.min(
+                codePart.indexOf('#') === -1 ? Infinity : codePart.indexOf('#'),
+                codePart.indexOf('//') === -1 ? Infinity : codePart.indexOf('//')
+            );
+            if (commentIdx !== Infinity) {
+                codePart = codePart.substring(0, commentIdx).trim();
             }
 
-            // Apply indentation (HCL uses 2 spaces)
-            formattedLines.push('  '.repeat(Math.max(0, indentLevel)) + trimmed);
+            if (codePart.endsWith('{')) {
+                isBlockStart = true;
+            }
 
-            // Calculate net brace change for NEXT line
-            let netChange = 0;
+            if (leadingClosingCount > 0) {
+                 flushBlockBuffer();
+                 formattedLines.push('  '.repeat(currentIndent) + trimmed);
+            } else if (isBlockStart) {
+                 // Check if it's an assignment block (e.g. tags = {)
+                 const assignmentBlockMatch = trimmed.match(/^((?:"[^"]+")|(?:[a-zA-Z0-9_-]+))\s*=\s*\{$/);
+                 if (assignmentBlockMatch) {
+                     // It is an assignment, so buffer it to align with others
+                     blockBuffer.push({ lineIndex: i, text: trimmed, indent: currentIndent });
+                 } else {
+                     // Standard block header, flush and print
+                     flushBlockBuffer();
+                     // Normalize brace spacing
+                     let lineToPrint = trimmed;
+                     if (!lineToPrint.endsWith(' {')) {
+                         lineToPrint = lineToPrint.replace(/\s*\{\s*$/, ' {');
+                     }
+                     formattedLines.push('  '.repeat(currentIndent) + lineToPrint);
+                 }
+            } else {
+                 // It's likely an assignment or comment or function call
+                 blockBuffer.push({ lineIndex: i, text: trimmed, indent: currentIndent });
+            }
+
+            // Update indentLevel for NEXT line
             for (let k = 0; k < trimmed.length; k++) {
                 const char = trimmed[k];
                 const nextChar = trimmed[k + 1];
@@ -553,24 +712,10 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
                 }
 
                 if (char === '#' || (char === '/' && nextChar === '/')) {
-                    break; // Line comment
+                    break;
                 }
-
                 if (char === '/' && nextChar === '*') {
-                    inMultilineComment = true;
-                    k++;
-                    continue;
-                }
-
-                if (char === '<' && nextChar === '<') {
-                    // Potential heredoc
-                    const remaining = trimmed.substring(k);
-                    const heredocMatch = remaining.match(/^<<-?\s*([A-Z0-9_]+)/i);
-                    if (heredocMatch) {
-                        inHeredoc = true;
-                        heredocDelimiter = heredocMatch[1];
-                        break;
-                    }
+                    break;
                 }
 
                 if (char === '"') {
@@ -584,9 +729,11 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
                     netChange--;
                 }
             }
-
             indentLevel = Math.max(0, indentLevel + netChange);
         }
+
+        flushBlockBuffer(); // Final flush
+
         formatted = formattedLines.join('\n');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Terraform/HCL: ${error.message}`);
