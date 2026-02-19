@@ -970,73 +970,29 @@ export async function handlePrisma(editor: vscode.TextEditor, text: string) {
     // Validate Prisma
     validationMessage = validatePrisma(text);
 
-    // Resilient formatting logic
+    // Try Deep Formatting with Prettier first
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inBlockComment = false;
+        const prettier = await import('prettier');
+        const prismaPlugin = await import('prettier-plugin-prisma');
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+        formatted = await prettier.format(text, {
+            parser: 'prisma-parse',
+            plugins: [prismaPlugin.default || prismaPlugin],
+            tabWidth: 2,
+            printWidth: 120,
+        });
 
-            if (trimmed === '' && !inBlockComment) {
-                formattedLines.push('');
-                continue;
-            }
+        await applyEdit(editor, formatted);
+        vscode.window.showInformationMessage('Prisma schema formatted successfully!');
+        return;
 
-            // Handle block comments /* */
-            if (inBlockComment) {
-                formattedLines.push(line);
-                if (trimmed.includes('*/')) {
-                    inBlockComment = false;
-                }
-                continue;
-            }
+    } catch (e) {
+        console.warn('Prettier-Prisma failed, falling back to custom formatter:', e);
+    }
 
-            if (trimmed.startsWith('/*')) {
-                inBlockComment = true;
-                formattedLines.push('  '.repeat(indentLevel) + trimmed);
-                if (trimmed.includes('*/')) {
-                    inBlockComment = false;
-                }
-                continue;
-            }
-
-            // Indentation adjustment for closing brace at the START of the line
-            let currentLineIndent = indentLevel;
-            if (trimmed.startsWith('}')) {
-                currentLineIndent--;
-            }
-
-            // Apply indentation (Prisma uses 2 spaces)
-            formattedLines.push('  '.repeat(Math.max(0, currentLineIndent)) + trimmed);
-
-            // Calculate net brace change for NEXT line
-            let netChange = 0;
-            let inString = false;
-
-            for (let k = 0; k < trimmed.length; k++) {
-                const char = trimmed[k];
-                if (char === '"' && (k === 0 || trimmed[k - 1] !== '\\')) {
-                    inString = !inString;
-                    continue;
-                }
-                if (inString) { continue; }
-
-                if (char === '/' && trimmed[k + 1] === '/') { break; } // Line comment
-
-                if (char === '{') {
-                    netChange++;
-                } else if (char === '}') {
-                    netChange--;
-                }
-            }
-
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-        formatted = formattedLines.join('\n');
+    // Resilient formatting logic (Deep Formatting Fallback)
+    try {
+        formatted = formatPrismaDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Prisma: ${error.message}`);
         return;
@@ -1047,8 +1003,157 @@ export async function handlePrisma(editor: vscode.TextEditor, text: string) {
     if (validationMessage) {
         vscode.window.showWarningMessage(`Prisma schema has syntax issues but was beautified. ${validationMessage}`);
     } else {
-        vscode.window.showInformationMessage('Prisma schema formatted successfully!');
+        vscode.window.showInformationMessage('Prisma schema formatted successfully (resilient mode)!');
     }
+}
+
+/**
+ * Custom Deep Formatter for Prisma
+ * Handles indentation and vertical alignment
+ */
+function formatPrismaDeep(text: string): string {
+    const lines = text.split('\n');
+    const finalLines: string[] = [];
+
+    let inBlock = false;
+    let blockLines: string[] = [];
+    let blockStartLine = '';
+
+    // Simple state machine to identify blocks
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        if (line === '') {
+            if (inBlock) {
+                // Preserve empty lines inside block, but max 1
+                if (blockLines.length > 0 && blockLines[blockLines.length - 1] !== '') {
+                    blockLines.push('');
+                }
+            } else {
+                if (finalLines.length > 0 && finalLines[finalLines.length - 1] !== '') {
+                    finalLines.push('');
+                }
+            }
+            continue;
+        }
+
+        // Comment handling
+        if (line.startsWith('//') || line.startsWith('///')) {
+            if (inBlock) {
+                blockLines.push(line);
+            } else {
+                finalLines.push(line);
+            }
+            continue;
+        }
+
+        // Block Start
+        if (line.endsWith('{') && !inBlock) {
+            inBlock = true;
+            blockStartLine = line;
+            continue;
+        }
+
+        // Block End
+        if (line === '}' && inBlock) {
+            inBlock = false;
+            // Process block
+            finalLines.push(blockStartLine);
+            const formattedBlock = formatPrismaBlockContent(blockLines, blockStartLine);
+            finalLines.push(...formattedBlock);
+            finalLines.push('}');
+            blockLines = [];
+            continue;
+        }
+
+        if (inBlock) {
+            blockLines.push(line);
+        } else {
+            finalLines.push(line);
+        }
+    }
+
+    // Handle unclosed block (fault tolerance)
+    if (inBlock) {
+        finalLines.push(blockStartLine);
+        finalLines.push(...blockLines.map(l => '  ' + l));
+    }
+
+    return finalLines.join('\n');
+}
+
+function formatPrismaBlockContent(lines: string[], startLine: string): string[] {
+    const isModelOrType = startLine.startsWith('model') || startLine.startsWith('type');
+    const isEnum = startLine.startsWith('enum');
+    const isConfig = startLine.startsWith('datasource') || startLine.startsWith('generator');
+
+    if (isModelOrType) {
+        // Parse fields: name type [attributes...]
+        const fields = lines.map(line => {
+            if (line === '' || line.startsWith('/')) return { raw: line, isComment: true };
+
+            // Basic tokenizer for fields
+            // Split by whitespace
+            const tokens = line.split(/\s+/);
+            if (tokens.length < 2) return { raw: line, isComment: false, tokens };
+
+            return {
+                name: tokens[0],
+                type: tokens[1],
+                rest: tokens.slice(2).join(' '),
+                isComment: false
+            };
+        });
+
+        // Calculate widths
+        let maxName = 0;
+        let maxType = 0;
+
+        fields.forEach(f => {
+            if (!f.isComment && f.name) {
+                maxName = Math.max(maxName, f.name.length);
+                maxType = Math.max(maxType, f.type!.length);
+            }
+        });
+
+        return fields.map(f => {
+            if (f.isComment || !f.name) return '  ' + (f.raw || '');
+            const namePad = f.name.padEnd(maxName);
+            const typePad = f.type!.padEnd(maxType);
+            const rest = f.rest ? ' ' + f.rest : '';
+            return `  ${namePad} ${typePad}${rest}`;
+        });
+    }
+
+    if (isConfig) {
+        // Key = Value
+        const props = lines.map(line => {
+            if (line === '' || line.startsWith('/')) return { raw: line, isComment: true };
+            const eq = line.indexOf('=');
+            if (eq === -1) return { raw: line, isComment: false };
+
+            return {
+                key: line.substring(0, eq).trim(),
+                val: line.substring(eq + 1).trim(),
+                isKV: true,
+                isComment: false
+            };
+        });
+
+        let maxKey = 0;
+        props.forEach(p => {
+            if (p.isKV) maxKey = Math.max(maxKey, p.key!.length);
+        });
+
+        return props.map(p => {
+            if (p.isComment || !p.isKV) return '  ' + (p.raw || '');
+            const keyPad = p.key!.padEnd(maxKey);
+            return `  ${keyPad} = ${p.val}`;
+        });
+    }
+
+    // Default indentation for enums or others
+    return lines.map(l => '  ' + l);
 }
 
 /**

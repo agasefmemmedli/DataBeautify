@@ -1,5 +1,3 @@
-Prisma (.prisma) — схемы баз данных.
-
 MongoDB Shell (.mongodb) — скрипты для NoSQL.
 
 Markdown (.md) — README и документация.
