@@ -1,5 +1,3 @@
-Kotlin (.kt, .kts) — Android и JVM.
-
 Dart (.dart) — Flutter разработка.
 
 Dockerfile (Dockerfile) — инструкции сборки контейнеров.
