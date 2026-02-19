@@ -466,6 +466,7 @@
     "sass": "^1.97.3",
     "sass-formatter": "^0.8.0",
     "smol-toml": "^1.6.0",
+    "sql-formatter": "^15.7.2",
     "svelte": "^5.51.1",
     "xml-formatter": "^3.6.0",
     "yaml": "^2.8.2"
