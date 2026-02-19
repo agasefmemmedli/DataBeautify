@@ -1,5 +1,3 @@
-Dockerfile (Dockerfile) — инструкции сборки контейнеров.
-
 Shell Script (.sh) — скрипты Bash/Zsh.
 
 PowerShell (.ps1) — автоматизация в Windows.

@@ -79,7 +79,7 @@ async function runTests() {
     console.log('Running CSS Deep Formatting Verification...');
     let Web;
     try {
-        Web = require('./out/src/formatters/web');
+        Web = require('./out/formatters/web');
     }
     catch (e) {
         console.error('Could not load web formatter. Make sure to run "npm run compile" first.');

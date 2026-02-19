@@ -11,23 +11,33 @@ export async function handleDockerfile(editor: vscode.TextEditor, text: string) 
     // Validate Dockerfile
     validationMessage = validateDockerfile(text);
 
-    // Resilient formatting logic
+    // Deep formatting logic
     try {
         const lines = text.split('\n');
         const formattedLines: string[] = [];
         let isMultiline = false;
+        let lastWasEmpty = false;
 
-        const instructions = [
+        const instructions = new Set([
             'FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'EXPOSE', 'ENTRYPOINT',
             'CMD', 'ENV', 'ARG', 'LABEL', 'USER', 'VOLUME', 'STOPSIGNAL',
             'HEALTHCHECK', 'ONBUILD', 'MAINTAINER', 'SHELL'
-        ];
+        ]);
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
-            if (trimmed === '' || trimmed.startsWith('#')) {
+            if (trimmed === '') {
+                if (!lastWasEmpty && formattedLines.length > 0) {
+                    formattedLines.push('');
+                    lastWasEmpty = true;
+                }
+                continue;
+            }
+            lastWasEmpty = false;
+
+            if (trimmed.startsWith('#')) {
                 formattedLines.push(trimmed);
                 continue;
             }
@@ -35,12 +45,33 @@ export async function handleDockerfile(editor: vscode.TextEditor, text: string) 
             let currentLine = trimmed;
             if (!isMultiline) {
                 // Check if line starts with an instruction
-                const firstWord = trimmed.split(/\s+/)[0].toUpperCase();
-                if (instructions.includes(firstWord)) {
-                    // Normalize instruction case
-                    const rest = trimmed.substring(firstWord.length).trim();
-                    currentLine = `${firstWord} ${rest}`;
+                const parts = trimmed.split(/\s+/);
+                const firstWord = parts[0].toUpperCase();
+
+                if (instructions.has(firstWord)) {
+                    // Special handling for JSON array arguments in CMD and ENTRYPOINT
+                    if ((firstWord === 'CMD' || firstWord === 'ENTRYPOINT') && /^\s*\[/.test(trimmed.substring(firstWord.length))) {
+                         // Attempt to fix single quotes to double quotes for valid JSON
+                         let args = trimmed.substring(firstWord.length).trim();
+                         // Simple heuristic: if it looks like ['a', 'b'], replace ' with "
+                         if (args.startsWith('[') && args.endsWith(']')) {
+                         // Safer replacement: only replace single quotes if they wrap content WITHOUT quotes or backslashes
+                         // e.g. ['a', 'b'] -> ["a", "b"]
+                         // but ['a\'b'] -> unchanged
+                         args = args.replace(/'([^'"\\]*)'/g, '"$1"');
+                         }
+                         currentLine = `${firstWord} ${args}`;
+                    } else {
+                        // Normalize instruction case
+                        const rest = trimmed.substring(firstWord.length).trim();
+                        currentLine = `${firstWord} ${rest}`;
+                    }
+                } else {
+                    // Not a known instruction, maybe a continuation or unknown directive
+                    // Keep as is, or uppercase first word if it looks like an instruction?
+                    // Better keep as is to be safe.
                 }
+
                 formattedLines.push(currentLine);
             } else {
                 // Indent multiline continuation
@@ -50,7 +81,38 @@ export async function handleDockerfile(editor: vscode.TextEditor, text: string) 
             // Check if this line ends with a backslash for multiline support
             isMultiline = trimmed.endsWith('\\');
         }
-        formatted = formattedLines.join('\n');
+
+        // Pass 2: Ensure empty lines before FROM blocks and attach comments
+        const finalLines = [...formattedLines];
+        for (let i = 0; i < finalLines.length; i++) {
+            if (finalLines[i].startsWith('FROM ')) {
+                // Determine block start (include preceding attached comments)
+                let j = i - 1;
+                while (j >= 0) {
+                    const line = finalLines[j];
+                    if (line.trim().startsWith('#')) {
+                        j--;
+                    } else if (line.trim() === '') {
+                        // Empty line breaks attachment
+                        break;
+                    } else {
+                        // Other instruction breaks attachment
+                        break;
+                    }
+                }
+                const blockStart = j + 1;
+
+                // Ensure empty line before blockStart (if not at very beginning)
+                if (blockStart > 0) {
+                     if (finalLines[blockStart - 1].trim() !== '') {
+                         finalLines.splice(blockStart, 0, '');
+                         i++; // Adjust index since we inserted a line
+                     }
+                }
+            }
+        }
+
+        formatted = finalLines.join('\n');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Dockerfile: ${error.message}`);
         return;
@@ -71,14 +133,15 @@ export async function handleDockerfile(editor: vscode.TextEditor, text: string) 
 function validateDockerfile(text: string): string | undefined {
     const lines = text.split('\n');
     let hasFrom = false;
+    let hasArg = false;
     let inQuotes = false;
     let quoteChar = '';
 
-    const instructions = [
+    const instructions = new Set([
         'FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'EXPOSE', 'ENTRYPOINT',
         'CMD', 'ENV', 'ARG', 'LABEL', 'USER', 'VOLUME', 'STOPSIGNAL',
         'HEALTHCHECK', 'ONBUILD', 'MAINTAINER', 'SHELL'
-    ];
+    ]);
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -100,8 +163,9 @@ function validateDockerfile(text: string): string | undefined {
         }
 
         const firstWord = trimmed.split(/\s+/)[0].toUpperCase();
-        if (instructions.includes(firstWord)) {
+        if (instructions.has(firstWord)) {
             if (firstWord === 'FROM') hasFrom = true;
+            if (firstWord === 'ARG') hasArg = true;
 
             const rest = trimmed.substring(firstWord.length).trim();
             if (rest === '' && !trimmed.endsWith('\\')) {
@@ -114,8 +178,11 @@ function validateDockerfile(text: string): string | undefined {
         return "Unclosed string literal";
     }
 
-    if (!hasFrom && text.trim().length > 0) {
-        return "Dockerfile should start with a 'FROM' instruction";
+    if (!hasFrom && !hasArg && text.trim().length > 0) {
+        // Technically ARG can precede FROM, but a Dockerfile must have FROM eventually.
+        // If we have ARG but no FROM, it's weird but maybe incomplete.
+        // Let's stick to requiring FROM if content exists.
+        if (!hasFrom) return "Dockerfile should start with a 'FROM' instruction (ARG is allowed before FROM)";
     }
 
     return undefined;
