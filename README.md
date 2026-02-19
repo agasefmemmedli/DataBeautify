@@ -1,5 +1,3 @@
-Terraform / HCL (.tf, .tfvars) — инфраструктура как код.
-
 Makefile (Makefile) — автоматизация сборки.
 
 Nginx Config (.conf, .nginx) — настройки серверов.
