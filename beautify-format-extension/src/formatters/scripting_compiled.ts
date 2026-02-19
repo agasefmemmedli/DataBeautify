@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit, loadESM } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
+import { formatGoDeep } from './go_deep_formatter';
 
 /**
  * Handle Python formatting and validation
@@ -1138,110 +1139,7 @@ export async function handleGo(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let extraIndent = 0;
-        let inRawString = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '' && !inRawString) {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Handle backtick raw strings
-            if (inRawString) {
-                formattedLines.push(line);
-                if (trimmed.includes('`')) {
-                    const matches = (trimmed.match(/`/g) || []).length;
-                    if (matches % 2 !== 0) {
-                        inRawString = false;
-                    }
-                }
-                continue;
-            }
-
-            if (trimmed.includes('`')) {
-                const matches = (trimmed.match(/`/g) || []).length;
-                if (matches % 2 !== 0) {
-                    inRawString = true;
-                }
-            }
-
-            // Indentation adjustment for closing braces at the START of the line
-            let leadingClosingCount = 0;
-            let j = 0;
-            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                leadingClosingCount++;
-                j++;
-            }
-
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
-                extraIndent = 0;
-            }
-
-            // Handle case and default labels
-            let currentExtraIndent = extraIndent;
-            if (trimmed.startsWith('case ') || trimmed.startsWith('default:')) {
-                currentExtraIndent = 0;
-                extraIndent = 1;
-            }
-
-            // Apply indentation (using 4 spaces as per Go standards often used in editors)
-            let currentLine = '    '.repeat(Math.max(0, indentLevel + currentExtraIndent)) + trimmed;
-
-            // Normalize := operator (ensure space around it)
-            if (currentLine.includes(':=')) {
-                currentLine = currentLine.replace(/\s*:=\s*/g, ' := ');
-            }
-
-            // Ensure space before {
-            if (currentLine.endsWith('{') && !currentLine.endsWith(' {')) {
-                currentLine = currentLine.replace(/\{$/, ' {');
-            }
-
-            formattedLines.push(currentLine);
-
-            // Calculate net brace change for NEXT line, excluding leading closing braces
-            let netChange = 0;
-            let inString = false;
-            let inChar = false;
-            const remaining = trimmed.substring(leadingClosingCount);
-
-            for (let k = 0; k < remaining.length; k++) {
-                const char = remaining[k];
-                if (char === '"' && (k === 0 || remaining[k-1] !== '\\')) {
-                    inString = !inString;
-                    continue;
-                }
-                if (inString) { continue; }
-
-                if (char === "'" && (k === 0 || remaining[k-1] !== '\\')) {
-                    inChar = !inChar;
-                    continue;
-                }
-                if (inChar) { continue; }
-
-                if (char === '/' && remaining[k+1] === '/') { break; }
-                if (char === '/' && remaining[k+1] === '*') { break; }
-
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
-                    extraIndent = 0;
-                }
-                if (char === '}' || char === ')' || char === ']') {
-                    netChange--;
-                }
-            }
-
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatGoDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Go: ${error.message}`);
         return;
