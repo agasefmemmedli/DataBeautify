@@ -1523,24 +1523,111 @@ export async function handleCPP(editor: vscode.TextEditor, text: string) {
 
     /* eslint-disable */
     try {
-        // Format C++ (using js-beautify's JS formatter which handles C-style syntax well)
-        formatted = jsbeautify.js(text, {
+        // --- PRE-PROCESSING ---
+        const masks: string[] = [];
+        const maskPrefix = '___CPP_MASK_';
+
+        // 1. Mask strings, chars and comments to protect them from formatting changes
+        // Strings: "..."
+        // Chars: '...'
+        // Comments: //... or /*...*/
+        // Preprocessor: #... (we mask these to avoid indentation mess up)
+        let maskedText = text.replace(/("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(^\s*#[^\n]*)/gm, (match) => {
+            const placeholder = `${maskPrefix}${masks.length}___`;
+            masks.push(match);
+            return placeholder;
+        });
+
+        // 2. Normalize C++ Syntax
+        // Access modifiers: public:, private:, protected:
+        // Ensure they are on their own line.
+        maskedText = maskedText.replace(/\b(public|private|protected)\s*:\s*/g, '$1:\n');
+
+        // Scope resolution spacing cleanup
+        maskedText = maskedText.replace(/\s*::\s*/g, '::');
+
+        // Lambda syntax: [] (...) -> ... {
+        // Ensure space between `] (`.
+        maskedText = maskedText.replace(/\]\s*\(/g, '] (');
+
+        // Template and Class on same line to prevent weird indentation
+        maskedText = maskedText.replace(/(template\s*<.*?>)\s+(class|struct)/g, '$1 $2');
+
+        // --- CORE FORMATTING ---
+        let beautified = jsbeautify.js(maskedText, {
             indent_size: 4,
             indent_char: ' ',
             max_preserve_newlines: 2,
             preserve_newlines: true,
-            keep_array_indentation: false,
+            keep_array_indentation: true, // Important for array initializers
             break_chained_methods: false,
             brace_style: 'collapse',
             space_before_conditional: true,
             unescape_strings: false,
             jslint_happy: false,
-            end_with_newline: false,
+            end_with_newline: true,
             wrap_line_length: 0,
             comma_first: false,
             e4x: true,
             indent_empty_lines: false
         });
+
+        // --- POST-PROCESSING ---
+
+        // 0. Ensure access modifiers are on new line if js-beautify collapsed them
+        beautified = beautified.replace(/^(\s*)(public|private|protected)\s*:\s*([^\s])/gm, '$1$2:\n$1    $3');
+
+        // 1. Fix Scope Resolution and Double References/Pointers (Before templates to avoid breaking std::vector match)
+        beautified = beautified.replace(/\s*::\s*/g, '::');
+        beautified = beautified.replace(/&\s*&/g, '&&');
+        beautified = beautified.replace(/\*\s*\*/g, '**');
+
+        // 2. Indentation Fixes
+        const lines = beautified.split('\n');
+        const finalLines: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            const trimmed = line.trim();
+
+            // Fix Access Modifiers Indentation
+            // Dedent public/private/protected by one level (4 spaces) relative to where js-beautify put them
+            if (/^(public|private|protected)\s*:/.test(trimmed)) {
+                line = line.replace(/^    /, '');
+            }
+
+            finalLines.push(line);
+        }
+        beautified = finalLines.join('\n');
+
+        // 3. Fix Template Spacing: vector < int > -> vector<int>
+        // Use callback to trim internal spaces
+        for (let k = 0; k < 3; k++) {
+            beautified = beautified.replace(/\b([\w:]+)\s*<\s+([^>]+?)\s+>(?=\s*[>(\w:,\*&;\[])/g, (match: string, id: string, content: string) => {
+                return `${id}<${content.trim()}>`;
+            });
+        }
+
+        // 4. Fix Pointer/Reference Alignment: int * p -> int* p
+        // Heuristic: Type * Variable.
+        const types = 'void|int|char|bool|float|double|long|short|unsigned|signed|size_t|auto|string|vector|map|set|list|pair|const|class|struct|typename';
+        beautified = beautified.replace(new RegExp(`\\b(${types})\\s*(\\*+|&+)\\s*(\\w+)`, 'g'), '$1$2 $3');
+
+        // Handle PascalCase types (Class pointers)
+        beautified = beautified.replace(/\b([A-Z]\w*)\s*(\*+|&+)\s*(\w+)/g, '$1$2 $3');
+
+        // Handle Abstract Declarators: void(T &) -> void(T&)
+        // Matches Type & [),>]
+        beautified = beautified.replace(new RegExp(`\\b([A-Z]\\w*|${types})\\s*(\\*+|&+)\\s*(?=\\s*[),>])`, 'g'), '$1$2');
+
+        // Handle Context-based pointers (assignment, return, etc)
+        beautified = beautified.replace(/([=\(\[\{,!:?&\|\^\+\-\*\/%])\s*(\*|&)\s+([\w_]+)/g, '$1 $2$3');
+
+        // 4. Restore Masks
+        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return masks[parseInt(index)];
+        });
+
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format C++: ${error.message}`);
         return;
