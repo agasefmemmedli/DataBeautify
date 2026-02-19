@@ -1,5 +1,3 @@
-TOML (.toml) — конфиги Rust (Cargo), Python (pyproject).
-
 INI (.ini) — старый добрый формат настроек.
 
 ENV (.env) — переменные окружения.

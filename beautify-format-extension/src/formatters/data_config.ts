@@ -84,6 +84,42 @@ export async function handleTOML(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const smolToml = require('smol-toml');
+    let prettier: any;
+    let tomlPlugin: any;
+
+    try {
+        prettier = await loadESM('prettier');
+        tomlPlugin = await loadESM('prettier-plugin-toml');
+    } catch (e) {
+        console.warn('Prettier or TOML plugin failed to load:', e);
+    }
+
+    // Try Deep Formatting with Prettier first
+    try {
+        if (!prettier || !tomlPlugin) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        const plugin = tomlPlugin.default || tomlPlugin;
+
+        formatted = await format(text, {
+            parser: 'toml',
+            plugins: [plugin],
+            tabWidth: 2,
+            printWidth: 120,
+            trailingComma: 'none',
+            singleQuote: false,
+            bracketSpacing: true
+        });
+
+        await applyEdit(editor, formatted);
+        vscode.window.showInformationMessage('TOML formatted successfully!');
+        return;
+
+    } catch (prettierError: any) {
+        // Fallback to manual formatting if Prettier fails
+    }
 
     // Validate TOML using smol-toml
     try {
