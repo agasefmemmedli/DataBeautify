@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit } from '../utils';
+import { applyEdit, loadESM } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
 
 /**
@@ -59,7 +59,6 @@ export async function handleJava(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const javaAst = require('java-ast');
-    const jsbeautify = require('js-beautify');
 
     // Validate Java using java-ast
     const originalConsoleError = console.error;
@@ -82,31 +81,54 @@ export async function handleJava(editor: vscode.TextEditor, text: string) {
         validationMessage = errorOutput.split('\n')[0].trim();
     }
 
-    /* eslint-disable */
+    // Try Deep Formatting with Prettier (Standard Style)
     try {
-        // Format Java (using js-beautify's JS formatter which handles Java well)
-        formatted = jsbeautify.js(text, {
-            indent_size: 4,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: false,
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: false,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
+        const prettier = await loadESM('prettier');
+        const pluginJavaMod = await loadESM('prettier-plugin-java');
+        const pluginJava = pluginJavaMod.default || pluginJavaMod;
+
+        formatted = await prettier.format(text, {
+            parser: "java",
+            plugins: [pluginJava],
+            tabWidth: 4,
+            printWidth: 100,
+            useTabs: false,
+            trailingComma: "none",
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Java: ${error.message}`);
-        return;
+    } catch (prettierError: any) {
+        console.warn('Prettier Java formatting failed, falling back to js-beautify', prettierError);
+
+        const jsbeautify = require('js-beautify');
+        /* eslint-disable */
+        try {
+            // Format Java (using js-beautify's JS formatter which handles Java well)
+            formatted = jsbeautify.js(text, {
+                indent_size: 4,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Java: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
+
+        if (!validationMessage) {
+             validationMessage = "Deep formatting failed (likely syntax error). Applied basic formatting.";
+        }
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
