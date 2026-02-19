@@ -150,56 +150,38 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
     // Validate Ruby using custom resilient validator
     validationMessage = validateRuby(text);
 
-    // Resilient formatting logic
+    // Try Deep Formatting with Prettier
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
+        const prettier = await loadESM('prettier');
+        const pluginRubyMod = await loadESM('@prettier/plugin-ruby');
+        const pluginRuby = pluginRubyMod.default || pluginRubyMod;
 
-        // Keywords that start a block
-        const blockOpeners = /^(class|module|def|begin|case|if|unless|while|until|for)\b/;
-        // Keywords that end a block
-        const blockClosers = /^end\b/;
-        // Keywords that are middle of a block
-        const blockIntermediates = /^(elsif|else|when|rescue|ensure)\b/;
-        // 'do' at the end of a line (common for blocks)
-        const doAtEnd = /\bdo\b(\s*\|.*\|)?\s*$/;
+        formatted = await prettier.format(text, {
+            parser: "ruby",
+            plugins: [pluginRuby],
+            tabWidth: 2,
+            printWidth: 100,
+            singleQuote: false,
+            trailingComma: 'none',
+        });
+    } catch (prettierError: any) {
+        console.error('Prettier Ruby formatting failed:', prettierError);
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Adjust indent for the current line if it's a closer or intermediate
-            let currentIndent = indentLevel;
-            if (blockClosers.test(trimmed) || blockIntermediates.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-
-            // Apply indentation (Ruby uses 2 spaces)
-            formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-            // Calculate indentation for the NEXT line
-            let nextIndent = indentLevel;
-
-            // If line starts with an opener or ends with 'do', increment indent
-            // We check if it starts with an opener to avoid modifier if/unless
-            if (blockOpeners.test(trimmed) || doAtEnd.test(trimmed) || blockIntermediates.test(trimmed)) {
-                nextIndent = currentIndent + 1;
-            } else if (blockClosers.test(trimmed)) {
-                nextIndent = Math.max(0, indentLevel - 1);
-            }
-
-            indentLevel = nextIndent;
+        let errorMsg = "Deep formatting failed (likely syntax error). Applied basic formatting.";
+        if (prettierError.message && prettierError.message.includes("cannot load such file")) {
+             errorMsg = "Deep formatting requires 'syntax_tree' gem. Run 'gem install syntax_tree'. Applied basic formatting.";
         }
-        formatted = formattedLines.join('\n');
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Ruby: ${error.message}`);
-        return;
+
+        // Fallback to basic formatting
+        try {
+            formatted = formatRubyBasic(text);
+            if (!validationMessage) {
+                validationMessage = errorMsg;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Ruby: ${error.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);
@@ -209,6 +191,57 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Ruby formatted successfully!');
     }
+}
+
+/**
+ * Basic resilient Ruby formatter (fallback)
+ */
+function formatRubyBasic(text: string): string {
+    const lines = text.split('\n');
+    const formattedLines: string[] = [];
+    let indentLevel = 0;
+
+    // Keywords that start a block
+    const blockOpeners = /^(class|module|def|begin|case|if|unless|while|until|for)\b/;
+    // Keywords that end a block
+    const blockClosers = /^end\b/;
+    // Keywords that are middle of a block
+    const blockIntermediates = /^(elsif|else|when|rescue|ensure)\b/;
+    // 'do' at the end of a line (common for blocks)
+    const doAtEnd = /\bdo\b(\s*\|.*\|)?\s*$/;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '') {
+            formattedLines.push('');
+            continue;
+        }
+
+        // Adjust indent for the current line if it's a closer or intermediate
+        let currentIndent = indentLevel;
+        if (blockClosers.test(trimmed) || blockIntermediates.test(trimmed)) {
+            currentIndent = Math.max(0, indentLevel - 1);
+        }
+
+        // Apply indentation (Ruby uses 2 spaces)
+        formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+        // Calculate indentation for the NEXT line
+        let nextIndent = indentLevel;
+
+        // If line starts with an opener or ends with 'do', increment indent
+        // We check if it starts with an opener to avoid modifier if/unless
+        if (blockOpeners.test(trimmed) || doAtEnd.test(trimmed) || blockIntermediates.test(trimmed)) {
+            nextIndent = currentIndent + 1;
+        } else if (blockClosers.test(trimmed)) {
+            nextIndent = Math.max(0, indentLevel - 1);
+        }
+
+        indentLevel = nextIndent;
+    }
+    return formattedLines.join('\n');
 }
 
 /**
@@ -244,7 +277,13 @@ function validateRuby(text: string): string | undefined {
             }
 
             // Check if the statement starts with an opener
-            const firstToken = tokens[0].replace(/[^a-z]/g, ''); // Simple cleanup
+            let firstToken = tokens[0];
+            const match = firstToken.match(/^([a-z]+)/);
+            if (match) {
+                firstToken = match[1];
+            } else {
+                firstToken = firstToken.replace(/[^a-z]/g, '');
+            }
 
             if (openers.includes(firstToken)) {
                 stack.push({ word: firstToken, line: i + 1 });
@@ -260,7 +299,9 @@ function validateRuby(text: string): string | undefined {
             }
 
             // Check for 'do' at end of statement
-            if (stmt.trim().endsWith('do') || /\bdo\s*\|.*\|\s*$/.test(stmt.trim())) {
+            // Check for 'do' keyword or 'do |...|'
+            // Be careful not to match 'todo'
+            if (/\bdo(\s*\|.*\|)?\s*$/.test(stmt.trim())) {
                 stack.push({ word: 'do', line: i + 1 });
             }
         }
