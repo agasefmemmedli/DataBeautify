@@ -1280,179 +1280,278 @@ export async function handleRust(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Lazy load dependencies
+    const jsbeautify = require('js-beautify');
+
     // Validate Rust using custom resilient validator
     validationMessage = validateRust(text);
 
-    // Resilient formatting logic
+    /* eslint-disable */
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inRawString = false;
-        let rawStringHashes = 0;
-        let inString = false;
-        let inChar = false;
-        let blockCommentLevel = 0;
+        // --- PRE-PROCESSING ---
+        const masks: string[] = [];
+        const maskPrefix = '___RS_MASK_';
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+        // 1. Mask strings, chars, comments and attributes
+        // Strings: "..."
+        // Raw Strings: r"..." or r#...#
+        // Chars: '...' (including lifetimes check handled below)
+        // Comments: //... or /*...*/
+        // Attributes: #[...] or #![...]
 
-            if (trimmed === '' && !inRawString && blockCommentLevel === 0) {
-                formattedLines.push('');
-                continue;
+        let maskedText = '';
+        let i = 0;
+
+        while (i < text.length) {
+            const char = text[i];
+            const next = text[i+1];
+
+            // Raw String: r" or r#
+            if (char === 'r' && (next === '"' || next === '#')) {
+                 let hashes = 0;
+                 let k = i + 1;
+                 while (k < text.length && text[k] === '#') {
+                     hashes++;
+                     k++;
+                 }
+                 if (k < text.length && text[k] === '"') {
+                     // Found start of raw string content
+                     const startContent = k + 1;
+                     // Find end
+                     const endSeq = '"' + '#'.repeat(hashes);
+                     const endIdx = text.indexOf(endSeq, startContent);
+                     if (endIdx !== -1) {
+                         const fullMatch = text.substring(i, endIdx + endSeq.length);
+                         masks.push(fullMatch);
+                         maskedText += `${maskPrefix}${masks.length - 1}___`;
+                         i = endIdx + endSeq.length;
+                         continue;
+                     }
+                 }
             }
 
-            // Handle Rust raw strings r"..." or r#..."#
-            if (inRawString) {
-                formattedLines.push(line);
-                const endMatch = line.match(new RegExp('"' + '#'.repeat(rawStringHashes)));
-                if (endMatch) {
-                    inRawString = false;
-                }
-                continue;
-            }
-
-            // Indentation adjustment for closing braces at the START of the line
-            let leadingClosingCount = 0;
-            if (blockCommentLevel === 0 && !inString && !inChar) {
-                let j = 0;
-                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                    leadingClosingCount++;
-                    j++;
-                }
-            }
-
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
-            }
-
-            // Apply indentation
-            let currentLine = (blockCommentLevel > 0 || inString || inChar) ? line : '    '.repeat(Math.max(0, indentLevel)) + trimmed;
-
-            // Normalize => and -> operators (only if not in string/comment/rawstring)
-            if (blockCommentLevel === 0 && !inString && !inChar && !inRawString) {
-                // This is still a bit naive but better than global replace on the whole line if we were tracking state within the line.
-                // To be truly robust we should do this character by character.
-            }
-
-            formattedLines.push(currentLine);
-
-            // Calculate net brace change for NEXT line and track state
-            let netChange = 0;
-            const startIdx = (blockCommentLevel > 0 || inString || inChar) ? 0 : leadingClosingCount;
-            const textToProcess = (blockCommentLevel > 0 || inString || inChar) ? line : trimmed.substring(leadingClosingCount);
-
-            for (let k = 0; k < textToProcess.length; k++) {
-                const char = textToProcess[k];
-                const nextChar = textToProcess[k + 1];
-
-                if (inRawString) {
-                    const remaining = textToProcess.substring(k);
-                    const endMatch = remaining.match(new RegExp('^"' + '#'.repeat(rawStringHashes)));
-                    if (endMatch) {
-                        inRawString = false;
-                        k += endMatch[0].length - 1;
-                    }
-                    continue;
-                }
-
-                if (blockCommentLevel > 0) {
-                    if (char === '*' && nextChar === '/') {
-                        blockCommentLevel--;
-                        k++;
-                    } else if (char === '/' && nextChar === '*') {
-                        blockCommentLevel++;
-                        k++;
-                    }
-                    continue;
-                }
-
-                if (inString) {
-                    if (char === '\\') {
-                        k++;
-                    } else if (char === '"') {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (inChar) {
-                    if (char === '\\') {
-                        k++;
-                    } else if (char === "'") {
-                        inChar = false;
-                    }
-                    continue;
-                }
-
-                // Start of comment
-                if (char === '/' && nextChar === '/') {
-                    break; // Line comment, rest of line is ignored
-                }
-                if (char === '/' && nextChar === '*') {
-                    blockCommentLevel++;
-                    k++;
-                    continue;
-                }
-
-                // Start of raw string
-                if (char === 'r' && (nextChar === '"' || nextChar === '#')) {
-                    let hashes = 0;
-                    let m = k + 1;
-                    while (m < textToProcess.length && textToProcess[m] === '#') {
-                        hashes++;
-                        m++;
-                    }
-                    if (m < textToProcess.length && textToProcess[m] === '"') {
-                        inRawString = true;
-                        rawStringHashes = hashes;
-                        k = m;
+            // Normal String
+            if (char === '"') {
+                let k = i + 1;
+                while (k < text.length) {
+                    if (text[k] === '\\') {
+                        k += 2;
                         continue;
                     }
-                }
-
-                if (char === '"') {
-                    inString = true;
-                    continue;
-                }
-
-                if (char === "'") {
-                    const remaining = textToProcess.substring(k + 1);
-                    if (/^([^'\\]|\\.)'/.test(remaining)) {
-                        inChar = true;
+                    if (text[k] === '"') {
+                        k++; // Include closing quote
+                        break;
                     }
+                    k++;
+                }
+                const fullMatch = text.substring(i, k);
+                masks.push(fullMatch);
+                maskedText += `${maskPrefix}${masks.length - 1}___`;
+                i = k;
+                continue;
+            }
+
+            // Char or Lifetime
+            if (char === "'") {
+                // Check if it's a lifetime: 'a (followed by identifier char, not followed by ')
+                // Check if it's a char: 'a' or '\n'
+
+                let isChar = false;
+                // Simple heuristic: look ahead for closing '
+                if (text[i+1] === '\\') {
+                    if (text.substring(i+2).startsWith("'")) {
+                        isChar = true; // '\n'
+                    }
+                } else if (text[i+2] === "'") {
+                    isChar = true; // 'a'
+                }
+
+                if (isChar) {
+                     let k = i + 1;
+                     while (k < text.length) {
+                        if (text[k] === '\\') {
+                            k += 2;
+                            continue;
+                        }
+                        if (text[k] === "'") {
+                            k++;
+                            break;
+                        }
+                        k++;
+                     }
+                     const fullMatch = text.substring(i, k);
+                     masks.push(fullMatch);
+                     maskedText += `${maskPrefix}${masks.length - 1}___`;
+                     i = k;
+                     continue;
+                }
+
+                // Treat as Lifetime -> mask it to treat as token
+                let k = i + 1;
+                while (k < text.length && /[a-zA-Z0-9_]/.test(text[k])) {
+                    k++;
+                }
+                const fullMatch = text.substring(i, k);
+                masks.push(fullMatch);
+                maskedText += `${maskPrefix}${masks.length - 1}___`;
+                i = k;
+                continue;
+            }
+
+            // Line Comment
+            if (char === '/' && next === '/') {
+                const endIdx = text.indexOf('\n', i);
+                const actualEnd = endIdx === -1 ? text.length : endIdx;
+                const fullMatch = text.substring(i, actualEnd);
+                masks.push(fullMatch);
+                maskedText += `${maskPrefix}${masks.length - 1}___`;
+                i = actualEnd;
+                continue;
+            }
+
+            // Block Comment
+            if (char === '/' && next === '*') {
+                const endIdx = text.indexOf('*/', i + 2);
+                if (endIdx !== -1) {
+                    const fullMatch = text.substring(i, endIdx + 2);
+                    masks.push(fullMatch);
+                    maskedText += `${maskPrefix}${masks.length - 1}___`;
+                    i = endIdx + 2;
                     continue;
                 }
+            }
 
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
+            // Attributes #[...] or #![...]
+            if (char === '#' && (next === '[' || (next === '!' && text[i+2] === '['))) {
+                let depth = 0;
+                let k = i;
+                let found = false;
+                while (k < text.length) {
+                    if (text[k] === '[') depth++;
+                    else if (text[k] === ']') {
+                        depth--;
+                        if (depth === 0) {
+                            found = true;
+                            k++; // Include closing ]
+                            break;
+                        }
+                    }
+                    k++;
                 }
-                if (char === '}' || char === ')' || char === ']') {
-                    netChange--;
+                if (found) {
+                     const fullMatch = text.substring(i, k);
+                     masks.push(fullMatch);
+                     maskedText += `${maskPrefix}${masks.length - 1}___`;
+                     i = k;
+                     continue;
                 }
             }
 
-            indentLevel = Math.max(0, indentLevel + netChange);
+            maskedText += char;
+            i++;
         }
-        formatted = formattedLines.join('\n');
 
-        // Post-process to normalize operators outside of strings/comments
-        // (A bit complex to do perfectly without a full parser, but let's keep it simple for now as per "resilient" goal)
-        // Actually, the previous version was simpler. Let's stick to a slightly better version.
-        formatted = formatted.split('\n').map(l => {
-            // Only normalize if the line doesn't seem to be a multiline string/comment middle
-            if (l.trim().startsWith('*') || l.trim().startsWith('"')) {
-                return l;
-            }
-            return l.replace(/([^ ])=>/g, '$1 =>').replace(/=>([^ ])/g, '=> $1')
-                    .replace(/([^ ])->/g, '$1 ->').replace(/->([^ ])/g, '-> $1');
-        }).join('\n');
+        // 2. Pre-processing Normalization
+        maskedText = maskedText.replace(/=>/g, ' => ');
+        maskedText = maskedText.replace(/->/g, ' -> ');
+
+        // Ensure no space between ! and ( [ { for macros during pre-processing to hint js-beautify
+        // Actually js-beautify will likely add space.
+
+        // --- CORE FORMATTING ---
+        let beautified = jsbeautify.js(maskedText, {
+            indent_size: 4,
+            indent_char: ' ',
+            max_preserve_newlines: 2,
+            preserve_newlines: true,
+            keep_array_indentation: false,
+            break_chained_methods: false,
+            brace_style: 'collapse',
+            space_before_conditional: true,
+            unescape_strings: false,
+            jslint_happy: false,
+            end_with_newline: true,
+            wrap_line_length: 0,
+            comma_first: false,
+            e4x: true,
+            indent_empty_lines: false
+        });
+
+        // --- POST-PROCESSING ---
+
+        // Fix double spaces
+        beautified = beautified.replace(/  => /g, ' => ').replace(/ =>  /g, ' => ');
+        // Fix arrows: ' - > ' or ' -> ' or ' - >'
+        beautified = beautified.replace(/\s*-\s*>\s*/g, ' -> ');
+
+        // Fix Generics: Point < T > -> Point<T>
+        // Use a loop to handle nested generics roughly
+        for(let k=0; k<2; k++) {
+            beautified = beautified.replace(/\b([a-zA-Z0-9_]+|::)\s*<\s+([^>]+?)\s+>(?=\s*[>(\w:,\*&;\[\{=\.])/g, (match: string, id: string, content: string) => {
+                // Safety check: comparisons and boolean logic
+                // If content contains ==, !=, <=, >=, &&, ||, it's likely a comparison, not a generic
+                if (/[{}=;]/.test(content) || /&&|\|\||==|!=|<=|>=/.test(content)) {
+                    return match;
+                }
+                return `${id}<${content.trim()}>`;
+            });
+        }
+
+        // Cleanup remaining loose < T > if they weren't attached to identifier (like `impl<T>`)
+        beautified = beautified.replace(/impl\s*<\s+([^>]+?)\s+>/g, 'impl<$1>');
+        beautified = beautified.replace(/fn\s+([a-zA-Z0-9_]+)\s*<\s+([^>]+?)\s+>/g, 'fn $1<$2>');
+
+        // Fix Range operators: 1. .10 or 1 . . 10 -> 1..10
+        beautified = beautified.replace(/(\w+)\s*\.\s*\.\s*(\w+)/g, '$1..$2');
+        beautified = beautified.replace(/(\w+)\s*\.\.\s*(\w+)/g, '$1..$2');
+        beautified = beautified.replace(/(\w+)\s*\.\s*\.\s*=\s*(\w+)/g, '$1..=$2');
+        beautified = beautified.replace(/(\w+)\s*\.\.=\s*(\w+)/g, '$1..=$2');
+
+        // Fix Closures: | x, y | -> |x, y|
+        beautified = beautified.replace(/([=\(\[\{,:]\s*)\|\s+([^|]+?)\s+\|/g, '$1|$2|');
+        beautified = beautified.replace(/([=\(\[\{,:]\s*)\|\|/g, '$1||');
+        // Remove space between ( and | in closure calls: map( |x| -> map(|x|
+        beautified = beautified.replace(/\(\s+\|/g, '(|');
+
+        // Fix Macro invocations: println ! (...) -> println!(...)
+        beautified = beautified.replace(/(\w+)\s*!\s*(\(|\[|\{)/g, '$1!$2');
+        // Fix macro_rules! name
+        beautified = beautified.replace(/macro_rules\s*!\s*([a-zA-Z0-9_]+)/g, 'macro_rules! $1');
+
+        // Fix :: spacing
+        beautified = beautified.replace(/\s+::\s+/g, '::');
+        beautified = beautified.replace(/::\s+/g, '::');
+        beautified = beautified.replace(/\s+::/g, '::');
+
+        // Fix impl A for B keeping it on one line if possible?
+        beautified = beautified.replace(/impl\s+(.+?)\s*\n\s*for\s+/g, 'impl $1 for ');
+
+        // Fix space before function parameters: fn foo (...) -> fn foo(...)
+        beautified = beautified.replace(/fn\s+([a-zA-Z0-9_<>]+)\s+\(/g, 'fn $1(');
+        // Fix space after < ... > if followed by (
+        beautified = beautified.replace(/>\s+\(/g, '>(');
+
+        // Restore masks
+        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return masks[parseInt(index)];
+        });
+
+        // Fix Reference spacing: & 'a -> &'a, & self -> &self (After unmasking)
+        formatted = formatted.replace(/&\s+(')/g, '&$1');
+        formatted = formatted.replace(/&\s+(self|mut)/g, '&$1');
+
+        // Fix space after ( for self: ( &self -> (&self
+        formatted = formatted.replace(/\(\s+&self/g, '(&self');
+        formatted = formatted.replace(/\(\s+&mut/g, '(&mut');
+
+        // Restore attributes indentation/newlines
+        formatted = formatted.replace(/^( *)(#\[[^\]]+\]) *([^\n\s])/gm, '$1$2\n$1$3');
 
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Rust: ${error.message}`);
         return;
     }
+    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
