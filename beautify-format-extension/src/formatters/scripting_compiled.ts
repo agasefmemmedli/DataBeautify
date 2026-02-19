@@ -2334,37 +2334,121 @@ export async function handleKotlin(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
-    // Lazy load dependencies
-    const jsbeautify = require('js-beautify');
-
     // Validate Kotlin using custom resilient validator
     validationMessage = validateKotlin(text);
 
-    /* eslint-disable */
+    // Try Deep Formatting with Prettier (Kotlin Plugin)
     try {
-        // Format Kotlin (using js-beautify's JS formatter which handles Kotlin well)
-        formatted = jsbeautify.js(text, {
-            indent_size: 4,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: false,
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: false,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
+        const prettier = await loadESM('prettier');
+        const pluginKotlinMod = await loadESM('prettier-plugin-kotlin');
+        const pluginKotlin = pluginKotlinMod.default || pluginKotlinMod;
+
+        formatted = await prettier.format(text, {
+            parser: "kotlin",
+            plugins: [pluginKotlin],
+            tabWidth: 4,
+            printWidth: 100,
+            useTabs: false,
+            trailingComma: "none",
+            singleQuote: false,
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Kotlin: ${error.message}`);
-        return;
+    } catch (prettierError: any) {
+        console.warn('Prettier Kotlin formatting failed, falling back to js-beautify', prettierError);
+
+        const jsbeautify = require('js-beautify');
+        /* eslint-disable */
+        try {
+            // --- PRE-PROCESSING ---
+            const masks: string[] = [];
+            const maskPrefix = '___KT_MASK_';
+
+            // 1. Mask strings, chars, comments and annotations
+            // Strings: """...""" (multiline), "..."
+            // Chars: '...'
+            // Comments: //... or /*...*/
+            // Annotations: @Identifier or @Identifier(...) - simplified to just @Identifier to avoid complexity
+            let maskedText = text.replace(/("""[\s\S]*?""")|("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(@[a-zA-Z0-9_]+(?:\([^)]*\))?)/g, (match) => {
+                const placeholder = `${maskPrefix}${masks.length}___`;
+                masks.push(match);
+                return placeholder;
+            });
+
+            // 2. Normalize Kotlin Syntax for js-beautify
+            maskedText = maskedText.replace(/->/g, '___ARROW___');
+            maskedText = maskedText.replace(/\.\./g, '___RANGE___');
+            maskedText = maskedText.replace(/\?\./g, '___SAFE_CALL___');
+            maskedText = maskedText.replace(/\!\!/g, '___NOT_NULL___');
+            maskedText = maskedText.replace(/\?:/g, '___ELVIS___');
+            maskedText = maskedText.replace(/\bdata\s+class\b/g, 'data_class');
+            maskedText = maskedText.replace(/\bcompanion\s+object\b/g, 'companion_object');
+            maskedText = maskedText.replace(/\bas\?/g, '___AS_SAFE___');
+
+            // --- CORE FORMATTING ---
+            let beautified = jsbeautify.js(maskedText, {
+                indent_size: 4,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false, // Kotlin doesn't strictly require trailing newline
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
+
+            // --- POST-PROCESSING ---
+
+            // Restore keywords
+            beautified = beautified.replace(/\bdata_class\b/g, 'data class');
+            beautified = beautified.replace(/\bcompanion_object\b/g, 'companion object');
+
+            // Restore Operators
+            beautified = beautified.replace(/\s*___ARROW___\s*/g, ' -> ');
+            beautified = beautified.replace(/\s*___RANGE___\s*/g, '..');
+            beautified = beautified.replace(/\s*___SAFE_CALL___\s*/g, '?.');
+            beautified = beautified.replace(/\s*___NOT_NULL___\s*/g, '!!');
+            beautified = beautified.replace(/\s*___ELVIS___\s*/g, ' ?: ');
+            beautified = beautified.replace(/___AS_SAFE___/g, 'as?');
+
+            // Fix Generics: List < String > -> List<String>
+            // Simple loop for nested generics
+            for (let k = 0; k < 2; k++) {
+                beautified = beautified.replace(/\b([a-zA-Z0-9_]+)\s*<\s+([^>]+?)\s+>(?=\s*[>(\w:,\*&;\[\{=\.])?/g, (match: string, id: string, content: string) => {
+                     if (/[{}=;]/.test(content) || /&&|\|\||==|!=|<=|>=/.test(content)) return match;
+                     return `${id}<${content.trim()}>`;
+                });
+            }
+
+            // Fix Nullable Types: String ? -> String?
+            beautified = beautified.replace(/([a-zA-Z0-9_>])\s+\?(?![?:])/g, '$1?');
+
+            // Fix Colon Spacing: var x : Int -> var x: Int
+            beautified = beautified.replace(/([^\s])\s+:\s+/g, '$1: ');
+
+            // Fix Lambda Braces: foo { -> foo {
+            beautified = beautified.replace(/([a-zA-Z0-9_>])\s*\{/g, '$1 {');
+
+            // Restore Masks
+            formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+                return masks[parseInt(index)];
+            });
+
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Kotlin: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
+
+        if (!validationMessage) {
+             validationMessage = "Deep formatting (Prettier) failed. Applied basic formatting.";
+        }
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
