@@ -150,56 +150,35 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
     // Validate Ruby using custom resilient validator
     validationMessage = validateRuby(text);
 
-    // Resilient formatting logic
+    // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
+        const prettier = await loadESM('prettier');
+        const pluginRubyMod = await loadESM('@prettier/plugin-ruby');
+        const pluginRuby = pluginRubyMod.default || pluginRubyMod;
 
-        // Keywords that start a block
-        const blockOpeners = /^(class|module|def|begin|case|if|unless|while|until|for)\b/;
-        // Keywords that end a block
-        const blockClosers = /^end\b/;
-        // Keywords that are middle of a block
-        const blockIntermediates = /^(elsif|else|when|rescue|ensure)\b/;
-        // 'do' at the end of a line (common for blocks)
-        const doAtEnd = /\bdo\b(\s*\|.*\|)?\s*$/;
+        formatted = await prettier.format(text, {
+            parser: "ruby",
+            plugins: [pluginRuby],
+            tabWidth: 2,
+            printWidth: 100,
+            useTabs: false,
+            trailingComma: "none",
+            rubyArrayLiteral: true,
+        });
+    } catch (prettierError: any) {
+        console.warn('Prettier Ruby formatting failed, falling back to custom formatter', prettierError);
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Adjust indent for the current line if it's a closer or intermediate
-            let currentIndent = indentLevel;
-            if (blockClosers.test(trimmed) || blockIntermediates.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-
-            // Apply indentation (Ruby uses 2 spaces)
-            formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-            // Calculate indentation for the NEXT line
-            let nextIndent = indentLevel;
-
-            // If line starts with an opener or ends with 'do', increment indent
-            // We check if it starts with an opener to avoid modifier if/unless
-            if (blockOpeners.test(trimmed) || doAtEnd.test(trimmed) || blockIntermediates.test(trimmed)) {
-                nextIndent = currentIndent + 1;
-            } else if (blockClosers.test(trimmed)) {
-                nextIndent = Math.max(0, indentLevel - 1);
-            }
-
-            indentLevel = nextIndent;
+        // Custom resilient formatter logic (improved)
+        try {
+            formatted = formatRubyCustom(text);
+        } catch (error: any) {
+             vscode.window.showErrorMessage(`Failed to format Ruby: ${error.message}`);
+             return;
         }
-        formatted = formattedLines.join('\n');
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Ruby: ${error.message}`);
-        return;
+
+        if (!validationMessage) {
+             validationMessage = "Deep formatting (Prettier) failed. Applied basic formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);
@@ -209,6 +188,86 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Ruby formatted successfully!');
     }
+}
+
+/**
+ * Custom resilient Ruby formatter
+ */
+function formatRubyCustom(text: string): string {
+    const lines = text.split('\n');
+    const formattedLines: string[] = [];
+    let indentLevel = 0;
+
+    // Keywords that start a block
+    const blockOpeners = /^(class|module|def|begin|case|if|unless|while|until|for)\b/;
+    // Keywords that end a block
+    const blockClosers = /^end\b/;
+    // Keywords that are middle of a block
+    const blockIntermediates = /^(elsif|else|when|rescue|ensure)\b/;
+    // 'do' at the end of a line (common for blocks)
+    const doAtEnd = /\bdo\b(\s*\|.*\|)?\s*$/;
+
+    // Heredoc tracking
+    let inHeredoc = false;
+    let heredocDelimiter = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (inHeredoc) {
+            formattedLines.push(line); // Preserve indentation inside heredoc
+            if (trimmed === heredocDelimiter) {
+                inHeredoc = false;
+            }
+            continue;
+        }
+
+        // Check for heredoc start
+        const heredocMatch = line.match(/<<[-~]?\s*(["']?)([A-Z0-9_]+)\1/i);
+        if (heredocMatch) {
+            inHeredoc = true;
+            heredocDelimiter = heredocMatch[2];
+        }
+
+        if (trimmed === '') {
+            formattedLines.push('');
+            continue;
+        }
+
+        // Adjust indent for the current line if it's a closer or intermediate
+        let currentIndent = indentLevel;
+        if (blockClosers.test(trimmed) || blockIntermediates.test(trimmed)) {
+            currentIndent = Math.max(0, indentLevel - 1);
+        }
+
+        // Handle closing braces/brackets at start of line
+        if (trimmed.startsWith('}') || trimmed.startsWith(']') || trimmed.startsWith(')')) {
+             currentIndent = Math.max(0, currentIndent - 1);
+        }
+
+        // Apply indentation (Ruby uses 2 spaces)
+        formattedLines.push('  '.repeat(currentIndent) + trimmed);
+
+        // Calculate indentation for the NEXT line
+        let nextIndent = indentLevel;
+
+        // Block openers
+        if (blockOpeners.test(trimmed) || doAtEnd.test(trimmed) || blockIntermediates.test(trimmed)) {
+            nextIndent = currentIndent + 1;
+        } else if (blockClosers.test(trimmed)) {
+            nextIndent = Math.max(0, indentLevel - 1);
+        }
+
+        // Braces/Brackets
+        const openBraces = (trimmed.match(/[\{\[\(]/g) || []).length;
+        const closeBraces = (trimmed.match(/[\}\]\)]/g) || []).length;
+        nextIndent += (openBraces - closeBraces);
+
+        // Ensure non-negative indentation
+        indentLevel = Math.max(0, nextIndent);
+    }
+    return formattedLines.join('\n');
 }
 
 /**
