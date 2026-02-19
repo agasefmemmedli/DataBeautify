@@ -11,8 +11,11 @@ async function build() {
             outfile: 'dist/extension.js',
             external: ['vscode'],
             sourcemap: true,
-            format: 'cjs',
+            format: 'esm',
             mainFields: ['module', 'main'], // Prefer ESM to avoid UMD issues
+            banner: {
+                js: "import { createRequire } from 'module';const require = createRequire(import.meta.url);",
+            },
         });
         console.log('Build complete');
     } catch (e) {

@@ -1,9 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 
-// Helper to load ESM modules in CommonJS environment
-const loadESM = (module: string) => new Function('module', 'return import(module)')(module);
-
 /**
  * Handle JavaScript formatting and validation
  */
@@ -17,8 +14,8 @@ export async function handleJS(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await loadESM('prettier');
-    const sortImportsPlugin = await loadESM('@trivago/prettier-plugin-sort-imports');
+    const prettier = await import('prettier');
+    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
 
     // Validate JavaScript (supports JSX)
@@ -112,8 +109,8 @@ export async function handleTS(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await loadESM('prettier');
-    const sortImportsPlugin = await loadESM('@trivago/prettier-plugin-sort-imports');
+    const prettier = await import('prettier');
+    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
 
     // Validate TypeScript
@@ -207,8 +204,8 @@ export async function handleTSX(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await loadESM('prettier');
-    const sortImportsPlugin = await loadESM('@trivago/prettier-plugin-sort-imports');
+    const prettier = await import('prettier');
+    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
 
     // Validate TSX
@@ -300,8 +297,8 @@ export async function handleJSX(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await loadESM('prettier');
-    const sortImportsPlugin = await loadESM('@trivago/prettier-plugin-sort-imports');
+    const prettier = await import('prettier');
+    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
 
     // Validate JSX
@@ -391,7 +388,7 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { parse, ParseError } = require('jsonc-parser');
-    const prettier = await loadESM('prettier');
+    const prettier = await import('prettier');
     const jsbeautify = require('js-beautify');
 
     // Validate JSONC using jsonc-parser
@@ -464,7 +461,7 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { jsonrepair } = require('jsonrepair');
-    const prettier = await loadESM('prettier');
+    const prettier = await import('prettier');
     const jsbeautify = require('js-beautify');
 
     try {

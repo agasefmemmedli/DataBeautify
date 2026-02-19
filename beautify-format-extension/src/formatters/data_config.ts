@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit, detectDelimiter, parseCSV, loadESM } from '../utils';
+import { applyEdit, detectDelimiter, parseCSV } from '../utils';
 
 /**
  * Handle YAML formatting and validation
@@ -13,7 +13,7 @@ export async function handleYAML(editor: vscode.TextEditor, text: string) {
     let prettier: any;
 
     try {
-        prettier = await loadESM('prettier');
+        prettier = await import('prettier');
     } catch (e) {
         console.warn('Prettier failed to load:', e);
     }
@@ -88,8 +88,8 @@ export async function handleTOML(editor: vscode.TextEditor, text: string) {
     let tomlPlugin: any;
 
     try {
-        prettier = await loadESM('prettier');
-        tomlPlugin = await loadESM('prettier-plugin-toml');
+        prettier = await import('prettier');
+        tomlPlugin = await import('prettier-plugin-toml');
     } catch (e) {
         console.warn('Prettier or TOML plugin failed to load:', e);
     }
@@ -580,7 +580,7 @@ export async function handleGraphQL(editor: vscode.TextEditor, text: string) {
     let prettier: any;
 
     try {
-        prettier = await loadESM('prettier');
+        prettier = await import('prettier');
     } catch (e) {
         console.warn('Prettier failed to load:', e);
     }

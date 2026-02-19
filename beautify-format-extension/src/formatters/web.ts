@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit, loadESM } from '../utils';
+import { applyEdit } from '../utils';
 
 /**
  * Handle XML formatting and validation
@@ -371,7 +371,7 @@ export async function handleVue(editor: vscode.TextEditor, text: string) {
     const jsbeautify = require('js-beautify');
     let prettier: any;
     try {
-        prettier = await loadESM('prettier');
+        prettier = await import('prettier');
     } catch (e) {
         console.warn('Prettier failed to load:', e);
     }
@@ -487,8 +487,8 @@ export async function handleSvelte(editor: vscode.TextEditor, text: string) {
     let prettier: any;
     let sveltePlugin: any;
     try {
-        prettier = await loadESM('prettier');
-        sveltePlugin = await loadESM('prettier-plugin-svelte');
+        prettier = await import('prettier');
+        sveltePlugin = await import('prettier-plugin-svelte');
     } catch (e) {
         console.warn('Prettier or Svelte plugin failed to load:', e);
     }
@@ -606,8 +606,8 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
     let prettier: any;
     let phpPlugin: any;
     try {
-        prettier = await loadESM('prettier');
-        phpPlugin = await loadESM('@prettier/plugin-php');
+        prettier = await import('prettier');
+        phpPlugin = await import('@prettier/plugin-php');
     } catch (e) {
         console.warn('Prettier or PHP plugin failed to load:', e);
     }
