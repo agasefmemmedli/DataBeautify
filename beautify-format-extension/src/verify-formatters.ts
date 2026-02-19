@@ -31,9 +31,12 @@ Module.prototype.require = function(id: string) {
     return originalRequire.apply(this, arguments);
 };
 
-import { beautify, detectFormat } from './extension';
+// import { beautify, detectFormat } from './extension'; // Removed to prevent hoisting
 
 async function runTests() {
+    // Load extension after mock
+    const { beautify, detectFormat } = require('./extension');
+
     const testFiles = fs.readdirSync('.').filter(f => f.startsWith('test.') && !f.endsWith('.map'));
     console.log(`Found ${testFiles.length} test files.`);
 

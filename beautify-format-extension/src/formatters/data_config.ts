@@ -282,24 +282,32 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
         validationMessage = e.message;
     }
 
-    // Resilient formatting logic
+    // Deep Formatting logic
     try {
         const lines = text.split('\n');
         const formattedLines: string[] = [];
-        let currentIndent = '';
 
-        for (let line of lines) {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
             const trimmed = line.trim();
 
-            // Handle comments and empty lines
-            if (trimmed === '' || trimmed.startsWith(';') || trimmed.startsWith('#')) {
+            if (trimmed === '') {
+                // Only add blank line if the previous line is not blank
+                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+                    formattedLines.push('');
+                }
+                continue;
+            }
+
+            // Handle comments
+            if (trimmed.startsWith(';') || trimmed.startsWith('#')) {
                 formattedLines.push(trimmed);
                 continue;
             }
 
             // Handle sections [section]
             if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-                // Ensure there is a newline before section if not at the start
+                // Ensure blank line before section if not at the start
                 if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
                     formattedLines.push('');
                 }
@@ -307,7 +315,7 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
                 continue;
             }
 
-            // Handle key = value or key : value
+            // Handle key = value
             let splitIdx = -1;
             const eqIdx = trimmed.indexOf('=');
             const colIdx = trimmed.indexOf(':');
@@ -319,22 +327,27 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
             }
 
             if (splitIdx > 0) {
-                const separator = trimmed[splitIdx];
                 const key = trimmed.substring(0, splitIdx).trim();
+                const separator = '='; // Standardize to '='
                 const valuePart = trimmed.substring(splitIdx + 1).trim();
 
                 // Check for inline comments
                 let commentStart = -1;
-                for (let i = 0; i < valuePart.length; i++) {
-                    const char = valuePart[i];
-                    if (char === ';' || char === '#') {
-                        // Check if it's not part of a quoted string (simple check)
-                        const before = valuePart.substring(0, i);
-                        const quoteCount = (before.match(/"/g) || []).length;
-                        if (quoteCount % 2 === 0) {
-                            commentStart = i;
-                            break;
+                let inString = false;
+                let quoteChar = '';
+
+                for (let j = 0; j < valuePart.length; j++) {
+                    const char = valuePart[j];
+                    if ((char === '"' || char === "'") && (j === 0 || valuePart[j - 1] !== '\\')) {
+                        if (!inString) {
+                            inString = true;
+                            quoteChar = char;
+                        } else if (quoteChar === char) {
+                            inString = false;
                         }
+                    } else if ((char === ';' || char === '#') && !inString) {
+                        commentStart = j;
+                        break;
                     }
                 }
 
@@ -351,6 +364,12 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
             // Fallback
             formattedLines.push(trimmed);
         }
+
+        // Remove trailing empty lines
+        while (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] === '') {
+            formattedLines.pop();
+        }
+
         formatted = formattedLines.join('\n');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format INI: ${error.message}`);
