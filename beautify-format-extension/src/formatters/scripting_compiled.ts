@@ -1024,8 +1024,44 @@ export async function handleDart(editor: vscode.TextEditor, text: string) {
 
     /* eslint-disable */
     try {
-        // Format Dart (using js-beautify's JS formatter which handles Dart well)
-        formatted = jsbeautify.js(text, {
+        // --- PRE-PROCESSING ---
+        const masks: string[] = [];
+        const maskPrefix = '___DART_MASK_';
+
+        // 1. Mask strings and comments
+        // Multiline strings: '''...''' or """..."""
+        // Raw strings: r'...' or r"..."
+        // Normal strings: '...' or "..."
+        // Comments: //... or /*...*/
+        let maskedText = text.replace(/("""[\s\S]*?""")|('''[\s\S]*?''')|(r"(?:\\.|[^"])*")|(r'(?:\\.|[^'])*')|("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)/g, (match) => {
+            const placeholder = `${maskPrefix}${masks.length}___`;
+            masks.push(match);
+            return placeholder;
+        });
+
+        // 2. Normalize Dart Syntax
+        // Null-aware cascades: ?..method() -> \n.___NULL_AWARE_CASCADE___method()
+        maskedText = maskedText.replace(/\?\.\./g, '\n.___NULL_AWARE_CASCADE___');
+
+        // Cascades: ..method() -> \n.___CASCADE___method() to force newline and leverage js-beautify indentation
+        // Fix: Use negative lookahead AND capture group check (simulating lookbehind) to avoid matching spread operator '...'
+        // matches anything not a dot (or start of line), followed by .., followed by not a dot.
+        maskedText = maskedText.replace(/(^|[^.])\.\.(?!\.)/g, '$1\n.___CASCADE___');
+        maskedText = maskedText.replace(/\?\./g, '___SAFE_CALL___');
+        maskedText = maskedText.replace(/\?\?/g, '___NULL_COALESCING___');
+        maskedText = maskedText.replace(/\?\?=/g, '___NULL_COALESCING_ASSIGN___');
+        maskedText = maskedText.replace(/=>/g, '___ARROW___');
+
+        // Named constructors: Class.name(...) -> Class___NAMED_CTOR___name(...)
+        // To prevent js-beautify from treating it as property access with space
+        maskedText = maskedText.replace(/([A-Z][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]+)/g, '$1___NAMED_CTOR___$2');
+
+        // Annotations: @foo -> ___ANNOTATION___foo
+        // Mask @ to avoid space insertion
+        maskedText = maskedText.replace(/@([a-zA-Z0-9_]+)/g, '___ANNOTATION___$1');
+
+        // --- CORE FORMATTING ---
+        let beautified = jsbeautify.js(maskedText, {
             indent_size: 2,
             indent_char: ' ',
             max_preserve_newlines: 2,
@@ -1036,12 +1072,66 @@ export async function handleDart(editor: vscode.TextEditor, text: string) {
             space_before_conditional: true,
             unescape_strings: false,
             jslint_happy: false,
-            end_with_newline: false,
+            end_with_newline: true,
             wrap_line_length: 0,
             comma_first: false,
             e4x: true,
             indent_empty_lines: false
         });
+
+        // --- POST-PROCESSING ---
+
+        // Restore Operators
+        // Cascades: Remove the dot we added and just keep the indentation js-beautify provided
+        beautified = beautified.replace(/\.___NULL_AWARE_CASCADE___/g, '?..');
+        beautified = beautified.replace(/\.___CASCADE___/g, '..');
+        beautified = beautified.replace(/\s*___SAFE_CALL___\s*/g, '?.');
+        beautified = beautified.replace(/\s*___NULL_COALESCING___\s*/g, ' ?? ');
+        beautified = beautified.replace(/\s*___NULL_COALESCING_ASSIGN___\s*/g, ' ??= ');
+        beautified = beautified.replace(/\s*___ARROW___\s*/g, ' => ');
+        beautified = beautified.replace(/___NAMED_CTOR___/g, '.');
+        beautified = beautified.replace(/___ANNOTATION___/g, '@');
+
+        // Fix Generics: List < T > -> List<T>
+        // Use a loop to handle nested generics (e.g. Future<List<Map<String, T>>>)
+        // Regex expanded to support deeper nesting (3 levels explicitly) to catch Future<List<Map<...>>>
+        for(let k=0; k<5; k++) {
+             beautified = beautified.replace(/\b([a-zA-Z0-9_]+)\s*<\s+((?:[^<>\n]|(?:[a-zA-Z0-9_]+\s*<\s*(?:[^<>\n]|(?:[a-zA-Z0-9_]+\s*<\s*[^<>\n]+\s*>))+\s*>))+?)\s*>/g, (match: string, id: string, content: string) => {
+                 // Avoid comparison operators
+                 if (/[{}=;]/.test(content) || /&&|\|\||==|!=|<=|>=/.test(content)) return match;
+                 return `${id}<${content.trim()}>`;
+             });
+        }
+
+        // Fix Cascades: Collapse double newlines (caused by our pre-processing adding \n)
+        beautified = beautified.replace(/\n\s*\n(\s*\.\.)/g, '\n$1');
+
+        // Fix Nullable Types: String ? -> String?
+        beautified = beautified.replace(/([a-zA-Z0-9_>\]\)])\s+\?(?![?:])/g, '$1?');
+
+        // Fix required keyword spacing
+        beautified = beautified.replace(/required([^\s])/g, 'required $1');
+
+        // Fix space after generic > and before (
+        // Only if > is not preceded by space (to distinguish from comparison operator a > (b))
+        beautified = beautified.replace(/([^\s])>\s+\(/g, '$1>(');
+
+        // Fix Constructor Initialization List: ): ... -> ) : ...
+        // Ensure : is on new line if line is long, or just ensure space
+        beautified = beautified.replace(/\)\s*:\s*([a-zA-Z0-9_]+)\s*=/g, ') : $1 =');
+
+        // Fix: Ensure @Annotation is followed by newline if it's on a class/method decl
+        // We look for @Annotation followed by space and then a keyword
+        beautified = beautified.replace(/(@[a-zA-Z0-9_]+(?:\([^)]*\))?)\s+(class|void|Future|int|String|bool|double|var|final|const|dynamic|List|Map|Set)/g, '$1\n$2');
+
+        // Restore Masks
+        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+            return masks[parseInt(index)];
+        });
+
+        // 3. Import Sorting (Dart Style Guide)
+        formatted = sortDartImports(formatted);
+
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Dart: ${error.message}`);
         return;
@@ -1055,6 +1145,141 @@ export async function handleDart(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Dart formatted successfully!');
     }
+}
+
+/**
+ * Sort Dart imports according to Effective Dart style
+ * 1. dart: imports
+ * 2. package: imports
+ * 3. relative imports
+ * 4. exports
+ */
+function sortDartImports(text: string): string {
+    const lines = text.split('\n');
+    const importLines: { line: string, type: number, index: number }[] = [];
+    let firstImportIndex = -1;
+    let lastImportIndex = -1;
+
+    // Identify import/export lines and their range
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('import ') || line.startsWith('export ')) {
+            if (firstImportIndex === -1) firstImportIndex = i;
+            lastImportIndex = i;
+
+            let type = 2; // relative by default
+            if (line.startsWith('export ')) type = 3;
+            else if (line.includes("'dart:") || line.includes('"dart:')) type = 0;
+            else if (line.includes("'package:") || line.includes('"package:')) type = 1;
+
+            importLines.push({ line: lines[i], type, index: i });
+        } else if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('library ')) {
+            // Allow comments/blanks/library directive within or before imports,
+            // but if we see code (class/void/etc), stop.
+            // For simplicity, we only sort a contiguous block of imports (ignoring comments mixed in for now or treating them as separators)
+            // Actually, sorting mixed comments is hard.
+            // We will only sort if we have a clean block or just extract imports.
+            // Let's stick to simple logic: Extract all imports, sort them, and put them back at the location of the first import?
+            // But they might be separated by logic.
+            // Safer: Only sort if they are in a contiguous block (separated by newlines/comments is ok).
+            if (firstImportIndex !== -1 && !line.startsWith('//') && line !== '' && !line.startsWith('library ')) {
+                 // Found code after imports
+                 break;
+            }
+        } else if (firstImportIndex !== -1) {
+             // Found code
+             break;
+        }
+    }
+
+    if (importLines.length === 0) return text;
+
+    // Sort imports
+    importLines.sort((a, b) => {
+        if (a.type !== b.type) return a.type - b.type;
+        return a.line.localeCompare(b.line);
+    });
+
+    // Reconstruct the text
+    // We only replace the lines that were imports.
+    // Issue: If we gathered imports from scattered places, putting them together might break things.
+    // But we stopped at first code.
+    // However, we might have comments/newlines in between that we want to preserve?
+    // Standard sorting usually groups them.
+
+    // Strategy: Replace the entire range from firstImportIndex to lastImportIndex with sorted imports + proper spacing?
+    // No, that deletes comments.
+    // Safer Strategy: Just replace the import lines in order.
+    // But we want to reorder them.
+    // If we have:
+    // import A
+    // // comment
+    // import B
+    // And we swap A and B. The comment stays?
+    // "import B // comment import A".
+    // Code comments usually belong to the import below or above.
+
+    // Let's keep it simple and safe: Only sort if the block is purely imports (and maybe blank lines).
+    // If there are comments, we skip sorting to avoid detaching comments.
+
+    let hasComments = false;
+    for(let i = firstImportIndex; i <= lastImportIndex; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('//') || line.startsWith('/*')) {
+            hasComments = true;
+            break;
+        }
+    }
+
+    if (hasComments) {
+        // Fallback: simple sort of just the import lines in place?
+        // No, might still be weird.
+        return text;
+    }
+
+    // Now we can safely rewrite the block
+    // We will collect all non-empty lines in the range, which should be just imports and exports.
+    // Wait, blank lines?
+    // We can filter out blank lines and re-insert groups with blank lines.
+
+    // Grouping
+    const dartImports = importLines.filter(x => x.type === 0).map(x => x.line);
+    const packageImports = importLines.filter(x => x.type === 1).map(x => x.line);
+    const relativeImports = importLines.filter(x => x.type === 2).map(x => x.line);
+    const exports = importLines.filter(x => x.type === 3).map(x => x.line);
+
+    const sortedBlock: string[] = [];
+    if (dartImports.length > 0) {
+        sortedBlock.push(...dartImports);
+        if (packageImports.length > 0 || relativeImports.length > 0 || exports.length > 0) sortedBlock.push('');
+    }
+    if (packageImports.length > 0) {
+        sortedBlock.push(...packageImports);
+        if (relativeImports.length > 0 || exports.length > 0) sortedBlock.push('');
+    }
+    if (relativeImports.length > 0) {
+        sortedBlock.push(...relativeImports);
+        if (exports.length > 0) sortedBlock.push('');
+    }
+    if (exports.length > 0) {
+        sortedBlock.push(...exports);
+    }
+
+    // Replace the range in 'lines'
+    // But we need to handle the case where we skipped lines in between?
+    // We checked for comments.
+    // What about other stuff?
+    // We iterated `importLines` which has indices.
+    // But we want to overwrite the range `firstImportIndex` to `lastImportIndex`?
+    // But if there were blank lines in between, we want to respect the new grouping.
+
+    // So:
+    // 1. Remove all lines from firstImportIndex to lastImportIndex.
+    // 2. Insert sortedBlock at firstImportIndex.
+
+    lines.splice(firstImportIndex, lastImportIndex - firstImportIndex + 1, ...sortedBlock);
+
+    return lines.join('\n');
 }
 
 /**
