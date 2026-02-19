@@ -1,0 +1,9 @@
+id,name,description,notes
+1,Simple,Just a simple row,
+2,"Quoted","Contains ""quotes"" inside",
+3,"Multiline","Line 1
+Line 2",
+4,Comma,"Contains, comma",
+5,"Mixed","""Quotes"" and
+newlines",Empty note
+6,  "  Whitespace  "  ,  Trimming test  ,
