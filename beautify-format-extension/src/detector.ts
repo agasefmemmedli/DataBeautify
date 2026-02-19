@@ -3,7 +3,7 @@ import { detectDelimiter, splitCSVLine } from './utils';
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'c' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro' | 'unknown' {
     const lang = languageId.toLowerCase();
     if (lang === 'astro') { return 'astro'; }
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
@@ -35,7 +35,8 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (lang === 'java') { return 'java'; }
     if (lang === 'kotlin' || lang === 'kt' || lang === 'kts') { return 'kotlin'; }
     if (lang === 'csharp') { return 'csharp'; }
-    if (lang === 'cpp' || lang === 'c') { return 'cpp'; }
+    if (lang === 'cpp') { return 'cpp'; }
+    if (lang === 'c') { return 'c'; }
     if (lang === 'rust' || lang === 'rs') { return 'rust'; }
     if (lang === 'go') { return 'go'; }
     if (lang === 'powershell' || lang === 'ps1' || lang === 'psm1') { return 'powershell'; }
@@ -340,7 +341,6 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
 
     // C++ heuristic
     if (
-        /^\s*#include\s*[<"]/m.test(trimmed) ||
         /\b(std::cout|std::endl|std::vector|std::string|std::map|std::set)\b/.test(trimmed) ||
         /\busing\s+namespace\s+std\s*;/.test(trimmed) ||
         /\btemplate\s*<\s*.+\s*>/m.test(trimmed) ||
@@ -348,6 +348,19 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         (/\bclass\s+[A-Za-z0-9_]+\s*\{/.test(trimmed) && trimmed.includes('};'))
     ) {
         return 'cpp';
+    }
+
+    // C heuristic
+    if (
+        /^\s*#include\s*[<"]/m.test(trimmed) ||
+        /\b(printf|scanf|malloc|free|struct|union|enum)\b/.test(trimmed) ||
+        /\bint\s+main\s*\(/.test(trimmed)
+    ) {
+        // Check if it's definitely C++
+        if (/\b(class|namespace|template|public:|private:|protected:)\b/.test(trimmed)) {
+             return 'cpp';
+        }
+        return 'c';
     }
 
     // Swift heuristic

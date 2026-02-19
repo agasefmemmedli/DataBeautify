@@ -1,0 +1,50 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+#define MAX_SIZE 100
+#define SQUARE(x) ((x) * (x))
+
+typedef struct {
+    int id;
+    char *name;
+    float value;
+} Item;
+
+void print_item(Item * item);
+
+int main(int argc, char *argv[]) {
+    int i;
+    int * p;
+    Item items[2] = {
+        {1, "Item 1", 10.5},
+        {2, "Item 2", 20.0}
+    };
+
+    if(argc > 1) {
+        printf("Arguments provided\n");
+    } else {
+        printf("No arguments\n");
+    }
+
+    for (i = 0; i < 2; i++) {
+        print_item(&items[i]);
+    }
+
+    p = malloc(sizeof(int));
+    *p = 10;
+
+    switch(*p) {
+        case 10:
+            printf("Ten\n");
+            break;
+        default:
+            printf("Other\n");
+    }
+
+    free(p);
+    return 0;
+}
+
+void print_item(Item * item) {
+    printf("ID: %d, Name: %s, Value: %.2f\n", item->id, item->name, item->value);
+}

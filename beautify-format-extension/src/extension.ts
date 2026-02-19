@@ -67,6 +67,7 @@ export function activate(context: vscode.ExtensionContext) {
     register('beautify-format.formatGo', 'go');
     register('beautify-format.formatRust', 'rust');
     register('beautify-format.formatCPP', 'cpp');
+    register('beautify-format.formatC', 'c');
     register('beautify-format.formatCSharp', 'csharp');
     register('beautify-format.formatJava', 'java');
     register('beautify-format.formatKotlin', 'kotlin');
@@ -92,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
     register('beautify-format.formatIPYNB', 'ipynb');
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro') {
+export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'c' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro') {
     const editor = vscode.window.activeTextEditor;
     
     if (!editor) {
@@ -150,6 +151,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
     else if (format === 'go') await Scripting.handleGo(editor, text);
     else if (format === 'rust') await Scripting.handleRust(editor, text);
     else if (format === 'cpp') await Scripting.handleCPP(editor, text);
+    else if (format === 'c') await Scripting.handleC(editor, text);
     else if (format === 'csharp') await Scripting.handleCSharp(editor, text);
     else if (format === 'java') await Scripting.handleJava(editor, text);
     else if (format === 'kotlin') await Scripting.handleKotlin(editor, text);
