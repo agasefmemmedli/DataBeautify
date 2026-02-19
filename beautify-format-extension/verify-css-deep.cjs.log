@@ -1,0 +1,11 @@
+Running CSS Deep Formatting Verification...
+
+Testing test-deep.css...
+INFO: CSS formatted successfully!
+✅ test-deep.css passed.
+
+Testing test-broken-deep.css...
+WARN: CSS has syntax issues but was beautified. First error: missing '}' at line 2, col 1
+✅ test-broken-deep.css passed (contains expected content).
+
+Results: 2 passed, 0 failed.

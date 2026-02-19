@@ -1,5 +1,3 @@
-Nginx Config (.conf, .nginx) — настройки серверов.
-
 SQL (.sql) — структурированные запросы.
 
 Prisma (.prisma) — схемы баз данных.
