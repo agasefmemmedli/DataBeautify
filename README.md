@@ -1,5 +1,3 @@
-Dart (.dart) — Flutter разработка.
-
 Dockerfile (Dockerfile) — инструкции сборки контейнеров.
 
 Shell Script (.sh) — скрипты Bash/Zsh.
