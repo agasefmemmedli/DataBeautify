@@ -577,6 +577,39 @@ export async function handleGraphQL(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const graphql = require('graphql');
+    let prettier: any;
+
+    try {
+        prettier = await loadESM('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
+
+    // Try Deep Formatting with Prettier first
+    try {
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        formatted = await format(text, {
+            parser: 'graphql',
+            tabWidth: 2,
+            printWidth: 120,
+            bracketSpacing: true
+        });
+
+        await applyEdit(editor, formatted);
+        vscode.window.showInformationMessage('GraphQL formatted successfully!');
+        return;
+
+    } catch (prettierError: any) {
+        // Fallback to manual formatting if Prettier fails
+    }
 
     // Validate GraphQL using graphql package
     try {
