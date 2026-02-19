@@ -1,0 +1,80 @@
+import Foundation
+
+@available(iOS 13.0, *)
+struct User: Codable, Identifiable {
+var id: UUID
+    var name: String
+        var email: String?
+
+    var computed: String {
+        return name.uppercased()
+    }
+
+    var observer: Int = 0 {
+        didSet {
+            print("Changed from \(oldValue) to \(observer)")
+        }
+    }
+}
+
+enum State {
+case active, inactive, pending
+    case error(String)
+}
+
+    protocol Service {
+func fetch() async throws -> [User]
+}
+
+class APIService: Service {
+    func fetch() async throws -> [User] {
+        guard let url = URL(string: "https://api.example.com/users") else {
+            throw URLError(.badURL)
+        }
+
+let (data, _) = try await URLSession.shared.data(from: url)
+        return try JSONDecoder().decode([User].self, from: data)
+    }
+
+    func complex(
+        param1: String,
+            param2: Int,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self = self else { return }
+            if param2 > 10 {
+                completion(.success("Done"))
+            } else {
+completion(.failure(NSError(domain: "Test", code: 1)))
+            }
+        }
+    }
+}
+
+// Extension
+extension String {
+    var localized: String {
+        return NSLocalizedString(self, comment: "")
+    }
+}
+
+let users = [User(id: UUID(), name: "Alice"), User(id: UUID(), name: "Bob")]
+let names = users.map { $0.name }
+    .filter { !$0.isEmpty }
+        .sorted()
+
+func testRanges() {
+    for i in 0 ..< 10 {
+        print(i)
+    }
+    for i in 0 ... 10 {
+        print(i)
+    }
+}
+
+func testOptionals() {
+    let x: Int? = nil
+    let y = x ?? 0
+    let z = x!
+}
