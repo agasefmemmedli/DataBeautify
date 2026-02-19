@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { applyEdit, loadESM } from '../utils';
+import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
 import { formatGoDeep } from './go_deep_formatter';
 
@@ -84,8 +84,8 @@ export async function handleJava(editor: vscode.TextEditor, text: string) {
 
     // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const prettier = await loadESM('prettier');
-        const pluginJavaMod = await loadESM('prettier-plugin-java');
+        const prettier = await import('prettier');
+        const pluginJavaMod = await import('prettier-plugin-java');
         const pluginJava = pluginJavaMod.default || pluginJavaMod;
 
         formatted = await prettier.format(text, {
@@ -152,8 +152,8 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
 
     // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const prettier = await loadESM('prettier');
-        const pluginRubyMod = await loadESM('@prettier/plugin-ruby');
+        const prettier = await import('prettier');
+        const pluginRubyMod = await import('@prettier/plugin-ruby');
         const pluginRuby = pluginRubyMod.default || pluginRubyMod;
 
         formatted = await prettier.format(text, {
@@ -561,8 +561,8 @@ export async function handleShell(editor: vscode.TextEditor, text: string) {
 
     // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const prettier = await loadESM('prettier');
-        const pluginShMod = await loadESM('prettier-plugin-sh');
+        const prettier = await import('prettier');
+        const pluginShMod = await import('prettier-plugin-sh');
         const pluginSh = pluginShMod.default || pluginShMod;
 
         formatted = await prettier.format(text, {
@@ -778,8 +778,8 @@ export async function handlePowerShell(editor: vscode.TextEditor, text: string) 
 
     // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const prettier = await loadESM('prettier');
-        const pluginPowerShellMod = await loadESM('prettier-plugin-powershell');
+        const prettier = await import('prettier');
+        const pluginPowerShellMod = await import('prettier-plugin-powershell');
         const pluginPowerShell = pluginPowerShellMod.default || pluginPowerShellMod;
 
         formatted = await prettier.format(text, {
@@ -2623,8 +2623,8 @@ export async function handleKotlin(editor: vscode.TextEditor, text: string) {
 
     // Try Deep Formatting with Prettier (Kotlin Plugin)
     try {
-        const prettier = await loadESM('prettier');
-        const pluginKotlinMod = await loadESM('prettier-plugin-kotlin');
+        const prettier = await import('prettier');
+        const pluginKotlinMod = await import('prettier-plugin-kotlin');
         const pluginKotlin = pluginKotlinMod.default || pluginKotlinMod;
 
         formatted = await prettier.format(text, {

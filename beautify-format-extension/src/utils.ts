@@ -196,7 +196,3 @@ export function splitCSVLine(line: string, delimiter: string): string[] {
     return rows.length > 0 ? rows[0] : [];
 }
 
-/**
- * Load ESM module dynamically in CommonJS environment
- */
-export const loadESM = (module: string) => new Function('module', 'return import(module)')(module);

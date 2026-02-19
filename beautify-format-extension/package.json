@@ -161,6 +161,7 @@
     "onLanguage:editorconfig",
     "onLanguage:astro"
   ],
+  "type": "module",
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
@@ -410,7 +411,7 @@
   "scripts": {
     "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
-    "bundle": "node esbuild.js",
+    "bundle": "node esbuild.cjs",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
