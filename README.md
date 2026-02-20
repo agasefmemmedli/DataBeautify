@@ -1,5 +1,3 @@
-MongoDB Shell (.mongodb) — скрипты для NoSQL.
-
 Markdown (.md) — README и документация.
 
 MDX (.mdx) — Markdown с компонентами React.

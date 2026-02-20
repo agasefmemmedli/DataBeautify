@@ -1236,37 +1236,76 @@ export async function handleMongoDB(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const jsbeautify = require('js-beautify');
+    let prettier: any;
+
+    try {
+        prettier = await import('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate MongoDB
     validationMessage = validateMongoDB(text);
 
-    /* eslint-disable */
+    // Deep Formatting with Prettier
+    let prettierSuccess = false;
     try {
-        // Format MongoDB (using js-beautify's JS formatter)
-        formatted = jsbeautify.js(text, {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: false,
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: false,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
-        });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format MongoDB Shell: ${error.message}`);
-        return;
-    }
-    /* eslint-enable */
+        if (prettier) {
+            // Mask Shell Commands
+            // MongoDB Shell commands like 'use db', 'show collections', 'it', 'cls' are not valid JS.
+            // We comment them out with a special marker to preserve them during JS formatting.
+            const maskedText = text.replace(/^(\s*)(use|show|it|cls|exit|quit)(\b.*)?$/gm, '$1// __MONGO_SHELL__ $2$3');
 
-    await applyEdit(editor, formatted);
+            const format = prettier.format || (prettier.default && prettier.default.format);
+            if (format) {
+                formatted = await format(maskedText, {
+                    parser: 'babel',
+                    tabWidth: 2,
+                    printWidth: 120,
+                    semi: true,
+                    singleQuote: false,
+                    trailingComma: 'none',
+                    bracketSpacing: true
+                });
+
+                // Unmask Shell Commands
+                formatted = formatted.replace(/^(\s*)\/\/ __MONGO_SHELL__ (.*)$/gm, '$1$2');
+                prettierSuccess = true;
+            }
+        }
+    } catch (prettierError) {
+        console.warn('Prettier failed for MongoDB, falling back to js-beautify:', prettierError);
+    }
+
+    if (!prettierSuccess) {
+        /* eslint-disable */
+        try {
+            // Format MongoDB (using js-beautify's JS formatter)
+            formatted = jsbeautify.js(text, {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: false,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: false,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format MongoDB Shell: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
+    }
+
+    await applyEdit(editor, formatted!);
 
     if (validationMessage) {
         vscode.window.showWarningMessage(`MongoDB Shell script has syntax issues but was beautified. ${validationMessage}`);

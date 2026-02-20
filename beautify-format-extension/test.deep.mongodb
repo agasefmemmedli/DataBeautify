@@ -1,0 +1,31 @@
+// Valid MongoDB Shell Script
+use myDatabase
+db.myCollection.drop()
+
+show collections
+
+db.myCollection.insertOne({
+    name: "Deep Formatting",
+    date: new Date(),
+    val: 123,
+    tags: ["a", "b", "c"]
+})
+
+// Complex query
+db.myCollection.find({
+    $or: [
+        { name: "Deep Formatting" },
+        { val: { $gt: 100 } }
+    ]
+}).sort({ val: -1 }).limit(10).forEach(function(doc) {
+    print("Found: " + doc.name);
+})
+
+// Function definition
+function myHelper(id) {
+    return db.myCollection.findOne({ _id: id });
+}
+
+// Shell helpers
+it
+cls
