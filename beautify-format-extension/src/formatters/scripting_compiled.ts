@@ -153,12 +153,12 @@ export async function handleRuby(editor: vscode.TextEditor, text: string) {
     // Try Deep Formatting with Prettier (Standard Style)
     try {
         const prettier = await import('prettier');
-        const pluginRubyMod = await import('@prettier/plugin-ruby');
-        const pluginRuby = pluginRubyMod.default || pluginRubyMod;
+        // Use require.resolve to avoid ERR_VM_MODULE_LINK_FAILURE with dynamic import in CommonJS
+        const pluginRubyPath = require.resolve('@prettier/plugin-ruby');
 
         formatted = await prettier.format(text, {
             parser: "ruby",
-            plugins: [pluginRuby],
+            plugins: [pluginRubyPath],
             tabWidth: 2,
             printWidth: 100,
             useTabs: false,

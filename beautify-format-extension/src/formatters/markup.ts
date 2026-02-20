@@ -1244,11 +1244,11 @@ export async function handleTwig(editor: vscode.TextEditor, text: string) {
     // Deep Formatting logic (Prettier)
     try {
         const prettier = await import('prettier');
-        const twigPlugin = await import('@sanderjn/prettier-plugin-twig-melody');
+        const twigPluginPath = require.resolve('@sanderjn/prettier-plugin-twig-melody');
 
         formatted = await prettier.format(text, {
             parser: 'melody',
-            plugins: [twigPlugin],
+            plugins: [twigPluginPath],
             tabWidth: 2,
             useTabs: false,
             printWidth: 80,
@@ -1486,11 +1486,11 @@ export async function handleLiquid(editor: vscode.TextEditor, text: string) {
     // Deep Formatting logic (Prettier)
     try {
         const prettier = await import('prettier');
-        const liquidPlugin = await import('@shopify/prettier-plugin-liquid');
+        const liquidPluginPath = require.resolve('@shopify/prettier-plugin-liquid');
 
         formatted = await prettier.format(text, {
             parser: 'liquid-html',
-            plugins: [liquidPlugin],
+            plugins: [liquidPluginPath],
             tabWidth: 2,
             useTabs: false,
             printWidth: 80,
