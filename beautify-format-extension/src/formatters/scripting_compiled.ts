@@ -7,6 +7,7 @@ import { formatCppDeep } from './cpp_deep_formatter';
 import { formatCDeep } from './c_deep_formatter';
 import { formatCSharpDeep } from './csharp_deep_formatter';
 import { formatDartDeep } from './dart_deep_formatter';
+import { formatSwiftDeep } from './swift_deep_formatter';
 
 /**
  * Handle Python formatting and validation
@@ -2206,99 +2207,13 @@ export async function handleSwift(editor: vscode.TextEditor, text: string) {
     // Validate Swift using custom resilient validator
     validationMessage = validateSwift(text);
 
-    /* eslint-disable */
+    // Deep Formatting logic
     try {
-        // --- PRE-PROCESSING ---
-        const masks: string[] = [];
-        const maskPrefix = '___SWIFT_MASK_';
-
-        // 1. Mask strings and comments
-        let maskedText = text.replace(/("""[\s\S]*?""")|("(?:\\.|[^\\"])*")|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)/g, (match) => {
-            const placeholder = `${maskPrefix}${masks.length}___`;
-            masks.push(match);
-            return placeholder;
-        });
-
-        // 2. Normalize Swift Syntax for js-beautify
-
-        // Mask Operators to protect them from splitting
-        maskedText = maskedText.replace(/->/g, '___ARROW___');
-        maskedText = maskedText.replace(/\.\.\./g, '___RANGE_CLOSED___');
-        maskedText = maskedText.replace(/\.\.<|…/g, '___RANGE_HALF___');
-        maskedText = maskedText.replace(/\?\?/g, '___NIL_COALESCING___');
-
-        // Attributes: @available(...) -> @available(...) \n
-        // Ensure attributes are separated from the next word if it's a keyword
-        maskedText = maskedText.replace(/(@[a-zA-Z0-9_]+(?:\([^)]*\))?)\s*(func|class|struct|enum|protocol|extension|var|let|init)/g, '$1\n$2');
-
-        // --- CORE FORMATTING ---
-        let beautified = jsbeautify.js(maskedText, {
-            indent_size: 4,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: true,
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: true,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
-        });
-
-        // --- POST-PROCESSING ---
-
-        // Restore Operators (remove extra spaces added by js-beautify around "identifiers")
-        beautified = beautified.replace(/\s*___ARROW___\s*/g, ' -> ');
-        beautified = beautified.replace(/\s*___RANGE_CLOSED___\s*/g, '...');
-        beautified = beautified.replace(/\s*___RANGE_HALF___\s*/g, '..<');
-        beautified = beautified.replace(/\s*___NIL_COALESCING___\s*/g, ' ?? ');
-
-        // Fix Generics: Array < String > -> Array<String>
-        // Supports one level of nesting: Dictionary < String, Array < Int > > -> Dictionary<String, Array<Int>>
-        for (let k = 0; k < 2; k++) {
-             beautified = beautified.replace(/\b([a-zA-Z0-9_]+)\s*<\s+((?:[^<>\n]|(?:[a-zA-Z0-9_]+\s*<\s*[^<>\n]+\s*>))+?)\s+>/g, (match: string, id: string, content: string) => {
-                 // Avoid comparison operators
-                 if (/[{}=;]/.test(content) || /&&|\|\||==|!=|<=|>=/.test(content)) return match;
-                 return `${id}<${content.trim()}>`;
-             });
-        }
-
-        // Fix Optionals: Type ? -> Type?
-        beautified = beautified.replace(/([a-zA-Z0-9_>\]\)])\s+([?!])(?=[,\)\]\}\s=\.])/g, '$1$2');
-
-        // Fix Argument Labels: label : Type -> label: Type
-        beautified = beautified.replace(/([^\s?])\s+:\s+/g, '$1: ');
-
-        // Fix space after keyword 'guard', 'if', 'switch' if missing
-        beautified = beautified.replace(/\b(guard|if|switch|while|for)\(/g, '$1 (');
-
-        // Fix guard/if let splitting
-        beautified = beautified.replace(/\b(guard|if)\s*\n\s*let\b/g, '$1 let');
-        // Pull 'else' up to same line
-        beautified = beautified.replace(/\n\s*else/g, ' else');
-
-        // Fix try/await splitting
-        beautified = beautified.replace(/=\s*\n\s*try\b/g, '= try');
-        beautified = beautified.replace(/try\s*\n\s*await\b/g, 'try await');
-
-        // Fix [weak self] in spacing
-        beautified = beautified.replace(/{\s*\[\s*weak\s+self\s*\]\s*in/g, '{ [weak self] in');
-
-        // 7. Restore Masks
-        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
-            return masks[parseInt(index)];
-        });
-
+        formatted = formatSwiftDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Swift: ${error.message}`);
         return;
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
