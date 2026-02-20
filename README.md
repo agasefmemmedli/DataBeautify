@@ -1,5 +1,6 @@
 # To-Improve List
 
+- [x] Dart (Deep Formatting Implemented)
 - [x] CSS (Deep Formatting Implemented)
 - [x] Go (Deep Formatting Implemented)
 - [x] Python (Deep Formatting Implemented)
