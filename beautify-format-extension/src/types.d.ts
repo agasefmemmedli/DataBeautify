@@ -6,3 +6,4 @@ declare module 'prettier-plugin-powershell';
 declare module 'prettier-plugin-toml';
 declare module 'prettier-plugin-prisma';
 declare module '@sanderjn/prettier-plugin-twig-melody';
+declare module 'prettier-plugin-astro';
