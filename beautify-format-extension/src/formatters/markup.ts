@@ -244,9 +244,26 @@ export async function handleMDX(editor: vscode.TextEditor, text: string) {
     // Validate MDX
     validationMessage = validateMDX(text);
 
-    // Resilient formatting logic
+    // Try Deep Formatting with Prettier (Standard Style)
     try {
-        const lines = text.split('\n');
+        const prettier = await import('prettier');
+
+        formatted = await prettier.format(text, {
+            parser: "mdx",
+            tabWidth: 2,
+            useTabs: false,
+            proseWrap: "preserve",
+            printWidth: 80,
+            singleQuote: false,
+            jsxSingleQuote: false,
+            bracketSpacing: true
+        });
+    } catch (prettierError: any) {
+        console.warn('Prettier MDX formatting failed, falling back to custom formatter', prettierError);
+
+        // Resilient formatting logic (Fallback)
+        try {
+            const lines = text.split('\n');
         const formattedLines: string[] = [];
         let inCodeBlock = false;
         let inTable = false;
@@ -406,9 +423,14 @@ export async function handleMDX(editor: vscode.TextEditor, text: string) {
         }
 
         formatted = formattedLines.join('\n');
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format MDX: ${error.message}`);
-        return;
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format MDX: ${error.message}`);
+            return;
+        }
+
+        if (!validationMessage) {
+            validationMessage = "Deep formatting (Prettier) failed. Applied resilient formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);

@@ -1,0 +1,58 @@
+---
+title: "Deep Formatting Test"
+author: "Beautifier"
+date: "2023-10-27"
+tags: ["mdx", "formatting", "deep"]
+---
+
+import { Chart } from './components/Chart';
+import Button from './ui/Button';
+
+# Hello MDX
+
+This is a paragraph with **bold** and _italic_ text.
+
+## JSX Components
+
+<div style={{ padding: '20px', backgroundColor: 'tomato' }}>
+  <h3>This is JSX inside Markdown</h3>
+  <Button onClick={() => alert('clicked')} variant="primary">
+    Click Me
+  </Button>
+</div>
+
+<Chart
+  data={[
+    { x: 1, y: 10 },
+    { x: 2, y: 20 },
+    { x: 3, y: 15 }
+  ]}
+  width={500}
+  height={300}
+/>
+
+## Code Blocks
+
+```javascript
+function hello() {
+  console.log("Hello World");
+  return true;
+}
+```
+
+## Tables
+
+| Header 1 | Header 2 | Header 3 |
+| :--- | :---: | ---: |
+| Left | Center | Right |
+| Data | Data | Data |
+
+## Lists
+
+- Item 1
+- Item 2
+  - Nested Item 2.1
+  - Nested Item 2.2
+
+1. Ordered Item 1
+2. Ordered Item 2
