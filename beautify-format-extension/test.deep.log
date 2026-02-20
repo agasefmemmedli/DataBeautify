@@ -1,0 +1,14 @@
+2023-10-27 10:00:00 [INFO] Starting service...
+2023-10-27 10:00:01 debug Connection received from 192.168.1.1
+[2023-10-27 10:00:02] WARN database connection timeout
+Oct 27 10:00:03 ERROR failed to process request: {"userId": 123, "action": "login", "status": "failed"}
+at processRequest (app.js:45)
+at handleConnection (server.js:80)
+Caused by: Error: database unavailable
+2023-10-27 10:00:04 INFO user created: {"id": 456, "name": "Alice", "roles": ["admin", "editor"]}
+10:00:05 TRACE detailed trace info here
+2023-10-27 10:00:06 FATAL critical system failure!
+System.Exception: Something went wrong
+   at System.IO.FileStream.Init(String path)
+   at App.Program.Main()
+2023-10-27T10:00:07.123Z INFO ISO8601 timestamp example
