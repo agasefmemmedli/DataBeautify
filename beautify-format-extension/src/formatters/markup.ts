@@ -1218,9 +1218,26 @@ export async function handleTwig(editor: vscode.TextEditor, text: string) {
     // Validate Twig
     validationMessage = validateTwig(text);
 
-    // Resilient formatting logic
+    // Deep Formatting logic (Prettier)
     try {
-        const lines = text.split('\n');
+        const prettier = await import('prettier');
+        const twigPlugin = await import('@sanderjn/prettier-plugin-twig-melody');
+
+        formatted = await prettier.format(text, {
+            parser: 'melody',
+            plugins: [twigPlugin],
+            tabWidth: 2,
+            useTabs: false,
+            printWidth: 80,
+            singleQuote: false,
+            bracketSameLine: false
+        });
+    } catch (prettierError: any) {
+        console.warn('Prettier Twig formatting failed, falling back to custom formatter', prettierError);
+
+        // Resilient formatting logic
+        try {
+            const lines = text.split('\n');
         const formattedLines: string[] = [];
         let indentLevel = 0;
 
@@ -1334,9 +1351,14 @@ export async function handleTwig(editor: vscode.TextEditor, text: string) {
         }
 
         formatted = formattedLines.join('\n');
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Twig: ${error.message}`);
-        return;
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Twig: ${error.message}`);
+            return;
+        }
+
+        if (!validationMessage) {
+            validationMessage = "Deep formatting (Prettier) failed. Applied resilient formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);

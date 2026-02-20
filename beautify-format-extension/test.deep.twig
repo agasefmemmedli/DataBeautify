@@ -1,0 +1,59 @@
+{# This is a comment #}
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>{{ page.title|upper }}</h1>
+
+    <div class="articles">
+        {% for article in articles %}
+            <article class="article-item {% if loop.first %}first{% endif %}">
+                <h2><a href="{{ article.url }}">{{ article.title }}</a></h2>
+                <div class="meta">
+                    Posted on {{ article.date|date("Y-m-d") }} by {{ article.author }}
+                </div>
+                <div class="body">
+                    {% if article.excerpt %}
+                        {{ article.excerpt|raw }}
+                        <a href="{{ article.url }}">Read more...</a>
+                    {% else %}
+                        {{ article.body|raw }}
+                    {% endif %}
+                </div>
+
+                {% if article.tags|length > 0 %}
+                    <ul class="tags">
+                        {% for tag in article.tags %}
+                            <li><a href="/tag/{{ tag }}">{{ tag }}</a></li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </article>
+        {% else %}
+            <p>No articles found.</p>
+        {% endfor %}
+    </div>
+
+    {% macro input(name, value, type = "text", size = 20) %}
+        <input type="{{ type }}" name="{{ name }}" value="{{ value|e }}" size="{{ size }}" />
+    {% endmacro %}
+
+    <form action="/submit" method="post">
+        <div class="form-group">
+            <label for="username">Username</label>
+            {{ _self.input('username', user.username) }}
+        </div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            {{ _self.input('password', '', 'password') }}
+        </div>
+
+        {% set foo = {
+            'bar': 'baz',
+            'qux': [1, 2, 3]
+        } %}
+
+        {% apply upper %}
+            This text becomes uppercase
+        {% endapply %}
+    </form>
+{% endblock %}

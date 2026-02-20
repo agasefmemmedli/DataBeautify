@@ -1,5 +1,3 @@
-Twig (.twig) — шаблоны PHP.
-
 Liquid (.liquid) — шаблоны Shopify/Jekyll.
 
 Jupyter Notebook (.ipynb) — JSON-структура тетрадок Python.
