@@ -1,57 +1,72 @@
-package com.example.demo;
+package com.example.deep;
 
 import java.util.List;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-@Deprecated
-public class DeepTest < T > {
+/**
+ * Deep Formatting Test for Java
+ */
+public enum TestEnum {
+    VALUE_ONE,
+    VALUE_TWO;
+}
 
-    private final List < String > items = new ArrayList < > ();
+@FunctionalInterface
+interface Converter<F, T> {
+    T convert(F from);
+}
 
-    @Override
-    public String toString() {
-        return "DeepTest{items=" + items + "}";
+public record Point(int x, int y) {}
+
+public class DeepJavaTest<T> {
+
+    private final List<T> items;
+
+    public DeepJavaTest(List<T> items) {
+        this.items = items;
     }
 
-    public void processItems() {
-        items.forEach((item) -> {
-            if (item.length() > 5) {
-                System.out.println(item.toUpperCase());
-            } else {
-                System.out.println(item.toLowerCase());
-            }
-        });
-    }
+    public void complexMethod() {
+        // Lambda with block
+        Converter<String, Integer> converter = (from) -> {
+            return Integer.valueOf(from);
+        };
 
-    public void switchExpression(int day) {
-        String dayName = switch (day) {
-            case 1 -> "Monday";
-            case 2 -> "Tuesday";
+        // Switch Expression (Java 14+)
+        var result = switch (TestEnum.VALUE_ONE) {
+            case VALUE_ONE -> "One";
+            case VALUE_TWO -> "Two";
             default -> "Unknown";
         };
-    }
 
-    public void tryWithResources() {
-        try (var resource = new AutoCloseable() {
-            @Override
-            public void close() throws Exception {
-                System.out.println("Closed");
-            }
-        }) {
-            System.out.println("Resource used");
+        // Text Block (Java 15+)
+        String html = """
+              <html>
+                  <body>
+                      <p>Hello, World</p>
+                  </body>
+              </html>
+              """;
+
+        // Streams with vertical alignment
+        List<String> filtered = items.stream()
+            .map(Object::toString)
+            .filter(s -> s.length() > 5)
+            .sorted()
+            .collect(Collectors.toList());
+
+        // Try-with-resources
+        try (Stream<String> s = filtered.stream()) {
+            s.forEach(System.out::println);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    public record Person(String name, int age) {}
-
-    public String textBlock() {
-        return """
-               This is a text block
-               with multiple lines
-               """;
+    // Inner class with generics
+    private static class Inner<U> {
+        U value;
+        Inner(U value) { this.value = value; }
     }
 }

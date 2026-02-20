@@ -86,12 +86,11 @@ export async function handleJava(editor: vscode.TextEditor, text: string) {
     // Try Deep Formatting with Prettier (Standard Style)
     try {
         const prettier = await import('prettier');
-        const pluginJavaMod = await import('prettier-plugin-java');
-        const pluginJava = pluginJavaMod.default || pluginJavaMod;
+        const pluginJavaPath = require.resolve('prettier-plugin-java');
 
         formatted = await prettier.format(text, {
             parser: "java",
-            plugins: [pluginJava],
+            plugins: [pluginJavaPath],
             tabWidth: 4,
             printWidth: 100,
             useTabs: false,
