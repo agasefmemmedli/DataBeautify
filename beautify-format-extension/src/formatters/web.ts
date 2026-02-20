@@ -130,9 +130,19 @@ export async function handleHTML(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const { HTMLHint } = require('htmlhint');
     const jsbeautify = require('js-beautify');
+    let prettier: any;
+    try {
+        prettier = await import('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate HTML
     const errors = HTMLHint.verify(text);
@@ -144,28 +154,54 @@ export async function handleHTML(editor: vscode.TextEditor, text: string) {
         }
     }
 
-    /* eslint-disable */
     try {
-        // Format HTML
-        formatted = jsbeautify.html(text, {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 1, // Stricter vertical spacing
-            preserve_newlines: true,
-            indent_scripts: 'normal', // Indent script content
-            end_with_newline: true, // Ensure file ends with newline (standard)
-            wrap_line_length: 120, // Enforce line length
-            indent_inner_html: true, // Indent <head> and <body> content
-            extra_liners: ['head', 'body', '/html', 'html', 'doctype'], // Ensure structural tags are on new lines
-            unformatted: ['a', 'span', 'img', 'code', 'pre', 'sub', 'sup', 'em', 'strong', 'b', 'i', 'u', 'strike', 'big', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], // Inline elements
-            wrap_attributes: 'force-aligned', // Wrap attributes if line is too long
-            wrap_attributes_indent_size: 2
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier
+        formatted = await format(text, {
+            parser: 'html',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false,
+            htmlWhitespaceSensitivity: 'css'
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format HTML: ${error.message}`);
-        return;
+
+    } catch (prettierError: any) {
+        /* eslint-disable */
+        try {
+            // Format HTML
+            formatted = jsbeautify.html(text, {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
+                max_preserve_newlines: 1, // Stricter vertical spacing
+                preserve_newlines: true,
+                indent_scripts: 'normal', // Indent script content
+                end_with_newline: true, // Ensure file ends with newline (standard)
+                wrap_line_length: 120, // Enforce line length
+                indent_inner_html: true, // Indent <head> and <body> content
+                extra_liners: ['head', 'body', '/html', 'html', 'doctype'], // Ensure structural tags are on new lines
+                unformatted: ['a', 'span', 'img', 'code', 'pre', 'sub', 'sup', 'em', 'strong', 'b', 'i', 'u', 'strike', 'big', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], // Inline elements
+                wrap_attributes: 'force-aligned', // Wrap attributes if line is too long
+                wrap_attributes_indent_size: tabSize
+            });
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format HTML: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
