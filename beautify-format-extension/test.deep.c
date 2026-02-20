@@ -4,47 +4,82 @@
 #define MAX_SIZE 100
 #define SQUARE(x) ((x) * (x))
 
-typedef struct {
+typedef struct Point {
+    int x;
+    int y;
+} Point;
+
+typedef enum Color {
+    RED,
+    GREEN,
+    BLUE
+} Color;
+
+struct Data {
     int id;
     char *name;
-    float value;
-} Item;
+    struct Point p;
+};
 
-void print_item(Item * item);
-
-int main(int argc, char *argv[]) {
-    int i;
-    int * p;
-    Item items[2] = {
-        {1, "Item 1", 10.5},
-        {2, "Item 2", 20.0}
-    };
-
-    if(argc > 1) {
-        printf("Arguments provided\n");
-    } else {
-        printf("No arguments\n");
+void process_data(struct Data *d) {
+    if (d == NULL) {
+        return;
     }
 
-    for (i = 0; i < 2; i++) {
-        print_item(&items[i]);
-    }
-
-    p = malloc(sizeof(int));
-    *p = 10;
-
-    switch(*p) {
-        case 10:
-            printf("Ten\n");
+    switch (d->id) {
+        case 1:
+            printf("Processing ID 1\n");
+            break;
+        case 2:
+            printf("Processing ID 2\n");
             break;
         default:
-            printf("Other\n");
+            printf("Unknown ID\n");
+            break;
     }
-
-    free(p);
-    return 0;
 }
 
-void print_item(Item * item) {
-    printf("ID: %d, Name: %s, Value: %.2f\n", item->id, item->name, item->value);
+int *get_array(int size) {
+    int *arr = (int *)malloc(size * sizeof(int));
+    if (!arr) return NULL;
+    for (int i = 0; i < size; i++) {
+        arr[i] = i;
+    }
+    return arr;
+}
+
+int main() {
+    Point p1 = { .x = 10, .y = 20 };
+    struct Data d1 = {
+        .id = 1,
+        .name = "Test",
+        .p = p1
+    };
+
+    int *ptr = &d1.id;
+    int val = *ptr;
+
+    printf("Value: %d\n", val);
+
+    int a = 5;
+    int b = 10;
+    int c = (a + b) * 2;
+
+    if (a < b) {
+        printf("a is less than b\n");
+    } else {
+        printf("a is not less than b\n");
+    }
+
+    // Test designated initializers in array
+    int numbers[10] = {
+        [0] = 1,
+        [5] = 10,
+        [9] = 100
+    };
+
+    // Test restrict keyword (C99)
+    int * restrict p_res = malloc(10);
+
+    return 0;
 }
