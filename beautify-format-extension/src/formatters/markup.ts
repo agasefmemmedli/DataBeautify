@@ -795,104 +795,126 @@ export async function handleAstro(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
-    // Lazy load dependencies
-    const jsbeautify = require('js-beautify');
-
     // Validate Astro
     validationMessage = validateAstro(text);
 
-    // Resilient formatting logic
+    // Deep Formatting with Prettier (Standard Style)
     try {
-        // Astro structure:
-        // ---
-        // frontmatter (TS/JS)
-        // ---
-        // template (HTML/JSX-like)
+        const prettier = await import('prettier');
+        const astroPlugin = require.resolve('prettier-plugin-astro');
 
-        const frontmatterRegex = /^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/m;
-        const match = text.match(frontmatterRegex);
+        formatted = await prettier.format(text, {
+            parser: 'astro',
+            plugins: [astroPlugin],
+            tabWidth: 2,
+            useTabs: false,
+            printWidth: 80,
+            singleQuote: false,
+            bracketSameLine: false
+        });
+    } catch (prettierError: any) {
+        console.warn('Prettier Astro formatting failed, falling back to custom formatter', prettierError);
 
-        let frontmatter = '';
-        let template = text;
-        let frontmatterRaw = '';
+        // Resilient formatting logic (Fallback)
+        try {
+            // Lazy load dependencies
+            const jsbeautify = require('js-beautify');
 
-        if (match) {
-            frontmatterRaw = match[0];
-            const content = match[1];
-            // Format frontmatter as TypeScript
-            // Use js-beautify.js
-            /* eslint-disable */
-            const formattedContent = jsbeautify.js(content, {
-                indent_size: 2,
-                indent_char: ' ',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: false,
-                wrap_line_length: 0,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            });
-            /* eslint-enable */
-            frontmatter = `---\n${formattedContent}\n---`;
-            template = text.substring(frontmatterRaw.length).trim();
-        }
+            // Astro structure:
+            // ---
+            // frontmatter (TS/JS)
+            // ---
+            // template (HTML/JSX-like)
 
-        // Format template as HTML (with some JSX awareness)
-        // We use js-beautify.html, similar to Svelte/Vue
-        /* eslint-disable */
-        const options: any = {
-            indent_size: 2,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            indent_scripts: 'normal',
-            end_with_newline: false,
-            wrap_line_length: 0,
-            indent_inner_html: false,
-            js: {
-                indent_size: 2,
-                indent_char: ' ',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: false,
-                wrap_line_length: 0,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            },
-            css: {
-                indent_size: 2,
-                indent_char: ' ',
-                selector_separator_newline: true,
-                newline_between_rules: true,
-                end_with_newline: false
+            const frontmatterRegex = /^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/m;
+            const match = text.match(frontmatterRegex);
+
+            let frontmatter = '';
+            let template = text;
+            let frontmatterRaw = '';
+
+            if (match) {
+                frontmatterRaw = match[0];
+                const content = match[1];
+                // Format frontmatter as TypeScript
+                // Use js-beautify.js
+                /* eslint-disable */
+                const formattedContent = jsbeautify.js(content, {
+                    indent_size: 2,
+                    indent_char: ' ',
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: false,
+                    wrap_line_length: 0,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false
+                });
+                /* eslint-enable */
+                frontmatter = `---\n${formattedContent}\n---`;
+                template = text.substring(frontmatterRaw.length).trim();
             }
-        };
-        const formattedTemplate = jsbeautify.html(template, options);
-        /* eslint-enable */
 
-        if (frontmatter) {
-            formatted = `${frontmatter}\n\n${formattedTemplate}`;
-        } else {
-            formatted = formattedTemplate;
+            // Format template as HTML (with some JSX awareness)
+            // We use js-beautify.html, similar to Svelte/Vue
+            /* eslint-disable */
+            const options: any = {
+                indent_size: 2,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                indent_scripts: 'normal',
+                end_with_newline: false,
+                wrap_line_length: 0,
+                indent_inner_html: false,
+                js: {
+                    indent_size: 2,
+                    indent_char: ' ',
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: false,
+                    wrap_line_length: 0,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false
+                },
+                css: {
+                    indent_size: 2,
+                    indent_char: ' ',
+                    selector_separator_newline: true,
+                    newline_between_rules: true,
+                    end_with_newline: false
+                }
+            };
+            const formattedTemplate = jsbeautify.html(template, options);
+            /* eslint-enable */
+
+            if (frontmatter) {
+                formatted = `${frontmatter}\n\n${formattedTemplate}`;
+            } else {
+                formatted = formattedTemplate;
+            }
+
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Astro: ${error.message}`);
+            return;
         }
 
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Astro: ${error.message}`);
-        return;
+        if (!validationMessage) {
+            validationMessage = "Deep formatting (Prettier) failed. Applied resilient formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);
