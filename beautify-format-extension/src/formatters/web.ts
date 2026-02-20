@@ -219,9 +219,19 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const css = require('css');
     const jsbeautify = require('js-beautify');
+    let prettier: any;
+    try {
+        prettier = await import('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate CSS
     let ast: any;
@@ -238,40 +248,68 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
         validationMessage = e.message;
     }
 
-    let cssTextToFormat = text;
-
-    // If no errors, normalize with css.stringify to add semicolons and fix structure
-    if (!validationMessage && ast && (!ast.stylesheet.parsingErrors || ast.stylesheet.parsingErrors.length === 0)) {
-        try {
-            const stringified = css.stringify(ast, { compress: false });
-            if (stringified) {
-                cssTextToFormat = stringified;
-            }
-        } catch (e) {
-            // If stringify fails, fallback to original text
-            console.error('CSS stringify failed:', e);
-        }
-    }
-
-    /* eslint-disable */
     try {
-        // Format CSS
-        formatted = jsbeautify.css(cssTextToFormat, {
-            indent_size: 2,
-            indent_char: ' ',
-            selector_separator_newline: true,
-            newline_between_rules: true,
-            end_with_newline: true,
-            preserve_newlines: true,
-            max_preserve_newlines: 1,
-            space_around_combinator: true,
-            space_around_selector_separator: true
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier
+        formatted = await format(text, {
+            parser: 'css',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
-        return;
+
+    } catch (prettierError: any) {
+        // Fallback to js-beautify
+
+        let cssTextToFormat = text;
+
+        // If no errors, normalize with css.stringify to add semicolons and fix structure
+        // Only do this if Prettier failed (likely due to syntax error or misconfig)
+        // And use ast from validation if available
+        if (!validationMessage && ast && (!ast.stylesheet.parsingErrors || ast.stylesheet.parsingErrors.length === 0)) {
+            try {
+                const stringified = css.stringify(ast, { compress: false });
+                if (stringified) {
+                    cssTextToFormat = stringified;
+                }
+            } catch (e) {
+                console.error('CSS stringify failed:', e);
+            }
+        }
+
+        /* eslint-disable */
+        try {
+            // Format CSS
+            formatted = jsbeautify.css(cssTextToFormat, {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: true,
+                preserve_newlines: true,
+                max_preserve_newlines: 1,
+                space_around_combinator: true,
+                space_around_selector_separator: true
+            });
+             if (!validationMessage) {
+                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
@@ -678,10 +716,11 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
 
     // Lazy load Prettier and plugin
     let prettier: any;
-    let phpPlugin: any;
+    let phpPluginPath: string | undefined;
     try {
         prettier = await import('prettier');
-        phpPlugin = await import('@prettier/plugin-php');
+        // Use require.resolve for CommonJS compatibility
+        phpPluginPath = require.resolve('@prettier/plugin-php');
     } catch (e) {
         console.warn('Prettier or PHP plugin failed to load:', e);
     }
@@ -707,7 +746,7 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
     }
 
     try {
-        if (!prettier || !phpPlugin) {
+        if (!prettier || !phpPluginPath) {
             throw new Error('Prettier or PHP plugin not available');
         }
 
@@ -719,7 +758,7 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
         // Deep Formatting with Prettier (PSR-12 compliant)
         formatted = await format(text, {
             parser: 'php',
-            plugins: [phpPlugin],
+            plugins: [phpPluginPath],
             tabWidth: tabSize || 4,
             useTabs: !insertSpaces,
             printWidth: 120,

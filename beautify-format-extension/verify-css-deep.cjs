@@ -94,13 +94,11 @@ div > span {
   color: red;
   margin: 0;
 }
-
 /* main */
 .class {
   display: block;
   font-size: 12px;
 }
-
 #id {
   padding: 10px;
 }
@@ -111,6 +109,38 @@ div > span {
             // Broken CSS fallback: js-beautify only.
             // js-beautify will add newline at end but won't fix missing braces or add semicolons if structural error exists
             expectedContains: 'div {'
+        },
+        {
+            file: 'test.complex.css',
+            expected: `:root {
+  --primary-color: #333;
+}
+
+@media (min-width: 768px) {
+  .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.nested > .child {
+  color: var(--primary-color);
+}
+`
         }
     ];
     let passed = 0;
