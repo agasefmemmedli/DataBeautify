@@ -3,6 +3,7 @@ import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
 import { formatGoDeep } from './go_deep_formatter';
 import { formatRustDeep } from './rust_deep_formatter';
+import { formatCppDeep } from './cpp_deep_formatter';
 
 /**
  * Handle Python formatting and validation
@@ -1809,124 +1810,96 @@ export async function handleCPP(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
-    // Lazy load dependencies
-    const jsbeautify = require('js-beautify');
-
     // Validate C++ using custom resilient validator
     validationMessage = validateCPP(text);
 
-    /* eslint-disable */
     try {
-        // --- PRE-PROCESSING ---
-        const masks: string[] = [];
-        const maskPrefix = '___CPP_MASK_';
+        // Deep Formatting
+        formatted = formatCppDeep(text);
+    } catch (error: any) {
+        console.warn(`Deep C++ formatting failed: ${error.message}. Falling back to js-beautify.`);
 
-        // 1. Mask strings, chars and comments to protect them from formatting changes
-        // Strings: "..."
-        // Chars: '...'
-        // Comments: //... or /*...*/
-        // Preprocessor: #... (we mask these to avoid indentation mess up)
-        let maskedText = text.replace(/("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(^\s*#[^\n]*)/gm, (match) => {
-            const placeholder = `${maskPrefix}${masks.length}___`;
-            masks.push(match);
-            return placeholder;
-        });
+        // Fallback to js-beautify (Original Implementation Logic)
+        const jsbeautify = require('js-beautify');
+        /* eslint-disable */
+        try {
+            // --- PRE-PROCESSING ---
+            const masks: string[] = [];
+            const maskPrefix = '___CPP_MASK_';
 
-        // 2. Normalize C++ Syntax
-        // Access modifiers: public:, private:, protected:
-        // Ensure they are on their own line.
-        maskedText = maskedText.replace(/\b(public|private|protected)\s*:\s*/g, '$1:\n');
+            let maskedText = text.replace(/("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(^\s*#[^\n]*)/gm, (match) => {
+                const placeholder = `${maskPrefix}${masks.length}___`;
+                masks.push(match);
+                return placeholder;
+            });
 
-        // Scope resolution spacing cleanup
-        maskedText = maskedText.replace(/\s*::\s*/g, '::');
+            maskedText = maskedText.replace(/\b(public|private|protected)\s*:\s*/g, '$1:\n');
+            maskedText = maskedText.replace(/\s*::\s*/g, '::');
+            maskedText = maskedText.replace(/\]\s*\(/g, '] (');
+            maskedText = maskedText.replace(/(template\s*<.*?>)\s+(class|struct)/g, '$1 $2');
 
-        // Lambda syntax: [] (...) -> ... {
-        // Ensure space between `] (`.
-        maskedText = maskedText.replace(/\]\s*\(/g, '] (');
+            let beautified = jsbeautify.js(maskedText, {
+                indent_size: 4,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: true,
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: true,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
 
-        // Template and Class on same line to prevent weird indentation
-        maskedText = maskedText.replace(/(template\s*<.*?>)\s+(class|struct)/g, '$1 $2');
+            // --- POST-PROCESSING ---
+            beautified = beautified.replace(/^(\s*)(public|private|protected)\s*:\s*([^\s])/gm, '$1$2:\n$1    $3');
+            beautified = beautified.replace(/\s*::\s*/g, '::');
+            beautified = beautified.replace(/&\s*&/g, '&&');
+            beautified = beautified.replace(/\*\s*\*/g, '**');
 
-        // --- CORE FORMATTING ---
-        let beautified = jsbeautify.js(maskedText, {
-            indent_size: 4,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: true, // Important for array initializers
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: true,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
-        });
+            const lines = beautified.split('\n');
+            const finalLines: string[] = [];
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+                const trimmed = line.trim();
+                if (/^(public|private|protected)\s*:/.test(trimmed)) {
+                    line = line.replace(/^    /, '');
+                }
+                finalLines.push(line);
+            }
+            beautified = finalLines.join('\n');
 
-        // --- POST-PROCESSING ---
-
-        // 0. Ensure access modifiers are on new line if js-beautify collapsed them
-        beautified = beautified.replace(/^(\s*)(public|private|protected)\s*:\s*([^\s])/gm, '$1$2:\n$1    $3');
-
-        // 1. Fix Scope Resolution and Double References/Pointers (Before templates to avoid breaking std::vector match)
-        beautified = beautified.replace(/\s*::\s*/g, '::');
-        beautified = beautified.replace(/&\s*&/g, '&&');
-        beautified = beautified.replace(/\*\s*\*/g, '**');
-
-        // 2. Indentation Fixes
-        const lines = beautified.split('\n');
-        const finalLines: string[] = [];
-
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            const trimmed = line.trim();
-
-            // Fix Access Modifiers Indentation
-            // Dedent public/private/protected by one level (4 spaces) relative to where js-beautify put them
-            if (/^(public|private|protected)\s*:/.test(trimmed)) {
-                line = line.replace(/^    /, '');
+            for (let k = 0; k < 3; k++) {
+                beautified = beautified.replace(/\b([\w:]+)\s*<\s+([^>]+?)\s+>(?=\s*[>(\w:,\*&;\[])/g, (match: string, id: string, content: string) => {
+                    return `${id}<${content.trim()}>`;
+                });
             }
 
-            finalLines.push(line);
-        }
-        beautified = finalLines.join('\n');
+            const types = 'void|int|char|bool|float|double|long|short|unsigned|signed|size_t|auto|string|vector|map|set|list|pair|const|class|struct|typename';
+            beautified = beautified.replace(new RegExp(`\\b(${types})\\s*(\\*+|&+)\\s*(\\w+)`, 'g'), '$1$2 $3');
+            beautified = beautified.replace(/\b([A-Z]\w*)\s*(\*+|&+)\s*(\w+)/g, '$1$2 $3');
+            beautified = beautified.replace(new RegExp(`\\b([A-Z]\\w*|${types})\\s*(\\*+|&+)\\s*(?=\\s*[),>])`, 'g'), '$1$2');
+            beautified = beautified.replace(/([=\(\[\{,!:?&\|\^\+\-\*\/%])\s*(\*|&)\s+([\w_]+)/g, '$1 $2$3');
 
-        // 3. Fix Template Spacing: vector < int > -> vector<int>
-        // Use callback to trim internal spaces
-        for (let k = 0; k < 3; k++) {
-            beautified = beautified.replace(/\b([\w:]+)\s*<\s+([^>]+?)\s+>(?=\s*[>(\w:,\*&;\[])/g, (match: string, id: string, content: string) => {
-                return `${id}<${content.trim()}>`;
+            formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+                return masks[parseInt(index)];
             });
+
+        } catch (beautifyError: any) {
+            vscode.window.showErrorMessage(`Failed to format C++: ${beautifyError.message}`);
+            return;
         }
+        /* eslint-enable */
 
-        // 4. Fix Pointer/Reference Alignment: int * p -> int* p
-        // Heuristic: Type * Variable.
-        const types = 'void|int|char|bool|float|double|long|short|unsigned|signed|size_t|auto|string|vector|map|set|list|pair|const|class|struct|typename';
-        beautified = beautified.replace(new RegExp(`\\b(${types})\\s*(\\*+|&+)\\s*(\\w+)`, 'g'), '$1$2 $3');
-
-        // Handle PascalCase types (Class pointers)
-        beautified = beautified.replace(/\b([A-Z]\w*)\s*(\*+|&+)\s*(\w+)/g, '$1$2 $3');
-
-        // Handle Abstract Declarators: void(T &) -> void(T&)
-        // Matches Type & [),>]
-        beautified = beautified.replace(new RegExp(`\\b([A-Z]\\w*|${types})\\s*(\\*+|&+)\\s*(?=\\s*[),>])`, 'g'), '$1$2');
-
-        // Handle Context-based pointers (assignment, return, etc)
-        beautified = beautified.replace(/([=\(\[\{,!:?&\|\^\+\-\*\/%])\s*(\*|&)\s+([\w_]+)/g, '$1 $2$3');
-
-        // 4. Restore Masks
-        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
-            return masks[parseInt(index)];
-        });
-
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format C++: ${error.message}`);
-        return;
+        if (!validationMessage) {
+             validationMessage = "Deep formatting failed. Applied resilient fallback.";
+        }
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 

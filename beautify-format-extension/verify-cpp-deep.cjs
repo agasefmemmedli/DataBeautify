@@ -138,7 +138,7 @@ async function runTest() {
     mockVscode.window.activeTextEditor = mockEditor;
 
     try {
-        await beautify('cpp');
+        await beautify('cpp'); // Assuming extension has 'cpp' mapping or languageId logic works
         console.log('--- Original ---');
         console.log(content);
         console.log('--- Formatted ---');
