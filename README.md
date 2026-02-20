@@ -1,5 +1,3 @@
-SVG (.svg) — по сути XML, но часто требует специфического сжатия/очистки.
-
 Git Config (.gitconfig) — локальные настройки Git.
 
 EditorConfig (.editorconfig) — правила форматирования проекта.
