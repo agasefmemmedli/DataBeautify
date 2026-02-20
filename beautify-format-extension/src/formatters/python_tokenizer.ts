@@ -26,16 +26,17 @@ export class PythonTokenizer {
     private line: number = 1;
     private col: number = 1;
 
+    // Added match, case, type for Python 3.10+
     private static readonly KEYWORDS = new Set([
         'def', 'class', 'if', 'elif', 'else', 'while', 'for', 'in', 'try', 'except',
         'finally', 'with', 'as', 'import', 'from', 'return', 'yield', 'raise', 'break',
         'continue', 'pass', 'global', 'nonlocal', 'assert', 'del', 'lambda', 'async',
-        'await', 'is', 'not', 'and', 'or', 'True', 'False', 'None'
+        'await', 'is', 'not', 'and', 'or', 'True', 'False', 'None', 'match', 'case', 'type'
     ]);
 
     private static readonly OPERATORS = new Set([
         '+', '-', '*', '/', '%', '**', '//', '@', '<<', '>>', '&', '|', '^', '~',
-        '<', '>', '<=', '>=', '==', '!=', ':=',
+        '<', '>', '<=', '>=', '==', '!=', ':=', '=',
         '+=', '-=', '*=', '/=', '%=', '//=', '**=', '@=', '&=', '|=', '^=', '<<=', '>>=',
         '->', '...'
     ]);
@@ -160,11 +161,6 @@ export class PythonTokenizer {
             }
 
             if (opMatch) {
-                // Decorator handling: @ followed by indentifier?
-                // Actually @ is an operator. We can refine it later or in parser.
-                // But let's check if it's a decorator context (start of line or after newline).
-                // It's safer to just emit Operator '@'.
-
                 const startLine = this.line;
                 const startCol = this.col;
                 tokens.push({ type: TokenType.Operator, text: opMatch, line: startLine, col: startCol });
@@ -229,7 +225,6 @@ export class PythonTokenizer {
 
         // Greedily consume letters to find prefix
         // Max prefix length is 2 (rf, fr, br, rb, u, b, r, f)
-        // But let's just peek characters
         while (this.pos + offset < this.code.length) {
             const c = this.code[this.pos + offset];
             if (c === "'" || c === '"') {
@@ -244,8 +239,9 @@ export class PythonTokenizer {
         }
 
         if (prefix.length > 0) {
+            // Enhanced prefix check for f, r, b, u and combinations
             if (!/^(r|u|f|b|fr|rf|br|rb|ur|ru)$/i.test(prefix)) {
-                return null; // Invalid prefix (e.g. identifier 'foo')
+                return null; // Invalid prefix
             }
         }
 
@@ -287,7 +283,7 @@ export class PythonTokenizer {
             searchPos++;
         }
 
-        return null; // Unclosed string, let's just return what we have? No, return null and let tokenizer handle as unknown/identifiers to be safe.
+        return null; // Unclosed string
     }
 
     private matchNumber(): string | null {
@@ -303,9 +299,7 @@ export class PythonTokenizer {
         if (octMatch) return octMatch[0];
 
         // Float/Int/Complex
-        // Regex: (\d+(_\d+)*)?(\.\d+(_\d+)*)?([eE][+-]?\d+(_\d+)*)?[jJ]?
-        // But carefully constructed to avoid matching nothing or just dot
-
+        // Matches decimals, floats with exponents, and complex numbers (j)
         const numberRegex = /^(\d+(_\d+)*(\.\d+(_\d+)*)?|\.\d+(_\d+)*)([eE][+-]?\d+(_\d+)*)?[jJ]?/;
         const match = remaining.match(numberRegex);
 
