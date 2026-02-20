@@ -1233,59 +1233,9 @@ export async function handleEditorConfig(editor: vscode.TextEditor, text: string
     // Validate EditorConfig
     validationMessage = validateEditorConfig(text);
 
-    // Resilient formatting logic
+    // Deep Formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let inSection = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                // Only push empty line if the previous one wasn't empty
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                continue;
-            }
-
-            // Comments
-            if (trimmed.startsWith('#') || trimmed.startsWith(';')) {
-                // Comments are usually aligned with the content
-                const indent = inSection ? '  ' : '';
-                formattedLines.push(indent + trimmed);
-                continue;
-            }
-
-            // Sections [section]
-            if (trimmed.startsWith('[')) {
-                // Ensure empty line before section if not at start
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(trimmed);
-                inSection = true;
-                continue;
-            }
-
-            // Key-Value pairs: key = value
-            const equalIndex = trimmed.indexOf('=');
-            if (equalIndex !== -1) {
-                const key = trimmed.substring(0, equalIndex).trim();
-                const value = trimmed.substring(equalIndex + 1).trim();
-                // Indent properties by 2 spaces if inside a section
-                const indent = inSection ? '  ' : '';
-                formattedLines.push(`${indent}${key} = ${value}`);
-                continue;
-            }
-
-            // Fallback
-            const indent = inSection ? '  ' : '';
-            formattedLines.push(indent + trimmed);
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatEditorConfigDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format EditorConfig: ${error.message}`);
         return;
@@ -1298,6 +1248,134 @@ export async function handleEditorConfig(editor: vscode.TextEditor, text: string
     } else {
         vscode.window.showInformationMessage('EditorConfig formatted successfully!');
     }
+}
+
+/**
+ * Helper: Format EditorConfig Deep
+ */
+function formatEditorConfigDeep(text: string): string {
+    const lines = text.split('\n');
+
+    interface Property {
+        key: string;
+        value: string;
+        comments: string[];
+    }
+
+    interface Section {
+        header: string | null;
+        properties: Property[];
+        comments: string[];
+    }
+
+    const sections: Section[] = [];
+    let currentSection: Section = { header: null, properties: [], comments: [] };
+    let currentComments: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '') continue;
+
+        if (trimmed.startsWith('#') || trimmed.startsWith(';')) {
+            currentComments.push(trimmed);
+            continue;
+        }
+
+        if (trimmed.startsWith('[')) {
+            // Push current section
+            sections.push(currentSection);
+
+            // Start new section
+            currentSection = {
+                header: trimmed,
+                properties: [],
+                comments: currentComments
+            };
+            currentComments = [];
+            continue;
+        }
+
+        const eqIndex = trimmed.indexOf('=');
+        if (eqIndex !== -1) {
+            const key = trimmed.substring(0, eqIndex).trim();
+            const value = trimmed.substring(eqIndex + 1).trim();
+
+            currentSection.properties.push({
+                key,
+                value,
+                comments: currentComments
+            });
+            currentComments = [];
+            continue;
+        }
+
+        // Fallback for weird lines
+        currentComments.push(line);
+    }
+
+    // Push last section
+    sections.push(currentSection);
+
+    // Reconstruct
+    const formattedLines: string[] = [];
+
+    sections.forEach((section, index) => {
+        // If it's the root section (index 0 usually, or header is null)
+        const isRoot = section.header === null;
+
+        // Skip empty root section if it has nothing
+        if (isRoot && section.properties.length === 0 && section.comments.length === 0) {
+            return;
+        }
+
+        // Spacing
+        if (formattedLines.length > 0) {
+            formattedLines.push('');
+        }
+
+        // Section Comments
+        section.comments.forEach(c => formattedLines.push(c));
+
+        // Section Header
+        if (section.header) {
+            formattedLines.push(section.header);
+        }
+
+        // Properties
+        if (section.properties.length > 0) {
+             // Sort
+            const sortedProps = [...section.properties].sort((a, b) => {
+                if (a.key === 'root' && b.key !== 'root') return -1;
+                if (b.key === 'root' && a.key !== 'root') return 1;
+                return a.key.localeCompare(b.key);
+            });
+
+            // Align
+            let maxKeyLen = 0;
+            sortedProps.forEach(p => {
+                if (p.key.length > maxKeyLen) maxKeyLen = p.key.length;
+            });
+
+            const indent = isRoot ? '' : '    ';
+
+            sortedProps.forEach(p => {
+                p.comments.forEach(c => formattedLines.push(`${indent}${c}`));
+                const padding = ' '.repeat(maxKeyLen - p.key.length);
+                formattedLines.push(`${indent}${p.key}${padding} = ${p.value}`);
+            });
+        }
+    });
+
+    // Trailing comments?
+    // If `currentComments` has items left, they were at the very end of file.
+    if (currentComments.length > 0) {
+        if (formattedLines.length > 0) formattedLines.push('');
+        currentComments.forEach(c => formattedLines.push(c));
+    }
+
+    return formattedLines.join('\n');
 }
 
 /**
