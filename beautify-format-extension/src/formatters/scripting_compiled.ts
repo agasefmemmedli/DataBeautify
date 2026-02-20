@@ -4,6 +4,7 @@ import { formatPythonDeep } from './python_deep_formatter';
 import { formatGoDeep } from './go_deep_formatter';
 import { formatRustDeep } from './rust_deep_formatter';
 import { formatCppDeep } from './cpp_deep_formatter';
+import { formatCDeep } from './c_deep_formatter';
 import { formatCSharpDeep } from './csharp_deep_formatter';
 
 /**
@@ -342,102 +343,113 @@ export async function handleC(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
-    // Lazy load dependencies
-    const jsbeautify = require('js-beautify');
-
     // Validate C using custom resilient validator
     validationMessage = validateC(text);
 
-    /* eslint-disable */
     try {
-        // --- PRE-PROCESSING ---
-        const masks: string[] = [];
-        const maskPrefix = '___C_MASK_';
-
-        // 1. Mask strings, chars and comments to protect them from formatting changes
-        // Strings: "..."
-        // Chars: '...'
-        // Comments: //... or /*...*/
-        // Preprocessor: #... (we mask these to avoid indentation mess up)
-        let maskedText = text.replace(/("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(^\s*#[^\n]*)/gm, (match) => {
-            const placeholder = `${maskPrefix}${masks.length}___`;
-            masks.push(match);
-            return placeholder;
-        });
-
-        // 2. Normalize C Syntax
-        // --- CORE FORMATTING ---
-        let beautified = jsbeautify.js(maskedText, {
-            indent_size: 4,
-            indent_char: ' ',
-            max_preserve_newlines: 2,
-            preserve_newlines: true,
-            keep_array_indentation: true, // Important for array initializers
-            break_chained_methods: false,
-            brace_style: 'collapse',
-            space_before_conditional: true,
-            unescape_strings: false,
-            jslint_happy: false,
-            end_with_newline: true,
-            wrap_line_length: 0,
-            comma_first: false,
-            e4x: true,
-            indent_empty_lines: false
-        });
-
-        // --- POST-PROCESSING ---
-
-        // Fix struct typedef: } \n Item; -> } Item;
-        beautified = beautified.replace(/\}\s+(\w+);/g, '} $1;');
-
-        // Fix Arrow Operator: item - > id -> item->id
-        beautified = beautified.replace(/\s*-\s*>\s*/g, '->');
-
-        // Fix Address-of: & var -> &var (unary context)
-        beautified = beautified.replace(/([=\(\[\{,!:?return])\s*&\s+([\w_]+)/g, (match: string, p1: string, p2: string) => {
-             if (p1 === '(' || p1 === '[' || p1 === '{' || p1 === '!') return `${p1}&${p2}`;
-             return `${p1} &${p2}`;
-        });
-
-        // Fix Dereference: * p -> *p (unary context)
-        beautified = beautified.replace(/([=\(\[\{,!:?return])\s*\*\s+([\w_]+)/g, (match: string, p1: string, p2: string) => {
-             if (p1 === '(' || p1 === '[' || p1 === '{' || p1 === '!') return `${p1}*${p2}`;
-             return `${p1} *${p2}`;
-        });
-
-        // Fix Dereference at start of line/statement: * p = 10;
-        beautified = beautified.replace(/(^|[\n\};])\s*\*\s+([\w_]+)/g, (match: string) => {
-            return match.replace(/\*\s+/, '*');
-        });
-
-        // 1. Fix Pointer/Reference Alignment: int * p -> int *p
-        // Common C style is `int *p`.
-        // js-beautify might produce `int * p`.
-        // Heuristic: Type * Variable.
-        const types = 'void|int|char|bool|float|double|long|short|unsigned|signed|size_t|auto|const|struct|union|enum';
-
-        // This regex tries to fix "Type * var"
-        // Since js-beautify puts space around binary operators, it might treat * as binary multiplication if context is ambiguous.
-        // But for declarations "int * p", it will likely be "int * p".
-        // We want "int *p".
-        beautified = beautified.replace(new RegExp(`\\b(${types})\\s*\\*+\\s+(\\w+)`, 'g'), (match: string, type: string, varName: string) => {
-            // Check if it's actually multiplication? No, because we matched a Type keyword.
-            return match.replace(/\s*\*\s*/g, ' *');
-        });
-
-        // Handle struct pointers: struct Item * item -> struct Item *item
-        beautified = beautified.replace(/\b(struct|union|enum)\s+(\w+)\s*\*\s+(\w+)/g, '$1 $2 *$3');
-
-        // 2. Restore Masks
-        formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
-            return masks[parseInt(index)];
-        });
-
+        // Deep Formatting
+        formatted = formatCDeep(text);
     } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format C: ${error.message}`);
-        return;
+        console.warn(`Deep C formatting failed: ${error.message}. Falling back to js-beautify.`);
+
+        // Lazy load dependencies
+        const jsbeautify = require('js-beautify');
+
+        /* eslint-disable */
+        try {
+            // --- PRE-PROCESSING ---
+            const masks: string[] = [];
+            const maskPrefix = '___C_MASK_';
+
+            // 1. Mask strings, chars and comments to protect them from formatting changes
+            // Strings: "..."
+            // Chars: '...'
+            // Comments: //... or /*...*/
+            // Preprocessor: #... (we mask these to avoid indentation mess up)
+            let maskedText = text.replace(/("(?:\\.|[^\\"])*")|('(?:\\.|[^\\'])*')|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|(^\s*#[^\n]*)/gm, (match) => {
+                const placeholder = `${maskPrefix}${masks.length}___`;
+                masks.push(match);
+                return placeholder;
+            });
+
+            // 2. Normalize C Syntax
+            // --- CORE FORMATTING ---
+            let beautified = jsbeautify.js(maskedText, {
+                indent_size: 4,
+                indent_char: ' ',
+                max_preserve_newlines: 2,
+                preserve_newlines: true,
+                keep_array_indentation: true, // Important for array initializers
+                break_chained_methods: false,
+                brace_style: 'collapse',
+                space_before_conditional: true,
+                unescape_strings: false,
+                jslint_happy: false,
+                end_with_newline: true,
+                wrap_line_length: 0,
+                comma_first: false,
+                e4x: true,
+                indent_empty_lines: false
+            });
+
+            // --- POST-PROCESSING ---
+
+            // Fix struct typedef: } \n Item; -> } Item;
+            beautified = beautified.replace(/\}\s+(\w+);/g, '} $1;');
+
+            // Fix Arrow Operator: item - > id -> item->id
+            beautified = beautified.replace(/\s*-\s*>\s*/g, '->');
+
+            // Fix Address-of: & var -> &var (unary context)
+            beautified = beautified.replace(/([=\(\[\{,!:?return])\s*&\s+([\w_]+)/g, (match: string, p1: string, p2: string) => {
+                if (p1 === '(' || p1 === '[' || p1 === '{' || p1 === '!') return `${p1}&${p2}`;
+                return `${p1} &${p2}`;
+            });
+
+            // Fix Dereference: * p -> *p (unary context)
+            beautified = beautified.replace(/([=\(\[\{,!:?return])\s*\*\s+([\w_]+)/g, (match: string, p1: string, p2: string) => {
+                if (p1 === '(' || p1 === '[' || p1 === '{' || p1 === '!') return `${p1}*${p2}`;
+                return `${p1} *${p2}`;
+            });
+
+            // Fix Dereference at start of line/statement: * p = 10;
+            beautified = beautified.replace(/(^|[\n\};])\s*\*\s+([\w_]+)/g, (match: string) => {
+                return match.replace(/\*\s+/, '*');
+            });
+
+            // 1. Fix Pointer/Reference Alignment: int * p -> int *p
+            // Common C style is `int *p`.
+            // js-beautify might produce `int * p`.
+            // Heuristic: Type * Variable.
+            const types = 'void|int|char|bool|float|double|long|short|unsigned|signed|size_t|auto|const|struct|union|enum';
+
+            // This regex tries to fix "Type * var"
+            // Since js-beautify puts space around binary operators, it might treat * as binary multiplication if context is ambiguous.
+            // But for declarations "int * p", it will likely be "int * p".
+            // We want "int *p".
+            beautified = beautified.replace(new RegExp(`\\b(${types})\\s*\\*+\\s+(\\w+)`, 'g'), (match: string, type: string, varName: string) => {
+                // Check if it's actually multiplication? No, because we matched a Type keyword.
+                return match.replace(/\s*\*\s*/g, ' *');
+            });
+
+            // Handle struct pointers: struct Item * item -> struct Item *item
+            beautified = beautified.replace(/\b(struct|union|enum)\s+(\w+)\s*\*\s+(\w+)/g, '$1 $2 *$3');
+
+            // 2. Restore Masks
+            formatted = beautified.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
+                return masks[parseInt(index)];
+            });
+
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format C: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
+
+        if (!validationMessage) {
+             validationMessage = "Deep formatting failed. Applied resilient fallback.";
+        }
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 
