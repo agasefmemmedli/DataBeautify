@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
+import { formatPythonDeep } from './python_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -1691,34 +1692,63 @@ export async function handleIPYNB(editor: vscode.TextEditor, text: string) {
             notebook = JSON.parse(repairedText);
         }
 
+        // Deep Formatting for Cells
         if (notebook.cells && Array.isArray(notebook.cells)) {
-            notebook.cells.forEach((cell: any) => {
-                if (cell.cell_type === 'code' && cell.source) {
-                    let source: string;
-                    let isArray = false;
-                    if (Array.isArray(cell.source)) {
+            // We need Prettier for Markdown cells
+            let prettier: any;
+            try {
+                prettier = await import('prettier');
+            } catch (e) {
+                console.warn('Prettier not available for Markdown cells inside Notebook.');
+            }
+
+            for (const cell of notebook.cells) {
+                if (cell.source) {
+                    let source = '';
+                    let isArray = Array.isArray(cell.source);
+
+                    if (isArray) {
                         source = cell.source.join('');
-                        isArray = true;
                     } else {
                         source = cell.source;
                     }
 
-                    // We need formatPythonCore here. It's in scripting_compiled.ts
-                    // But we can duplicate it or move it to utils.
-                    // To avoid circular dependency or import issues, I'll inline a simple version or
-                    // move it to utils in the next step.
-                    // For now, I'll duplicate the simple logic to be safe and fast.
-                    const formattedSource = formatPythonCoreLocal(source);
+                    let formattedSource = source;
 
+                    if (cell.cell_type === 'code') {
+                        try {
+                            formattedSource = formatPythonDeep(source);
+                        } catch (e: any) {
+                            console.warn('Failed to format Python cell:', e);
+                        }
+                    } else if (cell.cell_type === 'markdown' && prettier) {
+                        try {
+                            formattedSource = await prettier.format(source, {
+                                parser: "markdown",
+                                tabWidth: 2,
+                                useTabs: false,
+                                proseWrap: "preserve",
+                                printWidth: 80,
+                            });
+                        } catch (e: any) {
+                            console.warn('Failed to format Markdown cell:', e);
+                        }
+                    }
+
+                    // Convert back to array of strings if needed (Jupyter convention: lines end with \n)
                     if (isArray) {
-                        // Split back into array of strings, matching Jupyter standard
                         const lines = formattedSource.split('\n');
-                        cell.source = lines.map((line, i) => i < lines.length - 1 ? line + '\n' : line);
+                        cell.source = lines.map((line, i) => {
+                            if (i < lines.length - 1) {
+                                return line + '\n';
+                            }
+                            return line;
+                        });
                     } else {
                         cell.source = formattedSource;
                     }
                 }
-            });
+            }
         }
 
         // Jupyter notebooks standardly use 1-space indentation for JSON
@@ -1753,45 +1783,4 @@ function validateIPYNB(text: string): string | undefined {
         return `Invalid JSON structure: ${e.message}`;
     }
     return undefined;
-}
-
-// Local copy of python formatter for IPYNB to avoid cross-module dependency on scripting_compiled
-function formatPythonCoreLocal(text: string): string {
-    const lines = text.split('\n');
-    const formattedLines: string[] = [];
-    let indentLevel = 0;
-    let forceNextIndent = false;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        if (trimmed === '') {
-            formattedLines.push('');
-            continue;
-        }
-
-        const deindentKeywords = ['elif ', 'elif:', 'else:', 'except ', 'except:', 'finally:'];
-        const shouldDeindent = deindentKeywords.some(kw => trimmed.startsWith(kw));
-
-        if (shouldDeindent) {
-            indentLevel = Math.max(0, indentLevel - 1);
-        } else if (!forceNextIndent) {
-            const userIndent = line.length - line.trimStart().length;
-            const userLevel = Math.floor(userIndent / 4);
-            if (userLevel < indentLevel) {
-                indentLevel = userLevel;
-            }
-        }
-
-        formattedLines.push('    '.repeat(indentLevel) + trimmed);
-
-        if (trimmed.endsWith(':')) {
-            indentLevel++;
-            forceNextIndent = true;
-        } else {
-            forceNextIndent = false;
-        }
-    }
-    return formattedLines.join('\n');
 }
