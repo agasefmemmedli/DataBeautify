@@ -53,9 +53,21 @@ export async function handleSVG(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const { XMLValidator } = require('fast-xml-parser');
     const xmlFormatter = require('xml-formatter');
+
+    // Lazy load Prettier
+    let prettier: any;
+    try {
+        prettier = await import('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate SVG (as XML)
     const result = XMLValidator.validate(text);
@@ -64,16 +76,42 @@ export async function handleSVG(editor: vscode.TextEditor, text: string) {
     }
 
     try {
-        // Format SVG using xml-formatter
-        formatted = xmlFormatter(text, {
-            indentation: '  ',
-            collapseContent: true,
-            lineSeparator: '\n',
-            whiteSpaceAtEndOfSelfclosingTag: true
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier (SVG is handled by HTML parser in Prettier)
+        formatted = await format(text, {
+            parser: 'html',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false,
+            htmlWhitespaceSensitivity: 'ignore' // Helps with indentation
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format SVG: ${error.message}`);
-        return;
+
+    } catch (prettierError: any) {
+        // Fallback to xml-formatter
+        try {
+            formatted = xmlFormatter(text, {
+                indentation: insertSpaces ? ' '.repeat(tabSize) : '\t',
+                collapseContent: true,
+                lineSeparator: '\n',
+                whiteSpaceAtEndOfSelfclosingTag: true
+            });
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (xmlError: any) {
+            vscode.window.showErrorMessage(`Failed to format SVG: ${xmlError.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);
