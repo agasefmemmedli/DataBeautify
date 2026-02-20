@@ -1,80 +1,97 @@
+
 import Foundation
+import UIKit
+import SwiftUI
 
-@available(iOS 13.0, *)
-struct User: Codable, Identifiable {
-var id: UUID
-    var name: String
-        var email: String?
-
-    var computed: String {
-        return name.uppercased()
-    }
-
-    var observer: Int = 0 {
-        didSet {
-            print("Changed from \(oldValue) to \(observer)")
-        }
-    }
+@discardableResult
+func perform(action: () -> Void) -> Bool {
+    action()
+    return true
 }
 
-enum State {
-case active, inactive, pending
-    case error(String)
+struct User {
+    let name: String
+    let age: Int
 }
 
-    protocol Service {
-func fetch() async throws -> [User]
-}
+class Manager {
+    var users: [User] = []
 
-class APIService: Service {
-    func fetch() async throws -> [User] {
-        guard let url = URL(string: "https://api.example.com/users") else {
-            throw URLError(.badURL)
-        }
-
-let (data, _) = try await URLSession.shared.data(from: url)
-        return try JSONDecoder().decode([User].self, from: data)
-    }
-
-    func complex(
-        param1: String,
-            param2: Int,
-        completion: @escaping (Result<String, Error>) -> Void
-    ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self = self else { return }
-            if param2 > 10 {
-                completion(.success("Done"))
-            } else {
-completion(.failure(NSError(domain: "Test", code: 1)))
-            }
-        }
+    func addUser(name: String, age: Int) {
+        let user = User(name: name, age: age)
+        users.append(user)
     }
 }
 
 // Extension
-extension String {
-    var localized: String {
-        return NSLocalizedString(self, comment: "")
+extension Manager {
+    func findUser(byName name: String) -> User? {
+        // Guard
+        guard !users.isEmpty else {
+            return nil
+        }
+
+        // Loop
+        for user in users {
+            if user.name == name {
+                return user
+            }
+        }
+        return nil
     }
 }
 
-let users = [User(id: UUID(), name: "Alice"), User(id: UUID(), name: "Bob")]
-let names = users.map { $0.name }
-    .filter { !$0.isEmpty }
-        .sorted()
+// Switch
+enum Status {
+    case active
+    case inactive
+    case unknown
+}
 
-func testRanges() {
-    for i in 0 ..< 10 {
-        print(i)
-    }
-    for i in 0 ... 10 {
-        print(i)
+func checkStatus(_ status: Status) {
+    switch status {
+    case .active:
+        print("Active")
+    case .inactive:
+        print("Inactive")
+    default:
+        print("Unknown")
     }
 }
 
-func testOptionals() {
-    let x: Int? = nil
-    let y = x ?? 0
-    let z = x!
+// Complex Case
+func complexSwitch(val: Any) {
+    switch val {
+    case let x where x is [String: Int]:
+        print("Dictionary")
+    case let str as String where str == "test":
+        print("String test")
+    default:
+        break
+    }
+}
+
+// Generics vs Operators
+func testGenerics() {
+    let arr: Array<Int> = []
+    let count = 5
+    if count < 10 {
+        print("Less")
+    }
+    if count > 0 {
+        print("Greater")
+    }
+}
+
+// Strings
+let multiline = """
+    This is a
+    multiline string
+    """
+
+let interpolated = "Hello \(1 + 1)"
+
+// Trailing closure
+perform {
+    print("Done")
 }
