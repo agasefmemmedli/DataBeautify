@@ -1305,48 +1305,182 @@ export async function handleLog(editor: vscode.TextEditor, text: string) {
     // Validate Log
     validationMessage = validateLog(text);
 
-    // Resilient formatting logic
+    // Resilient Deep Formatting logic
     try {
         const lines = text.split('\n');
-        const formattedLines: string[] = [];
 
-        // Common timestamp patterns
-        const timestampRegex = /^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?/;
-        const logLevelRegex = /\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|TRACE|CRITICAL)\b/i;
+        // Data structure to hold parsed lines
+        interface LogLine {
+            type: 'entry' | 'continuation';
+            raw: string;
+            timestamp?: string;
+            level?: string;
+            message?: string;
+            indent?: number; // for continuation lines
+        }
+
+        const parsedLines: LogLine[] = [];
+
+        // 1. Parsing Pass
+        // Robust timestamp regex:
+        // - ISO8601: 2023-10-27T10:00:00.000Z or 2023-10-27 10:00:00
+        // - Common: Oct 27 10:00:00
+        // - Time only: 10:00:00
+        // - Surrounded by brackets []
+        const timestampRegex = /^(\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{2}:\d{2}:\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?)\s*/;
+        const logLevelRegex = /^\s*(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|TRACE|CRITICAL|NOTICE|ALERT|EMERG)\b/i;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
             if (trimmed === '') {
-                formattedLines.push('');
+                parsedLines.push({ type: 'entry', raw: '', message: '' });
                 continue;
             }
 
-            const tsMatch = line.match(timestampRegex);
+            const tsMatch = trimmed.match(timestampRegex);
             if (tsMatch) {
-                // It's a new log entry
-                let processedLine = line;
+                // Potential new entry
+                const timestamp = tsMatch[1];
+                let rest = trimmed.substring(tsMatch[0].length);
 
-                // Align log level if present
-                const levelMatch = processedLine.match(logLevelRegex);
+                // Check for Level
+                let level = '';
+                const levelMatch = rest.match(logLevelRegex);
                 if (levelMatch) {
-                    const level = levelMatch[1].toUpperCase();
-                    const paddedLevel = `[${level.padEnd(7)}]`;
-                    processedLine = processedLine.replace(levelMatch[0], paddedLevel);
+                    level = levelMatch[1];
+                    rest = rest.substring(levelMatch[0].length).trim();
                 }
 
-                formattedLines.push(processedLine.trimEnd());
+                parsedLines.push({
+                    type: 'entry',
+                    raw: line,
+                    timestamp: timestamp,
+                    level: level,
+                    message: rest
+                });
             } else {
-                // It's a continuation line (e.g., stack trace)
-                // Indent by 4 spaces if it's not already indented or doesn't look like a log start
-                if (!line.startsWith('    ') && !line.startsWith('\t')) {
-                    formattedLines.push('    ' + trimmed);
-                } else {
-                    formattedLines.push(line.trimEnd());
-                }
+                // Continuation line (Stack trace, JSON dump continuation, etc.)
+                // Determine indentation
+                // If the line starts with whitespace, preserve relative indentation?
+                // Or force standard indentation?
+                // Deep formatting: Standardize indentation to 4 spaces or align with message column.
+                // We'll calculate alignment later. For now mark it.
+                parsedLines.push({
+                    type: 'continuation',
+                    raw: line,
+                    message: trimmed
+                });
             }
         }
+
+        // 2. Alignment Calculation
+        let maxTsWidth = 0;
+        let maxLevelWidth = 0;
+
+        parsedLines.forEach(l => {
+            if (l.type === 'entry') {
+                if (l.timestamp && l.timestamp.length > maxTsWidth) maxTsWidth = l.timestamp.length;
+                if (l.level && l.level.length > maxLevelWidth) maxLevelWidth = l.level.length;
+            }
+        });
+
+        // 3. Formatting & JSON Processing
+        const formattedLines: string[] = [];
+        const indentString = '    '; // Standard indent for continuations
+
+        for (let i = 0; i < parsedLines.length; i++) {
+            const l = parsedLines[i];
+
+            if (l.type === 'entry') {
+                if (!l.timestamp && !l.level && !l.message) {
+                    formattedLines.push('');
+                    continue;
+                }
+
+                let lineStr = '';
+
+                // Timestamp
+                if (l.timestamp) {
+                    lineStr += l.timestamp.padEnd(maxTsWidth);
+                }
+
+                // Level
+                if (l.level) {
+                    // Normalize Level: Uppercase and surround with brackets if standard?
+                    // Let's just uppercase and pad.
+                    // If timestamp exists, add space separator
+                    if (l.timestamp) lineStr += ' ';
+
+                    const normalizedLevel = l.level.toUpperCase();
+                    // Optional: wrap in brackets if not already?
+                    // Many logs use [INFO]. If we want to standardize, we could.
+                    // But let's respect the regex extraction which might have stripped brackets if not careful.
+                    // The regex `logLevelRegex` matches WORDS. So `[INFO]` would be parsed as `INFO` if we handled brackets in regex.
+                    // But we didn't handle brackets in `logLevelRegex` explicitly before the word.
+                    // Let's check if the original had brackets.
+                    // Actually, let's just output padded level.
+                    // To be really "Deep", let's wrap level in [] if it's standard style.
+                    // But maybe simple alignment is safer.
+                    // Let's just PAD the level.
+
+                    lineStr += `[${normalizedLevel}]`.padEnd(maxLevelWidth + 2); // +2 for brackets
+                } else if (maxLevelWidth > 0) {
+                     // Empty level column
+                     if (l.timestamp) lineStr += ' ';
+                     lineStr += ' '.repeat(maxLevelWidth + 2);
+                }
+
+                // Message & JSON
+                let message = l.message || '';
+
+                // JSON Detection and Formatting
+                // Check if message contains potential JSON
+                const jsonStartIndex = message.search(/[\{\[]/);
+                if (jsonStartIndex !== -1) {
+                    const potentialJson = message.substring(jsonStartIndex);
+                    // Check if it ends with } or ] (basic heuristic before parsing)
+                    if ((potentialJson.startsWith('{') && potentialJson.endsWith('}')) ||
+                        (potentialJson.startsWith('[') && potentialJson.endsWith(']'))) {
+                        try {
+                            const parsed = JSON.parse(potentialJson);
+                            // Pretty print JSON
+                            const jsonStr = JSON.stringify(parsed, null, 2);
+                            const jsonLines = jsonStr.split('\n');
+
+                            const prefix = message.substring(0, jsonStartIndex);
+                            // First line: Prefix + JSON start
+                            message = prefix + jsonLines[0];
+
+                            // Construct the main line
+                            formattedLines.push((lineStr + ' ' + message).trimEnd());
+
+                            // Push the rest of JSON as continuation
+                            for (let j = 1; j < jsonLines.length; j++) {
+                                 // Align with JSON start?
+                                 // Calculate prefix length including alignment
+                                 const alignmentPadding = ' '.repeat(lineStr.length + 1 + prefix.length);
+                                 formattedLines.push(alignmentPadding + jsonLines[j]);
+                            }
+                            continue; // Skip standard push
+                        } catch (e) {
+                            // Not valid JSON, ignore
+                        }
+                    }
+                }
+
+                formattedLines.push((lineStr + ' ' + message).trimEnd());
+
+            } else {
+                // Continuation
+                // Indent relative to previous line's message start?
+                // Or just fixed indentation?
+                // Fixed indentation is safer for stack traces.
+                formattedLines.push(indentString + l.message);
+            }
+        }
+
         formatted = formattedLines.join('\n');
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Log: ${error.message}`);
@@ -1367,9 +1501,10 @@ export async function handleLog(editor: vscode.TextEditor, text: string) {
  */
 function validateLog(text: string): string | undefined {
     const lines = text.split('\n');
-    const timestampRegex = /\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?/;
+    // Enhanced regex for validation
+    const timestampRegex = /(\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\]?)/;
 
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
         const line = lines[i].trim();
         if (line === '') continue;
 
