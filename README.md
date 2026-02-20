@@ -5,3 +5,4 @@
 - [x] Python (Deep Formatting Implemented)
 - [x] Rust (Deep Formatting Implemented)
 - [x] Java (Deep Formatting Implemented)
+- [x] C++ (Deep Formatting Implemented)
