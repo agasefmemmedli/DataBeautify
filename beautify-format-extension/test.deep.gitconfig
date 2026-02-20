@@ -1,0 +1,35 @@
+[user]
+	name = "John Doe"
+	email = john@example.com
+[core]
+    editor = code --wait
+    autocrlf = input
+[diff "image"]
+	command = "imgdiff"
+[alias]
+    co = checkout
+    ci = commit
+    st = status
+    br = branch
+    hist = log --pretty=format:\"%h %ad | %s%d [%an]\" --graph --date=short
+    type = cat-file -t
+    dump = cat-file -p
+[merge]
+    tool = vscode
+[mergetool "vscode"]
+    cmd = code --wait $MERGED
+[remote "origin"]
+    url = https://github.com/user/repo.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+    remote = origin
+    merge = refs/heads/master
+# This is a comment
+; Another comment
+[section "sub section"]
+    key = value with \# hash
+    multiline = line1 \
+                line2 \
+                line3
+    escaped = "quote \" inside"
+    path = C:\\Program Files\\App
