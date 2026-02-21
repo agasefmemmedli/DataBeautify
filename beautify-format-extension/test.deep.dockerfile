@@ -5,10 +5,13 @@ from node:${NODE_VERSION}-alpine as builder
 # maintainer is deprecated but should still be handled
 maintainer John Doe <john@example.com>
 
+# Sorting test: should be sorted alphabetically
 run apk add --no-cache \
     python3 \
 make \
-    g++
+    g++ \
+    bash \
+    curl
 
 workdir /app
 
