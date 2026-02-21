@@ -21,3 +21,4 @@
 - [x] JSON (Deep Formatting Implemented)
 - [x] GraphQL (Deep Formatting Implemented)
 - [x] TOML (Deep Formatting Implemented)
+- [x] HTML (Deep Formatting Implemented)

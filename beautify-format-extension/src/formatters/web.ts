@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPHPDeep } from './php_deep_formatter';
 import { formatXMLDeep } from './xml_deep_formatter';
+import { formatHTMLDeep } from './html_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -195,31 +196,41 @@ export async function handleHTML(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        /* eslint-disable */
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            // Format HTML
-            formatted = jsbeautify.html(text, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                max_preserve_newlines: 1, // Stricter vertical spacing
-                preserve_newlines: true,
-                indent_scripts: 'normal', // Indent script content
-                end_with_newline: true, // Ensure file ends with newline (standard)
-                wrap_line_length: 120, // Enforce line length
-                indent_inner_html: true, // Indent <head> and <body> content
-                extra_liners: ['head', 'body', '/html', 'html', 'doctype'], // Ensure structural tags are on new lines
-                unformatted: ['a', 'span', 'img', 'code', 'pre', 'sub', 'sup', 'em', 'strong', 'b', 'i', 'u', 'strike', 'big', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], // Inline elements
-                wrap_attributes: 'force-aligned', // Wrap attributes if line is too long
-                wrap_attributes_indent_size: tabSize
+            formatted = formatHTMLDeep(text, {
+                tabSize: tabSize || 2,
+                insertSpaces: insertSpaces,
+                sortAttributes: true,
+                printWidth: 120
             });
             if (!validationMessage) {
-                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format HTML: ${error.message}`);
-            return;
+        } catch (deepError: any) {
+            /* eslint-disable */
+            try {
+                // Format HTML
+                formatted = jsbeautify.html(text, {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    max_preserve_newlines: 1, // Stricter vertical spacing
+                    preserve_newlines: true,
+                    indent_scripts: 'normal', // Indent script content
+                    end_with_newline: true, // Ensure file ends with newline (standard)
+                    wrap_line_length: 120, // Enforce line length
+                    indent_inner_html: true, // Indent <head> and <body> content
+                    extra_liners: ['head', 'body', '/html', 'html', 'doctype'], // Ensure structural tags are on new lines
+                    unformatted: ['a', 'span', 'img', 'code', 'pre', 'sub', 'sup', 'em', 'strong', 'b', 'i', 'u', 'strike', 'big', 'small', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], // Inline elements
+                    wrap_attributes: 'force-aligned', // Wrap attributes if line is too long
+                    wrap_attributes_indent_size: tabSize
+                });
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Failed to format HTML: ${deepError.message}`);
+                return;
+            }
+            /* eslint-enable */
         }
-        /* eslint-enable */
     }
 
     await applyEdit(editor, formatted);
