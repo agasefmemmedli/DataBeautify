@@ -11,3 +11,4 @@
 - [x] Swift (Deep Formatting Implemented)
 - [x] SCSS (Deep Formatting Implemented)
 - [x] LESS (Deep Formatting Implemented)
+- [x] Dockerfile (Deep Formatting Implemented)

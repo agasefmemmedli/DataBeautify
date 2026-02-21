@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
+import { formatDockerfileDeep } from './dockerfile_deep_formatter';
 
 /**
  * Handle Dockerfile formatting and validation
@@ -13,106 +14,7 @@ export async function handleDockerfile(editor: vscode.TextEditor, text: string) 
 
     // Deep formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let isMultiline = false;
-        let lastWasEmpty = false;
-
-        const instructions = new Set([
-            'FROM', 'RUN', 'COPY', 'ADD', 'WORKDIR', 'EXPOSE', 'ENTRYPOINT',
-            'CMD', 'ENV', 'ARG', 'LABEL', 'USER', 'VOLUME', 'STOPSIGNAL',
-            'HEALTHCHECK', 'ONBUILD', 'MAINTAINER', 'SHELL'
-        ]);
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                if (!lastWasEmpty && formattedLines.length > 0) {
-                    formattedLines.push('');
-                    lastWasEmpty = true;
-                }
-                continue;
-            }
-            lastWasEmpty = false;
-
-            if (trimmed.startsWith('#')) {
-                formattedLines.push(trimmed);
-                continue;
-            }
-
-            let currentLine = trimmed;
-            if (!isMultiline) {
-                // Check if line starts with an instruction
-                const parts = trimmed.split(/\s+/);
-                const firstWord = parts[0].toUpperCase();
-
-                if (instructions.has(firstWord)) {
-                    // Special handling for JSON array arguments in CMD and ENTRYPOINT
-                    if ((firstWord === 'CMD' || firstWord === 'ENTRYPOINT') && /^\s*\[/.test(trimmed.substring(firstWord.length))) {
-                         // Attempt to fix single quotes to double quotes for valid JSON
-                         let args = trimmed.substring(firstWord.length).trim();
-                         // Simple heuristic: if it looks like ['a', 'b'], replace ' with "
-                         if (args.startsWith('[') && args.endsWith(']')) {
-                         // Safer replacement: only replace single quotes if they wrap content WITHOUT quotes or backslashes
-                         // e.g. ['a', 'b'] -> ["a", "b"]
-                         // but ['a\'b'] -> unchanged
-                         args = args.replace(/'([^'"\\]*)'/g, '"$1"');
-                         }
-                         currentLine = `${firstWord} ${args}`;
-                    } else {
-                        // Normalize instruction case
-                        const rest = trimmed.substring(firstWord.length).trim();
-                        currentLine = `${firstWord} ${rest}`;
-                    }
-                } else {
-                    // Not a known instruction, maybe a continuation or unknown directive
-                    // Keep as is, or uppercase first word if it looks like an instruction?
-                    // Better keep as is to be safe.
-                }
-
-                formattedLines.push(currentLine);
-            } else {
-                // Indent multiline continuation
-                formattedLines.push('    ' + trimmed);
-            }
-
-            // Check if this line ends with a backslash for multiline support
-            isMultiline = trimmed.endsWith('\\');
-        }
-
-        // Pass 2: Ensure empty lines before FROM blocks and attach comments
-        const finalLines = [...formattedLines];
-        for (let i = 0; i < finalLines.length; i++) {
-            if (finalLines[i].startsWith('FROM ')) {
-                // Determine block start (include preceding attached comments)
-                let j = i - 1;
-                while (j >= 0) {
-                    const line = finalLines[j];
-                    if (line.trim().startsWith('#')) {
-                        j--;
-                    } else if (line.trim() === '') {
-                        // Empty line breaks attachment
-                        break;
-                    } else {
-                        // Other instruction breaks attachment
-                        break;
-                    }
-                }
-                const blockStart = j + 1;
-
-                // Ensure empty line before blockStart (if not at very beginning)
-                if (blockStart > 0) {
-                     if (finalLines[blockStart - 1].trim() !== '') {
-                         finalLines.splice(blockStart, 0, '');
-                         i++; // Adjust index since we inserted a line
-                     }
-                }
-            }
-        }
-
-        formatted = finalLines.join('\n');
+        formatted = formatDockerfileDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Dockerfile: ${error.message}`);
         return;
