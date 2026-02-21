@@ -283,32 +283,58 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
         validationMessage = e.message;
     }
 
-    // Deep Formatting logic
+    // Deep Formatting logic (Vertical Alignment)
     try {
         const lines = text.split('\n');
         const formattedLines: string[] = [];
+
+        let sectionBuffer: { type: string, raw: string, key?: string, value?: string, comment?: string }[] = [];
+
+        const processBuffer = () => {
+            if (sectionBuffer.length === 0) return;
+
+            // Calculate max key length in this buffer
+            let maxKeyLen = 0;
+            sectionBuffer.forEach(item => {
+                if (item.type === 'property' && item.key) {
+                    if (item.key.length > maxKeyLen) maxKeyLen = item.key.length;
+                }
+            });
+
+            // Output buffer
+            sectionBuffer.forEach(item => {
+                if (item.type === 'property' && item.key) {
+                    const padding = ' '.repeat(maxKeyLen - item.key.length);
+                    let line = `${item.key}${padding} = ${item.value}`;
+                    if (item.comment) {
+                        line += ` ${item.comment}`;
+                    }
+                    formattedLines.push(line);
+                } else {
+                    formattedLines.push(item.raw);
+                }
+            });
+            sectionBuffer = [];
+        };
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
 
             if (trimmed === '') {
-                // Only add blank line if the previous line is not blank
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
+                // Empty line acts as separator for visual grouping?
+                // Or just preserve?
+                // If we want alignment across the whole section including empty lines, buffer it.
+                // But typically empty line resets alignment context in many formatters?
+                // Let's stick to: Alignment is per Section. Empty lines don't break alignment within section.
+                sectionBuffer.push({ type: 'empty', raw: '' });
                 continue;
             }
 
-            // Handle comments
-            if (trimmed.startsWith(';') || trimmed.startsWith('#')) {
-                formattedLines.push(trimmed);
-                continue;
-            }
-
-            // Handle sections [section]
+            // Section Header
             if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-                // Ensure blank line before section if not at the start
+                processBuffer(); // Flush previous section
+                // Ensure blank line before section if not start
                 if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
                     formattedLines.push('');
                 }
@@ -316,6 +342,13 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
                 continue;
             }
 
+            // Comment
+            if (trimmed.startsWith(';') || trimmed.startsWith('#')) {
+                sectionBuffer.push({ type: 'comment', raw: trimmed });
+                continue;
+            }
+
+            // Property
             // Handle key = value
             let splitIdx = -1;
             const eqIdx = trimmed.indexOf('=');
@@ -329,7 +362,6 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
 
             if (splitIdx > 0) {
                 const key = trimmed.substring(0, splitIdx).trim();
-                const separator = '='; // Standardize to '='
                 const valuePart = trimmed.substring(splitIdx + 1).trim();
 
                 // Check for inline comments
@@ -355,16 +387,17 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
                 if (commentStart !== -1) {
                     const value = valuePart.substring(0, commentStart).trim();
                     const comment = valuePart.substring(commentStart).trim();
-                    formattedLines.push(`${key} ${separator} ${value} ${comment}`);
+                    sectionBuffer.push({ type: 'property', raw: line, key, value, comment });
                 } else {
-                    formattedLines.push(`${key} ${separator} ${valuePart}`);
+                    sectionBuffer.push({ type: 'property', raw: line, key, value: valuePart });
                 }
-                continue;
+            } else {
+                // Unknown
+                sectionBuffer.push({ type: 'unknown', raw: trimmed });
             }
-
-            // Fallback
-            formattedLines.push(trimmed);
         }
+
+        processBuffer(); // Flush remaining
 
         // Remove trailing empty lines
         while (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] === '') {
