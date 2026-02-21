@@ -1884,6 +1884,52 @@ function validateCSharp(text: string): string | undefined {
     return undefined;
 }
 
+function sortKotlinImports(text: string): string {
+    const lines = text.split('\n');
+    const importLines: string[] = [];
+    const otherLines: string[] = [];
+
+    for (const line of lines) {
+        if (line.trim().startsWith('import ')) {
+            importLines.push(line);
+        } else {
+            otherLines.push(line);
+        }
+    }
+
+    if (importLines.length === 0) return text;
+
+    importLines.sort((a, b) => a.trim().localeCompare(b.trim()));
+
+    let insertIdx = 0;
+    for (let i = 0; i < otherLines.length; i++) {
+        if (otherLines[i].trim().startsWith('package ')) {
+            insertIdx = i + 1;
+            break;
+        }
+    }
+
+    const head = otherLines.slice(0, insertIdx);
+    const tail = otherLines.slice(insertIdx);
+
+    while (tail.length > 0 && tail[0].trim() === '') {
+        tail.shift();
+    }
+    while (head.length > 0 && head[head.length - 1].trim() === '') {
+        head.pop();
+    }
+
+    const result = [
+        ...head,
+        '',
+        ...importLines,
+        '',
+        ...tail
+    ];
+
+    return result.join('\n').replace(/^\n+/, '');
+}
+
 /**
  * Handle Kotlin formatting and validation
  */
@@ -1893,6 +1939,9 @@ export async function handleKotlin(editor: vscode.TextEditor, text: string) {
 
     // Validate Kotlin using custom resilient validator
     validationMessage = validateKotlin(text);
+
+    // Deep Formatting: Sort Imports
+    text = sortKotlinImports(text);
 
     // Try Deep Formatting with Prettier (Kotlin Plugin)
     try {

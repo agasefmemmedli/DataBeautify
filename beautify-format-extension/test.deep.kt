@@ -1,8 +1,9 @@
 
 package com.example.deep.formatting
 
-import java.util.Date
 import kotlin.collections.*
+import java.util.Date
+import com.example.deep.formatting.User
 
 @Deprecated("Use new formatting")
 data class User(val id: Int, var name: String, val email: String? = null)

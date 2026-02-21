@@ -22,3 +22,4 @@
 - [x] TOML (Deep Formatting Implemented)
 - [x] HTML (Deep Formatting Implemented)
 - [x] Markdown (Deep Formatting Implemented)
+- [x] Kotlin (Deep Formatting Implemented)
