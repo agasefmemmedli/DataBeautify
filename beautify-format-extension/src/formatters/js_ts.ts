@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
+import { formatJSONDeep } from './json_deep_formatter';
 
 // Helper to load Prettier and Sort Imports Plugin
 async function loadPrettier() {
@@ -432,7 +433,6 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { parse, ParseError } = require('jsonc-parser');
-    const jsbeautify = require('js-beautify');
 
     const { prettier } = await loadPrettier();
 
@@ -457,31 +457,14 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
             endOfLine: 'lf'
         });
     } catch (prettierError: any) {
-        // Fallback to js-beautify
+        // Fallback to Custom Deep Formatter (jsonc-parser)
         try {
-             formatted = jsbeautify.js(text, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                indent_with_tabs: !insertSpaces,
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse,preserve-inline',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: true,
-                wrap_line_length: 120,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            });
-             if (!validationMessage) {
-                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            formatted = formatJSONDeep(text, { tabSize, insertSpaces });
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (beautifyError: any) {
-            vscode.window.showErrorMessage(`Failed to format JSONC: ${beautifyError.message}`);
+        } catch (deepError: any) {
+            vscode.window.showErrorMessage(`Failed to format JSONC: ${deepError.message}`);
             return;
         }
     }
@@ -508,7 +491,6 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { jsonrepair } = require('jsonrepair');
-    const jsbeautify = require('js-beautify');
 
     const { prettier } = await loadPrettier();
 
@@ -549,22 +531,14 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
 
             repairMessage = originalError.message;
         } catch (repairError: any) {
-            // Fallback to js-beautify if Prettier fails on repaired text (unlikely but possible)
-             try {
-                 // Try to format original text with fault tolerance of js-beautify
-                formatted = jsbeautify.js(text, {
-                    indent_size: tabSize,
-                    indent_char: insertSpaces ? ' ' : '\t',
-                    indent_with_tabs: !insertSpaces,
-                    preserve_newlines: false,
-                    brace_style: 'collapse',
-                    wrap_line_length: 120
-                });
-                repairMessage = `Prettier failed, using fallback. ${originalError.message}`;
-             } catch (beautifyError: any) {
+            // Fallback to Custom Deep Formatter (jsonc-parser)
+            try {
+                formatted = formatJSONDeep(text, { tabSize, insertSpaces });
+                repairMessage = `Prettier failed, using resilient formatter. ${originalError.message}`;
+            } catch (deepError: any) {
                 vscode.window.showErrorMessage(`Failed to format JSON. Original error: ${originalError.message}`);
                 return;
-             }
+            }
         }
     }
 

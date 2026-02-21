@@ -18,3 +18,4 @@
 - [x] PHP (Deep Formatting Implemented)
 - [x] INI (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
+- [x] JSON (Deep Formatting Implemented)
