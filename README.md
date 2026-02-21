@@ -16,3 +16,4 @@
 - [x] Vue (Deep Formatting Implemented)
 - [x] SQL (Deep Formatting Implemented)
 - [x] PHP (Deep Formatting Implemented)
+- [x] INI (Deep Formatting Implemented)
