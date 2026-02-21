@@ -1,32 +1,46 @@
 // Variables
-@width:10px;
-@height:@width+10px;
+@primary-color: #4D926F;
+@base-color: #333;
 
 // Mixins
-.bordered(@color:black){
-border:1px solid @color;
-&:hover{
-border-color:white;
-}
-}
-
-// Nested rules
-#header{
-color:black;
-.navigation{
-font-size:12px;
-}
-.logo{
-width:300px;
-}
+.rounded-corners (@radius: 5px) {
+  -webkit-border-radius: @radius;
+  -moz-border-radius: @radius;
+  -ms-border-radius: @radius;
+  -o-border-radius: @radius;
+  border-radius: @radius;
 }
 
-// Loops
-.generate-columns(4);
-
-.generate-columns(@n,@i:1) when (@i=<@n){
-.column-@{i}{
-width:(@i * 100% / @n);
+// Nested Rules
+#header {
+  color: @primary-color;
+  .navigation {
+    font-size: 12px;
+  }
+  .logo {
+    width: 300px;
+    &:hover {
+      text-decoration: none;
+    }
+  }
 }
-.generate-columns(@n,(@i + 1));
+
+// Operators
+@the-border: 1px;
+@base-color: #111;
+@red: #842210;
+
+#footer {
+  color: (@base-color * 3);
+  border-color: desaturate(@red, 10%);
+}
+
+// Functions
+.average(@x, @y) {
+  @average: ((@x + @y) / 2);
+}
+
+div {
+  .average(16px, 50px);
+  padding: @average;
 }
