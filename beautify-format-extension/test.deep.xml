@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<root xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="main" class="container" xsi:noNamespaceSchemaLocation="schema.xsd">
+    <!-- This is a comment -->
+    <element name="item1" id="i1" class="item" style="color: red;">
+        Content 1
+    </element>
+    <element style="color: blue;" class="item" name="item2" id="i2" longAttribute1="very long value to force wrapping of attributes in the output" longAttribute2="another very long value to ensure that the line length exceeds the limit">
+        <description><![CDATA[Some <b>bold</b> text inside CDATA]]></description>
+    </element>
+    <selfClosing id="s1" name="selfy" />
+    <nested>
+        <child>
+            <grandchild attr="val" />
+        </child>
+    </nested>
+    <café id="unicode" type="beverage">
+        <description>Unicode tag name test</description>
+    </café>
+</root>
