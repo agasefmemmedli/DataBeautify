@@ -5,226 +5,439 @@ interface CSSFormatterOptions {
     insertSpaces: boolean;
 }
 
+// AST Nodes
+interface Rule {
+    type: 'Rule';
+    selector: string;
+    children: Node[];
+}
+
+interface AtRule {
+    type: 'AtRule';
+    name: string; // e.g., @media
+    params: string; // e.g., screen and (min-width: 900px)
+    children?: Node[]; // Block content
+}
+
+interface Property {
+    type: 'Property';
+    name: string;
+    value: string;
+}
+
+interface Comment {
+    type: 'Comment';
+    value: string;
+}
+
+type Node = Rule | AtRule | Property | Comment;
+
 export function formatCSSDeep(text: string, options: CSSFormatterOptions = { tabSize: 2, insertSpaces: true }): string {
     const tokens = tokenize(text);
-    const indentString = options.insertSpaces ? ' '.repeat(options.tabSize) : '\t';
+    const nodes = parse(tokens);
+    const sortedNodes = sortNodes(nodes);
+    return print(sortedNodes, options).trim() + '\n';
+}
 
-    let formatted = '';
-    let indentLevel = 0;
+function parse(tokens: Token[]): Node[] {
+    const nodes: Node[] = [];
+    let i = 0;
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.Whitespace) {
+            i++;
+            continue;
+        }
+        if (t.type === TokenType.Comment) {
+            nodes.push({ type: 'Comment', value: t.value });
+            i++;
+            continue;
+        }
+        if (t.type === TokenType.AtKeyword) {
+            const res = parseAtRule(tokens, i);
+            nodes.push(res.node);
+            i = res.nextIndex;
+            continue;
+        }
+        if (t.type === TokenType.BraceClose) {
+            i++;
+            continue;
+        }
 
-    let buffer: Token[] = [];
-    let parenLevel = 0;
+        const res = parseRule(tokens, i);
+        nodes.push(res.node);
+        i = res.nextIndex;
+    }
+    return nodes;
+}
 
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
+function parseBlock(tokens: Token[], startIndex: number): { children: Node[], nextIndex: number } {
+    const children: Node[] = [];
+    let i = startIndex;
 
-        if (token.type === TokenType.ParenthesisOpen) parenLevel++;
-        if (token.type === TokenType.ParenthesisClose && parenLevel > 0) parenLevel--;
+    // Expect {
+    if (i < tokens.length && tokens[i].type === TokenType.BraceOpen) {
+        i++;
+    } else {
+        return { children, nextIndex: i };
+    }
 
-        if (token.type === TokenType.BraceOpen) {
-            // Start of Block
-            const selectorStr = formatSelector(buffer);
+    while (i < tokens.length) {
+        const t = tokens[i];
 
-            if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
-            if (formatted.trim().endsWith('}')) formatted += '\n';
+        if (t.type === TokenType.Whitespace) {
+            i++;
+            continue;
+        }
 
-            formatted += getIndent(indentLevel, indentString) + selectorStr;
-            if (selectorStr.length > 0) formatted += ' ';
-            formatted += '{\n';
+        if (t.type === TokenType.BraceClose) {
+            i++;
+            return { children, nextIndex: i };
+        }
 
-            indentLevel++;
-            buffer = [];
-        } else if (token.type === TokenType.BraceClose) {
-            // End of Block
-            if (buffer.length > 0) {
-                 const propStr = formatProperty(buffer);
-                 if (propStr.trim().length > 0) {
-                     formatted += getIndent(indentLevel, indentString) + propStr + '\n';
-                 }
-            }
-            buffer = [];
+        if (t.type === TokenType.Comment) {
+            children.push({ type: 'Comment', value: t.value });
+            i++;
+            continue;
+        }
 
-            if (indentLevel > 0) indentLevel--;
-            formatted += getIndent(indentLevel, indentString) + '}\n';
-        } else if (token.type === TokenType.Semicolon && parenLevel === 0) {
-            // End of Property
-            buffer.push(token);
-            const propStr = formatProperty(buffer);
-            if (propStr.trim().length > 0) {
-                formatted += getIndent(indentLevel, indentString) + propStr + '\n';
-            }
-            buffer = [];
-        } else if (token.type === TokenType.Comment) {
-             if (buffer.every(t => t.type === TokenType.Whitespace)) {
-                 // Standalone comment line (or buffer only has whitespace)
-                 buffer = []; // Clear whitespace
-                 formatted += getIndent(indentLevel, indentString) + token.value + '\n';
-             } else {
-                 buffer.push(token);
-             }
+        if (t.type === TokenType.AtKeyword) {
+            const res = parseAtRule(tokens, i);
+            children.push(res.node);
+            i = res.nextIndex;
+            continue;
+        }
+
+        const isRule = scanIsRule(tokens, i);
+        if (isRule) {
+            const res = parseRule(tokens, i);
+            children.push(res.node);
+            i = res.nextIndex;
         } else {
-            buffer.push(token);
+            const res = parseProperty(tokens, i);
+            children.push(res.node);
+            i = res.nextIndex;
         }
     }
 
-    if (buffer.length > 0) {
-        // Flush remaining
-        const str = formatProperty(buffer);
-        if (str.trim().length > 0) {
-            formatted += getIndent(indentLevel, indentString) + str + '\n';
-        }
-    }
-
-    return formatted;
+    return { children, nextIndex: i };
 }
 
-function getIndent(level: number, indentString: string): string {
-    return indentString.repeat(Math.max(0, level));
+function scanIsRule(tokens: Token[], startIndex: number): boolean {
+    let i = startIndex;
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.BraceOpen) return true;
+        if (t.type === TokenType.BraceClose) return false;
+        if (t.type === TokenType.Semicolon) return false;
+        i++;
+    }
+    return false;
 }
 
-function formatSelector(tokens: Token[]): string {
-    let result = '';
-    let hasSpace = false;
+function parseAtRule(tokens: Token[], startIndex: number): { node: AtRule, nextIndex: number } {
+    let i = startIndex;
+    const name = tokens[i].value;
+    i++;
 
-    // Trim leading/trailing whitespace tokens from buffer logic
-    // But buffer might contain them.
-
-    let meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace);
-    if (meaningfulTokens.length === 0) return '';
-
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
-
-        if (token.type === TokenType.Whitespace) {
-            hasSpace = true;
-            continue;
+    let paramsTokens: Token[] = [];
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.BraceOpen || t.type === TokenType.Semicolon || t.type === TokenType.BraceClose) {
+            break;
         }
-
-        // Decide if we output space before this token
-        if (result.length > 0) {
-            const prevTokenIndex = i - 1;
-            // Find actual previous non-whitespace token
-            let prevToken = tokens[prevTokenIndex];
-            let k = prevTokenIndex;
-            while (k >= 0 && prevToken.type === TokenType.Whitespace) {
-                k--;
-                prevToken = tokens[k];
-            }
-
-            if (prevToken) {
-                 if (shouldAddSpaceSelector(prevToken, token, hasSpace)) {
-                     result += ' ';
-                 }
-            }
-        }
-
-        result += token.value;
-        hasSpace = false;
+        paramsTokens.push(t);
+        i++;
     }
-    return result.trim();
+
+    const params = reconstruct(paramsTokens).trim();
+
+    if (i < tokens.length && tokens[i].type === TokenType.BraceOpen) {
+        const blockRes = parseBlock(tokens, i);
+        return {
+            node: { type: 'AtRule', name, params, children: blockRes.children },
+            nextIndex: blockRes.nextIndex
+        };
+    } else {
+        if (i < tokens.length && tokens[i].type === TokenType.Semicolon) {
+            i++;
+        }
+        return {
+            node: { type: 'AtRule', name, params },
+            nextIndex: i
+        };
+    }
 }
 
-function formatProperty(tokens: Token[]): string {
-    let result = '';
-    let hasSpace = false;
-    let firstColonFound = false;
-    let parenLevel = 0;
+function parseRule(tokens: Token[], startIndex: number): { node: Rule, nextIndex: number } {
+    let i = startIndex;
+    let selectorTokens: Token[] = [];
 
-    let meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace);
-    if (meaningfulTokens.length === 0) return '';
-
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
-
-        if (token.type === TokenType.Whitespace) {
-            hasSpace = true;
-            continue;
-        }
-
-        if (token.type === TokenType.ParenthesisOpen) parenLevel++;
-        if (token.type === TokenType.ParenthesisClose && parenLevel > 0) parenLevel--;
-
-        // Decide spacing
-        if (result.length > 0) {
-             const prevTokenIndex = i - 1;
-             let prevToken = tokens[prevTokenIndex];
-             let k = prevTokenIndex;
-             while (k >= 0 && prevToken.type === TokenType.Whitespace) {
-                 k--;
-                 prevToken = tokens[k];
-             }
-
-             if (prevToken) {
-                 if (shouldAddSpaceProperty(prevToken, token, hasSpace, firstColonFound)) {
-                     result += ' ';
-                 }
-             }
-        }
-
-        result += token.value;
-        hasSpace = false;
-
-        if (token.type === TokenType.Colon && !firstColonFound && parenLevel === 0) {
-            firstColonFound = true;
-        }
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.BraceOpen) break;
+        if (t.type === TokenType.BraceClose) break;
+        selectorTokens.push(t);
+        i++;
     }
-    return result.trim();
+
+    const selector = reconstructSelector(selectorTokens).trim();
+    const blockRes = parseBlock(tokens, i);
+
+    return {
+        node: { type: 'Rule', selector, children: blockRes.children },
+        nextIndex: blockRes.nextIndex
+    };
 }
 
-function shouldAddSpaceSelector(prev: Token, curr: Token, wasSpace: boolean): boolean {
-    // Comma always needs space after
-    if (prev.type === TokenType.Comma) return true;
+function parseProperty(tokens: Token[], startIndex: number): { node: Property, nextIndex: number } {
+    let i = startIndex;
+    let name = '';
 
-    // Dot/Hash
-    if (curr.type === TokenType.Dot || curr.type === TokenType.Hash) {
-        // Space before . or # implies descendant if wasSpace is true
-        // div .class vs div.class
-        return wasSpace;
-    }
-    if (prev.type === TokenType.Dot || prev.type === TokenType.Hash) {
-        // .class or #id -> No space even if wasSpace is true (fix bad formatting)
-        return false;
-    }
-
-    // Colon (Pseudo)
-    if (curr.type === TokenType.Colon) return false; // a:hover
-    if (prev.type === TokenType.Colon) return false; // :hover
-
-    // Operators (> + ~)
-    if (isOperator(prev) || isOperator(curr)) {
-        return true; // Force space around operators
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.Colon) {
+            i++;
+            break;
+        }
+        if (t.type === TokenType.Semicolon || t.type === TokenType.BraceClose || t.type === TokenType.BraceOpen) {
+            break;
+        }
+        if (t.type !== TokenType.Whitespace) {
+            name += t.value;
+        }
+        i++;
     }
 
-    // Words
-    if (wasSpace) return true; // Keep semantic space
+    let valTokens: Token[] = [];
+    while (i < tokens.length) {
+        const t = tokens[i];
+        if (t.type === TokenType.Semicolon) {
+            i++;
+            break;
+        }
+        if (t.type === TokenType.BraceClose || t.type === TokenType.BraceOpen) {
+            break;
+        }
+
+        if (isStartOfNewProperty(tokens, i)) {
+            break;
+        }
+
+        valTokens.push(t);
+        i++;
+    }
+
+    // Use reconstructValue for hex safety and zero units
+    let value = reconstructValue(valTokens).trim();
+    value = normalizeValue(value);
+
+    return {
+        node: { type: 'Property', name: name.trim(), value },
+        nextIndex: i
+    };
+}
+
+function isStartOfNewProperty(tokens: Token[], currentIndex: number): boolean {
+    let i = currentIndex;
+    while (i < tokens.length && tokens[i].type === TokenType.Whitespace) {
+        i++;
+    }
+
+    if (i >= tokens.length) return false;
+
+    const t = tokens[i];
+    if (t.type !== TokenType.Word) return false;
+
+    i++;
+    while (i < tokens.length && tokens[i].type === TokenType.Whitespace) {
+        i++;
+    }
+
+    if (i >= tokens.length) return false;
+
+    if (tokens[i].type === TokenType.Colon) {
+        return true;
+    }
 
     return false;
 }
 
-function shouldAddSpaceProperty(prev: Token, curr: Token, wasSpace: boolean, firstColonFound: boolean): boolean {
-    if (prev.type === TokenType.Comma) return true;
+function sortNodes(nodes: Node[]): Node[] {
+    const charsets: Node[] = [];
+    const imports: Node[] = [];
+    const others: Node[] = [];
 
-    // Colon
-    if (prev.type === TokenType.Colon && !firstColonFound) return true; // prop: val (Space after first colon)
+    for (const node of nodes) {
+        if (node.type === 'AtRule') {
+            if (node.name === '@charset') {
+                charsets.push(node);
+            } else if (node.name === '@import') {
+                imports.push(node);
+            } else {
+                others.push(node);
+            }
+        } else {
+            others.push(node);
+        }
+    }
 
-    // No space around other colons usually (url, progid)
-    if (prev.type === TokenType.Colon) return false;
-    if (curr.type === TokenType.Colon) return false;
+    imports.sort((a, b) => {
+        const pa = (a as AtRule).params || '';
+        const pb = (b as AtRule).params || '';
+        return pa.localeCompare(pb);
+    });
 
-    // !important
-    if (curr.type === TokenType.Operator && curr.value === '!') return true; // space before !
-    if (prev.type === TokenType.Operator && prev.value === '!') return false; // !important
-
-    // / separator
-    if (curr.type === TokenType.Operator && curr.value === '/') return false;
-    if (prev.type === TokenType.Operator && prev.value === '/') return false;
-
-    // Default operators
-    if (isOperator(prev) || isOperator(curr)) return true;
-
-    return wasSpace;
+    return [...charsets, ...imports, ...others];
 }
 
-function isOperator(token: Token): boolean {
-    return token.type === TokenType.Operator && token.value !== '!' && token.value !== '/';
+function normalizeValue(value: string): string {
+    return value.replace(/(^|[\s(,])0(px|em|rem|in|cm|mm|pt|pc|ex|ch|vw|vh|vmin|vmax)(?=$|[\s,);])/gi, '$10');
+}
+
+function reconstruct(tokens: Token[]): string {
+    let res = '';
+    for (const t of tokens) {
+        if (t.type === TokenType.Whitespace) {
+            res += ' ';
+        } else {
+            res += t.value;
+        }
+    }
+    // Collapse spaces in general strings (except String tokens handled by t.value)
+    // Actually, if we output ' ' for each whitespace token, we might get multiple spaces.
+    // Standard reconstruct for params/selectors: collapse spaces.
+    return res.replace(/\s+/g, ' ');
+}
+
+function reconstructValue(tokens: Token[]): string {
+    let res = '';
+    let inUrl = false;
+
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+
+        if (t.type === TokenType.Word && t.value.toLowerCase() === 'url') {
+             // Look ahead for (
+             let k = i + 1;
+             while (k < tokens.length && tokens[k].type === TokenType.Whitespace) k++;
+             if (k < tokens.length && tokens[k].type === TokenType.ParenthesisOpen) {
+                 inUrl = true;
+             }
+        }
+        if (t.type === TokenType.ParenthesisClose) {
+            inUrl = false;
+        }
+
+        // Hex logic
+        if (t.type === TokenType.Hash && !inUrl) {
+            // Check if next token is valid hex word
+            let k = i + 1;
+            // Should be adjacent? Tokenizer splits #ABC into Hash(#) Word(ABC).
+            // No whitespace allowed for color hex.
+            if (k < tokens.length && tokens[k].type === TokenType.Word) {
+                const hex = tokens[k].value;
+                if (/^[0-9a-fA-F]{3,8}$/.test(hex)) {
+                    res += '#' + hex.toLowerCase();
+                    i++; // Skip hex word
+                    continue;
+                }
+            }
+        }
+
+        if (t.type === TokenType.Whitespace) {
+            res += ' ';
+        } else {
+            res += t.value;
+        }
+    }
+
+    // We want to collapse multiple spaces in property values (standard CSS)
+    // but PRESERVE spaces inside String tokens (t.value).
+    // The loop above produces ' ' for Whitespace tokens.
+    // If we have "   " (String token), it is added as "   ".
+    // If we have Word Space Space Word, we get Word  Word.
+    // We should collapse the spaces outside strings.
+    // But `res` is a string now. We don't know where strings are.
+    // Simple fix: Tokenizer merged consecutive whitespace into single Whitespace token?
+    // css_tokenizer.ts: `while ... /\s/.test ...`. Yes!
+    // So one Whitespace token = one or more spaces.
+    // If we output ' ', we collapse them!
+    // So `res` already has collapsed spaces (one space per whitespace sequence).
+    // So we don't need regex replace on `res`.
+    // Wait, `reconstruct` uses regex replace. `reconstructValue` doesn't?
+    // `reconstruct` collapses blindly.
+    // `reconstructValue` should also yield collapsed spaces.
+    // Since tokenizer merges whitespace, `t.type === Whitespace` represents a sequence of spaces.
+    // Outputting ' ' replaces that sequence with one space.
+    // Correct!
+
+    return res.trim();
+}
+
+
+function reconstructSelector(tokens: Token[]): string {
+    // Selectors also need whitespace preservation inside strings (attribute selectors).
+    // So we should use similar logic to reconstruct, but be careful.
+    // `reconstruct` logic:
+    // t.type === Whitespace -> ' '
+    // t.type === String -> t.value (preserves internal space)
+    // Regex replace `/\s+/g, ' '` at the end...
+    // THIS BREAKS STRINGS!
+    // Because `t.value` ("   ") contains spaces. Regex will collapse them!
+
+    // Fix: Remove the regex replace in `reconstruct` and `reconstructSelector`.
+    // Rely on tokenizer merging whitespace tokens + outputting single space.
+
+    let res = '';
+    for (const t of tokens) {
+        if (t.type === TokenType.Whitespace) {
+            res += ' ';
+        } else {
+            res += t.value;
+        }
+    }
+    return res.trim();
+}
+
+function print(nodes: Node[], options: CSSFormatterOptions, level = 0): string {
+    const indentChar = options.insertSpaces ? ' ' : '\t';
+    const indentSize = options.insertSpaces ? options.tabSize : 1;
+    const indent = indentChar.repeat(indentSize * level);
+
+    let output = '';
+
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const prev = i > 0 ? nodes[i-1] : null;
+
+        if (prev) {
+            const prevBlock = prev.type === 'Rule' || (prev.type === 'AtRule' && !!prev.children);
+            const currBlock = node.type === 'Rule' || (node.type === 'AtRule' && !!node.children);
+
+            if (prevBlock || currBlock) {
+                output += '\n';
+            }
+        }
+
+        if (node.type === 'Rule') {
+             output += indent + node.selector + ' {\n';
+             output += print(node.children, options, level + 1);
+             output += indent + '}\n';
+        } else if (node.type === 'AtRule') {
+             if (node.children) {
+                 output += indent + node.name + ' ' + node.params + ' {\n';
+                 output += print(node.children, options, level + 1);
+                 output += indent + '}\n';
+             } else {
+                 output += indent + node.name + (node.params ? ' ' + node.params : '') + ';\n';
+             }
+        } else if (node.type === 'Property') {
+             // Hex normalization done in parsing
+             output += indent + node.name + ': ' + node.value + ';\n';
+        } else if (node.type === 'Comment') {
+             output += indent + node.value + '\n';
+        }
+    }
+    return output;
 }
