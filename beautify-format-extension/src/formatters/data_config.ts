@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit, detectDelimiter, parseCSV } from '../utils';
+import { formatGraphQLDeep } from './graphql_deep_formatter';
 import { formatSQLDeep } from './sql_deep_formatter';
 import { formatYAMLDeep } from './yaml_deep_formatter';
 
@@ -648,81 +649,10 @@ export async function handleGraphQL(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inTripleString = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '' && !inTripleString) {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Handle multiline strings (triple quotes)
-            if (inTripleString) {
-                formattedLines.push(line);
-                if (trimmed.includes('"""')) {
-                    const matches = (trimmed.match(/"""/g) || []).length;
-                    if (matches % 2 !== 0) {
-                        inTripleString = false;
-                    }
-                }
-                continue;
-            }
-
-            if (trimmed.includes('"""')) {
-                const matches = (trimmed.match(/"""/g) || []).length;
-                if (matches % 2 !== 0) {
-                    inTripleString = true;
-                }
-            }
-
-            // Count leading closing braces to adjust indentation for CURRENT line
-            let leadingClosingCount = 0;
-            let j = 0;
-            while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                leadingClosingCount++;
-                j++;
-            }
-
-            indentLevel = Math.max(0, indentLevel - leadingClosingCount);
-
-            formattedLines.push('  '.repeat(indentLevel) + trimmed);
-
-            // Calculate net brace change for NEXT line, excluding leading closing braces
-            let netChange = 0;
-            let inString = false;
-            const remaining = trimmed.substring(leadingClosingCount);
-
-            for (let k = 0; k < remaining.length; k++) {
-                const char = remaining[k];
-                if (char === '"' && (k === 0 || remaining[k-1] !== '\\')) {
-                    inString = !inString;
-                    continue;
-                }
-                if (inString) {
-                    continue;
-                }
-                if (char === '#') {
-                    break; // Comment
-                }
-
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
-                }
-                if (char === '}' || char === ')' || char === ']') {
-                    netChange--;
-                }
-            }
-
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatGraphQLDeep(text);
     } catch (error: any) {
+        // Fallback to basic resilience if deep formatter fails
+        console.warn('Deep GraphQL formatter failed:', error);
         vscode.window.showErrorMessage(`Failed to format GraphQL: ${error.message}`);
         return;
     }

@@ -607,6 +607,7 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
                 return;
              }
         }
+        }
     }
 
     await applyEdit(editor, formatted);
