@@ -59,6 +59,15 @@ class DeepFormatting {
       _ => 'non-zero',
     };
 
+    // Switch statement (New test case)
+    switch (x) {
+    case 1:
+    print('one');
+    break;
+    default:
+    print('default');
+    }
+
     // Records
     var record = (1, a: 2);
     var (first, a: second) = record;
