@@ -1,0 +1,15 @@
+{
+  "key1": "value1"
+  "key2": 123,
+  // Comment
+  "key3": [
+    1, 2, 3
+  ],
+  "broken": {
+    "a": 1
+    "b": 2,
+  },
+  unquoted: true,
+  "trailing": "comma",
+  kebab-case: "value"
+}
