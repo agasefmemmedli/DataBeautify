@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
+import { formatMarkdownDeep } from './markdown_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -26,147 +27,16 @@ export async function handleMarkdown(editor: vscode.TextEditor, text: string) {
     } catch (prettierError: any) {
         console.warn('Prettier Markdown formatting failed, falling back to custom formatter', prettierError);
 
-        // Resilient formatting logic (Fallback)
+        // Resilient formatting logic (Deep Formatting Fallback)
         try {
-            const lines = text.split('\n');
-                const formattedLines: string[] = [];
-                let inCodeBlock = false;
-                let inTable = false;
-                let tableRows: string[][] = [];
-
-                const flushTable = (rows: string[][]) => {
-                    if (rows.length === 0) return;
-                    const maxWidths: number[] = [];
-                    rows.forEach(row => {
-                        row.forEach((cell, i) => {
-                            maxWidths[i] = Math.max(maxWidths[i] || 0, cell.trim().length);
-                        });
-                    });
-
-                    rows.forEach((row, rowIndex) => {
-                        const isSeparator = rowIndex === 1 && row.every(cell => /^\s*:?-+:?\s*$/.test(cell));
-                        const formattedRow = row.map((cell, i) => {
-                            const trimmed = cell.trim();
-                            if (isSeparator) {
-                                const hasLeftColon = trimmed.startsWith(':');
-                                const hasRightColon = trimmed.endsWith(':');
-                                let content = '-'.repeat(Math.max(3, maxWidths[i]));
-                                if (hasLeftColon && hasRightColon) {
-                                    content = ':' + '-'.repeat(Math.max(1, maxWidths[i] - 2)) + ':';
-                                } else if (hasLeftColon) {
-                                    content = ':' + '-'.repeat(Math.max(2, maxWidths[i] - 1));
-                                } else if (hasRightColon) {
-                                    content = '-'.repeat(Math.max(2, maxWidths[i] - 1)) + ':';
-                                }
-                                return content;
-                            }
-                            return ' ' + trimmed.padEnd(maxWidths[i]) + ' ';
-                        }).join('|');
-                        formattedLines.push('|' + formattedRow + '|');
-                    });
-                };
-
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    const trimmed = line.trim();
-
-                    // Code blocks
-                    if (trimmed.startsWith('```')) {
-                        if (inTable) {
-                            flushTable(tableRows);
-                            tableRows = [];
-                            inTable = false;
-                        }
-                        inCodeBlock = !inCodeBlock;
-                        // Ensure blank line before code block if not at start
-                        if (inCodeBlock && formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                            formattedLines.push('');
-                        }
-                        formattedLines.push(trimmed);
-                        continue;
-                    }
-
-                    if (inCodeBlock) {
-                        formattedLines.push(line);
-                        continue;
-                    }
-
-                    // Tables
-                    if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
-                        inTable = true;
-                        const cells = trimmed.split('|').slice(1, -1);
-                        tableRows.push(cells);
-                        continue;
-                    } else if (inTable) {
-                        flushTable(tableRows);
-                        tableRows = [];
-                        inTable = false;
-                    }
-
-                    // Empty lines
-                    if (trimmed === '') {
-                        formattedLines.push('');
-                        continue;
-                    }
-
-                    // Headers
-                    if (trimmed.startsWith('#')) {
-                        const match = trimmed.match(/^(#+)(.*)$/);
-                        if (match) {
-                            const level = match[1];
-                            const content = match[2].trim();
-                            // Ensure blank line before header if not at start
-                            if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                                formattedLines.push('');
-                            }
-                            formattedLines.push(`${level} ${content}`);
-                            continue;
-                        }
-                    }
-
-                    // Horizontal Rules
-                    if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
-                        if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                            formattedLines.push('');
-                        }
-                        formattedLines.push('---');
-                        continue;
-                    }
-
-                    // Lists
-                    const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
-                    if (listMatch) {
-                        const indent = listMatch[1];
-                        let marker = listMatch[2];
-                        if (marker === '*' || marker === '+') marker = '-'; // Normalize
-                        const content = listMatch[3].trim();
-                        formattedLines.push(`${indent}${marker} ${content}`);
-                        continue;
-                    }
-
-                    // Blockquotes
-                    if (trimmed.startsWith('>')) {
-                        const content = trimmed.substring(1).trim();
-                        formattedLines.push(`> ${content}`);
-                        continue;
-                    }
-
-                    // Regular text
-                    formattedLines.push(trimmed);
-                }
-
-                if (inTable) {
-                    flushTable(tableRows);
-                }
-
-                formatted = formattedLines.join('\n');
+            formatted = formatMarkdownDeep(text);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Markdown: ${error.message}`);
             return;
         }
 
         if (!validationMessage) {
-            validationMessage = "Deep formatting (Prettier) failed. Applied resilient formatting.";
+            validationMessage = "Deep formatting (Prettier) failed. Applied resilient deep formatting.";
         }
     }
 
