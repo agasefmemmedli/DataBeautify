@@ -3,6 +3,7 @@ import { applyEdit } from '../utils';
 import { formatPHPDeep } from './php_deep_formatter';
 import { formatXMLDeep } from './xml_deep_formatter';
 import { formatHTMLDeep } from './html_deep_formatter';
+import { formatCSSDeep } from './css_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -299,46 +300,53 @@ export async function handleCSS(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        // Fallback to js-beautify
-
-        let cssTextToFormat = text;
-
-        // If no errors, normalize with css.stringify to add semicolons and fix structure
-        // Only do this if Prettier failed (likely due to syntax error or misconfig)
-        // And use ast from validation if available
-        if (!validationMessage && ast && (!ast.stylesheet.parsingErrors || ast.stylesheet.parsingErrors.length === 0)) {
-            try {
-                const stringified = css.stringify(ast, { compress: false });
-                if (stringified) {
-                    cssTextToFormat = stringified;
-                }
-            } catch (e) {
-                console.error('CSS stringify failed:', e);
-            }
-        }
-
-        /* eslint-disable */
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            // Format CSS
-            formatted = jsbeautify.css(cssTextToFormat, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                selector_separator_newline: true,
-                newline_between_rules: true,
-                end_with_newline: true,
-                preserve_newlines: true,
-                max_preserve_newlines: 1,
-                space_around_combinator: true,
-                space_around_selector_separator: true
+            formatted = formatCSSDeep(text, {
+                tabSize: tabSize || 2,
+                insertSpaces: insertSpaces
             });
-             if (!validationMessage) {
-                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format CSS: ${error.message}`);
-            return;
+        } catch (deepError: any) {
+            // Fallback to js-beautify
+            let cssTextToFormat = text;
+
+            // If no errors, normalize with css.stringify to add semicolons and fix structure
+            // Only do this if Prettier failed (likely due to syntax error or misconfig)
+            // And use ast from validation if available
+            if (!validationMessage && ast && (!ast.stylesheet.parsingErrors || ast.stylesheet.parsingErrors.length === 0)) {
+                try {
+                    const stringified = css.stringify(ast, { compress: false });
+                    if (stringified) {
+                        cssTextToFormat = stringified;
+                    }
+                } catch (e) {
+                    console.error('CSS stringify failed:', e);
+                }
+            }
+
+            /* eslint-disable */
+            try {
+                // Format CSS
+                formatted = jsbeautify.css(cssTextToFormat, {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    selector_separator_newline: true,
+                    newline_between_rules: true,
+                    end_with_newline: true,
+                    preserve_newlines: true,
+                    max_preserve_newlines: 1,
+                    space_around_combinator: true,
+                    space_around_selector_separator: true
+                });
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Failed to format CSS: ${deepError.message}`);
+                return;
+            }
+            /* eslint-enable */
         }
-        /* eslint-enable */
     }
 
     await applyEdit(editor, formatted);
