@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPHPDeep } from './php_deep_formatter';
+import { formatXMLDeep } from './xml_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -23,19 +24,36 @@ export async function handleXML(editor: vscode.TextEditor, text: string) {
         // Get indentation options from editor
         const tabSize = editor.options.tabSize;
         const insertSpaces = editor.options.insertSpaces;
-        const indentation = insertSpaces ? ' '.repeat(Number(tabSize) || 2) : '\t';
 
-        // Format XML (xml-formatter is somewhat lenient and will try to fix issues)
-        formatted = xmlFormatter(text, {
-            indentation,
-            collapseContent: true,
-            lineSeparator: '\n',
-            whiteSpaceAtEndOfSelfclosingTag: true,
-            forceSelfClosingEmptyTag: true
+        // Try Deep Formatting first
+        formatted = formatXMLDeep(text, {
+            tabSize: Number(tabSize) || 2,
+            insertSpaces: insertSpaces as boolean,
+            sortAttributes: true,
+            printWidth: 120
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format XML: ${error.message}`);
-        return;
+
+    } catch (deepError: any) {
+        // Fallback to xml-formatter
+        try {
+            const tabSize = editor.options.tabSize;
+            const insertSpaces = editor.options.insertSpaces;
+            const indentation = insertSpaces ? ' '.repeat(Number(tabSize) || 2) : '\t';
+
+            formatted = xmlFormatter(text, {
+                indentation,
+                collapseContent: true,
+                lineSeparator: '\n',
+                whiteSpaceAtEndOfSelfclosingTag: true,
+                forceSelfClosingEmptyTag: true
+            });
+            if (!validationMessage) {
+                validationMessage = `Deep formatting failed, using fallback. ${deepError.message.split('\n')[0]}`;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format XML: ${error.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);
