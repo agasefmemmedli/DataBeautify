@@ -72,3 +72,15 @@ UNION ALL
 (SELECT id FROM archived_users WHERE archive_date > '2023-01-01'
  INTERSECT
  SELECT id FROM temporary_users);
+
+-- New Test Case for Alignment
+SELECT
+    user_id as uid,
+    first_name as fname,
+    last_name as lname,
+    email_address as email
+FROM users
+WHERE
+    status = 'active'
+    AND
+    created_at > '2023-01-01';
