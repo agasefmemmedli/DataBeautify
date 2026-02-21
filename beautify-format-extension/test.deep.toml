@@ -1,0 +1,56 @@
+# This is a TOML document
+
+title = "TOML Example"
+
+[owner]
+name = "Tom Preston-Werner"
+dob = 1979-05-27T07:32:00-08:00
+
+[database]
+server = "192.168.1.1"
+ports = [ 8000, 8001, 8002 ]
+connection_max = 5000
+enabled = true
+
+[servers]
+
+  # Indentation (although TOML is usually flat, some people indent)
+  [servers.alpha]
+  ip = "10.0.0.1"
+  dc = "eqdc10"
+
+  [servers.beta]
+  ip = "10.0.0.2"
+  dc = "eqdc10"
+
+[clients]
+data = [ ["gamma", "delta"], [1, 2] ]
+
+# Line breaks are OK when inside arrays
+hosts = [
+  "alpha",
+  "omega"
+]
+
+# Inline tables
+name = { first = "Tom", last = "Preston-Werner" }
+point = { x = 1, y = 2 }
+
+# Dotted keys
+site.google.com = true
+site.yahoo.com = false
+
+# Alignment test
+[alignment]
+short = 1
+very_long_key_name = 2
+mid_key = 3
+
+# Multiline strings
+str1 = """
+Roses are red
+Violets are blue"""
+
+str2 = '''
+The quick brown fox
+jumps over the lazy dog.'''

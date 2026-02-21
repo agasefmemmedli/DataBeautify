@@ -3,6 +3,7 @@ import { applyEdit, detectDelimiter, parseCSV } from '../utils';
 import { formatGraphQLDeep } from './graphql_deep_formatter';
 import { formatSQLDeep } from './sql_deep_formatter';
 import { formatYAMLDeep } from './yaml_deep_formatter';
+import { formatTOMLDeep } from './toml_deep_formatter';
 
 /**
  * Handle YAML formatting and validation
@@ -126,123 +127,7 @@ export async function handleTOML(editor: vscode.TextEditor, text: string) {
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let inMultilineString = false;
-        let multilineStringChar = '';
-        let currentIndent = '';
-
-        for (let line of lines) {
-            // If we are inside a multiline string, preserve the line exactly
-            if (inMultilineString) {
-                formattedLines.push(line);
-                if (line.includes(multilineStringChar.repeat(3))) {
-                    inMultilineString = false;
-                }
-                continue;
-            }
-
-            const trimmed = line.trim();
-
-            // Handle comments and empty lines
-            if (trimmed === '' || trimmed.startsWith('#')) {
-                const indent = (trimmed === '') ? '' : currentIndent;
-                formattedLines.push(indent + trimmed);
-                continue;
-            }
-
-            // Identify if this line starts a multiline string
-            let pendingMultilineToggle = false;
-            let pendingMultilineChar = '';
-            if (trimmed.includes('"""') || trimmed.includes("'''")) {
-                const char = trimmed.includes('"""') ? '"' : "'";
-                // Check if the triple quote is not inside a comment
-                const commentIdx = trimmed.indexOf('#');
-                const tripleIdx = trimmed.indexOf(char.repeat(3));
-                if (commentIdx === -1 || tripleIdx < commentIdx) {
-                    const matches = trimmed.match(new RegExp(char.repeat(3), 'g'));
-                    if (matches && matches.length % 2 !== 0) {
-                        pendingMultilineToggle = true;
-                        pendingMultilineChar = char;
-                    }
-                }
-            }
-
-            // Handle table headers [table] or [[table]]
-            if (trimmed.startsWith('[') && trimmed.endsWith(']') && !trimmed.includes('=')) {
-                formattedLines.push(trimmed);
-                currentIndent = '  ';
-                if (pendingMultilineToggle) {
-                    inMultilineString = true;
-                    multilineStringChar = pendingMultilineChar;
-                }
-                continue;
-            }
-
-            // Handle key = value
-            let eqIndex = -1;
-            let inKeyString = false;
-            let keyStringChar = '';
-            for (let i = 0; i < trimmed.length; i++) {
-                const char = trimmed[i];
-                if ((char === '"' || char === "'") && (i === 0 || trimmed[i - 1] !== '\\')) {
-                    if (!inKeyString) {
-                        inKeyString = true;
-                        keyStringChar = char;
-                    } else if (keyStringChar === char) {
-                        inKeyString = false;
-                    }
-                } else if (char === '=' && !inKeyString) {
-                    eqIndex = i;
-                    break;
-                }
-            }
-
-            if (eqIndex > 0) {
-                const key = trimmed.substring(0, eqIndex).trim();
-                const valuePart = trimmed.substring(eqIndex + 1).trim();
-
-                let commentStart = -1;
-                let inValueString = false;
-                let valueStringChar = '';
-
-                for (let i = 0; i < valuePart.length; i++) {
-                    const char = valuePart[i];
-                    if ((char === '"' || char === "'") && (i === 0 || valuePart[i - 1] !== '\\')) {
-                        if (!inValueString) {
-                            inValueString = true;
-                            valueStringChar = char;
-                        } else if (valueStringChar === char) {
-                            inValueString = false;
-                        }
-                    } else if (char === '#' && !inValueString) {
-                        commentStart = i;
-                        break;
-                    }
-                }
-
-                if (commentStart !== -1) {
-                    const value = valuePart.substring(0, commentStart).trim();
-                    const comment = valuePart.substring(commentStart);
-                    formattedLines.push(`${currentIndent}${key} = ${value} ${comment}`);
-                } else {
-                    formattedLines.push(`${currentIndent}${key} = ${valuePart}`);
-                }
-                if (pendingMultilineToggle) {
-                    inMultilineString = true;
-                    multilineStringChar = pendingMultilineChar;
-                }
-                continue;
-            }
-
-            // Fallback for anything else
-            formattedLines.push(currentIndent + trimmed);
-            if (pendingMultilineToggle) {
-                inMultilineString = true;
-                multilineStringChar = pendingMultilineChar;
-            }
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatTOMLDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format TOML: ${error.message}`);
         return;
