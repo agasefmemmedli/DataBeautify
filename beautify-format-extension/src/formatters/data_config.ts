@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { applyEdit, detectDelimiter, parseCSV } from '../utils';
+import { applyEdit } from '../utils';
 import { formatGraphQLDeep } from './graphql_deep_formatter';
 import { formatSQLDeep } from './sql_deep_formatter';
 import { formatYAMLDeep } from './yaml_deep_formatter';
 import { formatTOMLDeep } from './toml_deep_formatter';
+import { formatCSVDeep, validateCSV } from './csv_deep_formatter';
 
 /**
  * Handle YAML formatting and validation
@@ -414,56 +415,12 @@ export async function handleCSV(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Validate CSV
+    validationMessage = validateCSV(text);
+
     try {
-        const delimiter = detectDelimiter(text);
-        const rows = parseCSV(text, delimiter);
-
-        // Validation: Check for inconsistent column count
-        const meaningfulRows = rows.filter(r => r.length > 0 && (r.length > 1 || r[0].trim() !== ''));
-        if (meaningfulRows.length > 0) {
-            const headerCount = meaningfulRows[0].length;
-            for (let i = 0; i < meaningfulRows.length; i++) {
-                if (meaningfulRows[i].length !== headerCount) {
-                    if (!validationMessage) {
-                        validationMessage = `Inconsistent column count (expected ${headerCount}, got ${meaningfulRows[i].length})`;
-                    }
-                }
-            }
-        }
-
         // Deep Formatting
-        const formattedRows: string[][] = rows.map(row => {
-            return row.map(cell => {
-                const trimmed = cell.trim();
-                if (trimmed.includes(delimiter) || trimmed.includes('"') || trimmed.includes('\n') || trimmed.includes('\r')) {
-                    return `"${trimmed.replace(/"/g, '""')}"`;
-                }
-                return trimmed;
-            });
-        });
-
-        // Calculate max widths
-        const maxWidths: number[] = [];
-        for (const row of formattedRows) {
-            for (let i = 0; i < row.length; i++) {
-                maxWidths[i] = Math.max(maxWidths[i] || 0, row[i].length);
-            }
-        }
-
-        // Format
-        const formattedLines = formattedRows.map(row => {
-            if (row.length === 0 || (row.length === 1 && row[0] === '')) {
-                return '';
-            }
-            return row.map((cell, i) => {
-                if (i === row.length - 1) {
-                    return cell;
-                }
-                return cell.padEnd(maxWidths[i]);
-            }).join(` ${delimiter} `);
-        });
-
-        formatted = formattedLines.join('\n');
+        formatted = formatCSVDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format CSV: ${error.message}`);
         return;
