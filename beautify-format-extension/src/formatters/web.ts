@@ -593,7 +593,9 @@ export async function handleVue(editor: vscode.TextEditor, text: string) {
             htmlWhitespaceSensitivity: 'ignore', // To fix indentation
             vueIndentScriptAndStyle: false, // Standard Vue style guide: script and style tags content not indented relative to tag
             endOfLine: 'lf',
-            bracketSameLine: false
+            bracketSameLine: false,
+            trailingComma: 'none', // Avoid trailing commas in Vue templates/scripts to prevent parsing issues
+            arrowParens: 'avoid' // Cleaner arrow functions
         });
     } catch (prettierError: any) {
          // Fallback to js-beautify
