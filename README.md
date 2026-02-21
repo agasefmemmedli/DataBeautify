@@ -24,3 +24,4 @@
 - [x] Kotlin (Deep Formatting Implemented)
 - [x] CSV (Deep Formatting Implemented)
 - [x] Astro (Deep Formatting Implemented)
+- [x] Svelte (Deep Formatting Implemented)

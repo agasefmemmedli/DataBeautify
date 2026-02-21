@@ -4,6 +4,7 @@ import { formatPHPDeep } from './php_deep_formatter';
 import { formatXMLDeep } from './xml_deep_formatter';
 import { formatHTMLDeep } from './html_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
+import { formatSvelteDeep } from './svelte_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -754,52 +755,64 @@ export async function handleSvelte(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        /* eslint-disable */
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            // Fallback to js-beautify's HTML formatter
-            const options: any = {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                indent_scripts: 'normal',
-                end_with_newline: false,
-                wrap_line_length: 0,
-                indent_inner_html: false,
-                js: {
+            formatted = formatSvelteDeep(text, {
+                tabSize: tabSize || 2,
+                insertSpaces: insertSpaces,
+                printWidth: 120
+            });
+            if (!validationMessage) {
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (deepError: any) {
+            /* eslint-disable */
+            try {
+                // Fallback to js-beautify's HTML formatter
+                const options: any = {
                     indent_size: tabSize,
                     indent_char: insertSpaces ? ' ' : '\t',
                     max_preserve_newlines: 2,
                     preserve_newlines: true,
-                    keep_array_indentation: false,
-                    break_chained_methods: false,
-                    brace_style: 'collapse',
-                    space_before_conditional: true,
-                    unescape_strings: false,
-                    jslint_happy: false,
+                    indent_scripts: 'normal',
                     end_with_newline: false,
                     wrap_line_length: 0,
-                    comma_first: false,
-                    e4x: true,
-                    indent_empty_lines: false
-                },
-                css: {
-                    indent_size: tabSize,
-                    indent_char: insertSpaces ? ' ' : '\t',
-                    selector_separator_newline: true,
-                    newline_between_rules: true,
-                    end_with_newline: false
+                    indent_inner_html: false,
+                    js: {
+                        indent_size: tabSize,
+                        indent_char: insertSpaces ? ' ' : '\t',
+                        max_preserve_newlines: 2,
+                        preserve_newlines: true,
+                        keep_array_indentation: false,
+                        break_chained_methods: false,
+                        brace_style: 'collapse',
+                        space_before_conditional: true,
+                        unescape_strings: false,
+                        jslint_happy: false,
+                        end_with_newline: false,
+                        wrap_line_length: 0,
+                        comma_first: false,
+                        e4x: true,
+                        indent_empty_lines: false
+                    },
+                    css: {
+                        indent_size: tabSize,
+                        indent_char: insertSpaces ? ' ' : '\t',
+                        selector_separator_newline: true,
+                        newline_between_rules: true,
+                        end_with_newline: false
+                    }
+                };
+                formatted = jsbeautify.html(text, options);
+                if (!validationMessage) {
+                    validationMessage = `Deep formatting failed, using fallback. ${deepError.message.split('\n')[0]}`;
                 }
-            };
-            formatted = jsbeautify.html(text, options);
-            if (!validationMessage) {
-                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            } catch (beautifyError: any) {
+                vscode.window.showErrorMessage(`Failed to format Svelte: ${beautifyError.message}`);
+                return;
             }
-        } catch (beautifyError: any) {
-            vscode.window.showErrorMessage(`Failed to format Svelte: ${beautifyError.message}`);
-            return;
+            /* eslint-enable */
         }
-        /* eslint-enable */
     }
 
     await applyEdit(editor, formatted);
