@@ -50,7 +50,11 @@ export function formatDartDeep(text: string): string {
     let inParen = 0;
     let inBracket = 0;
     let inBrace = 0;
-    let inSwitch = false;
+
+    // Switch State Tracking
+    // Stack stores the indent level of the 'switch' keyword
+    const switchStack: { indent: number, inCase: boolean }[] = [];
+
     let inGenerics = 0;
     let justClosedGeneric = false;
 
@@ -68,8 +72,33 @@ export function formatDartDeep(text: string): string {
         const prev = i > 0 ? enhancedTokens[i-1] : null;
 
         // --- Indentation Adjustments (Before processing token) ---
+        // Dedent closing brackets immediately
         if (['}', ']', ')'].includes(token.text)) {
+            // Special handling for switch closing brace
+            // Wait to pop until after we process the token, but check logic here if needed
             indentLevel = Math.max(0, indentLevel - 1);
+
+             // Pop switch stack AFTER decrementing indentLevel and matching
+            if (token.text === '}') {
+                if (switchStack.length > 0) {
+                     const currentSwitch = switchStack[switchStack.length-1];
+                     if (indentLevel === currentSwitch.indent) {
+                         switchStack.pop();
+                     }
+                }
+            }
+        }
+
+        // Handle Switch Case/Default Dedent (Before processing)
+        if (switchStack.length > 0) {
+            const currentSwitch = switchStack[switchStack.length - 1];
+            // If we encounter 'case' or 'default', we should be at switchIndent + 1
+            if (token.text === 'case' || token.text === 'default') {
+                // Ensure we are indented correctly relative to switch
+                // We manually force indentLevel for case labels
+                indentLevel = currentSwitch.indent + 1;
+                currentSwitch.inCase = false; // We are at label, not body
+            }
         }
 
         // --- Newline Logic ---
@@ -97,7 +126,8 @@ export function formatDartDeep(text: string): string {
         }
         if (prev && (prev.text === '}' || prev.type === TokenType.Comment)) {
             forceNewline = true;
-            if (prev.text === '}' && (token.text === 'else' || token.text === 'catch' || token.text === 'on' || token.text === ',' || token.text === ';')) {
+            // Don't force newline if followed by these
+            if (prev.text === '}' && (token.text === 'else' || token.text === 'catch' || token.text === 'on' || token.text === ',' || token.text === ';' || token.text === ')')) {
                  forceNewline = false;
             }
         }
@@ -117,8 +147,24 @@ export function formatDartDeep(text: string): string {
             forceNewline = true;
         }
 
+        // Switch Case/Default
+        if (switchStack.length > 0) {
+            if (token.text === 'case' || token.text === 'default') {
+                forceNewline = true;
+            }
+            if (prev && prev.text === ':') {
+                 const currentSwitch = switchStack[switchStack.length - 1];
+                 // If previous token was colon and we are in a switch (and it was a case label colon)
+                 // We need to check if we just finished a case label.
+                 if (!currentSwitch.inCase) {
+                      forceNewline = true;
+                      currentSwitch.inCase = true; // Enter body
+                 }
+            }
+        }
+
         // Constructor Initializers :
-        if (token.text === ':' && inParen === 0 && inBrace === 1 && !inSwitch) {
+        if (token.text === ':' && inParen === 0 && inBrace === 1 && switchStack.length === 0) {
             if (prev && prev.text === ')') {
                  forceNewline = true;
             }
@@ -134,6 +180,15 @@ export function formatDartDeep(text: string): string {
             // Calc indent
             let currentIndent = indentLevel;
 
+            // Switch Case Body Indentation
+            if (switchStack.length > 0) {
+                const currentSwitch = switchStack[switchStack.length - 1];
+                if (currentSwitch.inCase && token.text !== 'case' && token.text !== 'default' && token.text !== '}') {
+                    // We are in case body, add extra indent
+                    currentIndent = currentSwitch.indent + 2;
+                }
+            }
+
             // Adjust indent for Cascades
             if (token.text === '..' || token.text === '?..') {
                 currentIndent += 2;
@@ -145,9 +200,17 @@ export function formatDartDeep(text: string): string {
                  }
             }
             // Adjust for wrapped arguments/parameters
+            // Only if we forced a newline inside parens and it's not a block start
             if ((inParen > 0 || inBracket > 0) && forceNewline) {
-                 if (prev && !['(', '[', '{'].includes(prev.text)) {
-                      currentIndent += 1; // 2 spaces
+                 // Check if we are inside a parameter list that wraps
+                 // Simple heuristic: if previous was comma or opening paren
+                 if (prev && (prev.text === ',' || prev.text === '(' || prev.text === '[')) {
+                      // Don't double indent if indentLevel already increased
+                 } else {
+                     // Continuation indent
+                     if (!['}', ']'].includes(token.text)) { // Don't indent closing on new line
+                        currentIndent += 1;
+                     }
                  }
             }
 
@@ -164,7 +227,7 @@ export function formatDartDeep(text: string): string {
             // Enforce spacing rules
             if (prev) {
                 if (prev.type === TokenType.Keyword) {
-                     if (!['(', '.', '?.', '::', '[', ')', ']', ';', ',', '!', '?'].includes(token.text)) {
+                     if (!['(', '.', '?.', '::', '[', ')', ']', ';', ',', '!', '?', ':'].includes(token.text)) {
                           spaceBefore = true;
                      }
                      if (['this', 'super'].includes(prev.text) && token.text === '.') spaceBefore = false;
@@ -179,18 +242,21 @@ export function formatDartDeep(text: string): string {
                           spaceBefore = false; // ...list
                      } else if (token.text === ':') {
                           spaceBefore = false;
-                          if (inSwitch && (prev.type === TokenType.Number || prev.type === TokenType.Identifier || prev.text === 'default')) {
-                               spaceBefore = false;
-                          }
-                          // Heuristic for map vs ternary vs named arg
-                          if (prev.type === TokenType.Identifier && inParen > 0) {
-                               spaceBefore = false;
-                          } else {
-                               if (inBrace > 0 && prev.type === TokenType.Identifier) {
+
+                          if (switchStack.length > 0) {
+                               const currentSwitch = switchStack[switchStack.length - 1];
+                               // If potentially a case label colon
+                               if (!currentSwitch.inCase) {
                                    spaceBefore = false;
-                               } else {
-                                   spaceBefore = true;
                                }
+                          }
+
+                          if (prev.text === ')') {
+                              spaceBefore = true;
+                          }
+
+                          if (prev.type === TokenType.Identifier && (inParen > 0 || inBrace > 0)) {
+                              spaceBefore = false;
                           }
                      } else if (token.text === '<') {
                           // Type<T> -> No space
@@ -220,7 +286,10 @@ export function formatDartDeep(text: string): string {
 
                 if (prev.text === ',') spaceBefore = true;
                 if (prev.text === ';') spaceBefore = true;
-                if (prev.text === ':') spaceBefore = true;
+
+                if (prev.text === ':') {
+                    spaceBefore = true;
+                }
 
                 if (prev.type === TokenType.Operator) {
                      if (['!', '++', '--', '~'].includes(prev.text)) spaceBefore = false;
@@ -252,7 +321,6 @@ export function formatDartDeep(text: string): string {
                      else spaceBefore = false;
                  }
                  else if (prev && prev.text === '>') {
-                      // T>() likely method call with generic or cast?
                       if (justClosedGeneric) spaceBefore = false; // foo<T>()
                       else spaceBefore = true; // comparison x > (1)
                  }
@@ -274,11 +342,26 @@ export function formatDartDeep(text: string): string {
             indentLevel++;
             if (token.text === '{') {
                  inBrace++;
-                 if (prev && prev.text === ')') {
-                      let j = i - 1;
-                      while(j >= 0 && enhancedTokens[j].type !== TokenType.Keyword) j--;
+                 // Check for switch
+                 // Robust lookback logic
+                 let j = i - 1;
+                 while(j >= 0 && enhancedTokens[j].type === TokenType.Comment) j--; // Skip comments
+
+                 if (j >= 0 && enhancedTokens[j].text === ')') {
+                      // skip parens of switch(x)
+                      let parenCount = 1;
+                      j--;
+                      while (j >= 0 && parenCount > 0) {
+                          if (enhancedTokens[j].text === ')') parenCount++;
+                          else if (enhancedTokens[j].text === '(') parenCount--;
+                          j--;
+                      }
+
+                      // Skip comments between ( and switch
+                      while (j >= 0 && enhancedTokens[j].type === TokenType.Comment) j--;
+
                       if (j >= 0 && enhancedTokens[j].text === 'switch') {
-                           inSwitch = true;
+                           switchStack.push({ indent: indentLevel - 1, inCase: false }); // indentLevel was just incremented, so switch is at indentLevel-1
                       }
                  }
             }
@@ -287,7 +370,6 @@ export function formatDartDeep(text: string): string {
         } else if (['}', ']', ')'].includes(token.text)) {
              if (token.text === '}') {
                  inBrace--;
-                 if (inSwitch) inSwitch = false;
              }
              if (token.text === ')') inParen--;
              if (token.text === ']') inBracket--;
@@ -333,6 +415,11 @@ function sortDartImports(text: string): string {
             if (firstImportIndex !== -1 && !line.startsWith('//') && line !== '' && !line.startsWith('library ')) {
                  break;
             }
+            // Update last import index if we are inside a block of imports+comments
+            // if (firstImportIndex !== -1) {
+            //    lastImportIndex = i;
+            // }
+            // Reverted this change to avoid including trailing blanks/comments that shouldn't be part of the sort block
         } else if (firstImportIndex !== -1) {
              break;
         }
