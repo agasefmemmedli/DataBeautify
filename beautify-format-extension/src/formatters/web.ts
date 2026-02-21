@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
+import { formatPHPDeep } from './php_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -841,29 +842,38 @@ export async function handlePHP(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        /* eslint-disable */
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            // Fallback to js-beautify's HTML formatter
-            const options: any = {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                indent_scripts: 'normal',
-                end_with_newline: false,
-                wrap_line_length: 0,
-                indent_inner_html: false,
-                templating: ['php']
-            };
-            formatted = jsbeautify.html(text, options);
+            formatted = formatPHPDeep(text, {
+                tabSize: tabSize || 4,
+                insertSpaces: insertSpaces,
+                sortImports: true
+            });
             if (!validationMessage) {
-                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (beautifyError: any) {
-            vscode.window.showErrorMessage(`Failed to format PHP: ${beautifyError.message}`);
-            return;
+        } catch (deepError: any) {
+            /* eslint-disable */
+            try {
+                // Fallback to js-beautify's HTML formatter
+                const options: any = {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    indent_scripts: 'normal',
+                    end_with_newline: false,
+                    wrap_line_length: 0,
+                    indent_inner_html: false,
+                    templating: ['php']
+                };
+                formatted = jsbeautify.html(text, options);
+            } catch (beautifyError: any) {
+                vscode.window.showErrorMessage(`Failed to format PHP: ${deepError.message}`);
+                return;
+            }
+            /* eslint-enable */
         }
-        /* eslint-enable */
     }
 
     await applyEdit(editor, formatted);
