@@ -1,6 +1,7 @@
 <?php
-function broken(){
-echo "This is broken"
-echo "Really broken";
+function broken() {
+echo "missing semicolon"
+if (true) {
+echo "bad nesting"
 }
 ?>
