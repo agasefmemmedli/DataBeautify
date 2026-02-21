@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
 import { formatMarkdownDeep } from './markdown_deep_formatter';
+import { formatAstroDeep } from './astro_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -687,96 +688,11 @@ export async function handleAstro(editor: vscode.TextEditor, text: string) {
 
         // Resilient formatting logic (Fallback)
         try {
-            // Lazy load dependencies
-            const jsbeautify = require('js-beautify');
-
-            // Astro structure:
-            // ---
-            // frontmatter (TS/JS)
-            // ---
-            // template (HTML/JSX-like)
-
-            const frontmatterRegex = /^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/m;
-            const match = text.match(frontmatterRegex);
-
-            let frontmatter = '';
-            let template = text;
-            let frontmatterRaw = '';
-
-            if (match) {
-                frontmatterRaw = match[0];
-                const content = match[1];
-                // Format frontmatter as TypeScript
-                // Use js-beautify.js
-                /* eslint-disable */
-                const formattedContent = jsbeautify.js(content, {
-                    indent_size: 2,
-                    indent_char: ' ',
-                    max_preserve_newlines: 2,
-                    preserve_newlines: true,
-                    keep_array_indentation: false,
-                    break_chained_methods: false,
-                    brace_style: 'collapse',
-                    space_before_conditional: true,
-                    unescape_strings: false,
-                    jslint_happy: false,
-                    end_with_newline: false,
-                    wrap_line_length: 0,
-                    comma_first: false,
-                    e4x: true,
-                    indent_empty_lines: false
-                });
-                /* eslint-enable */
-                frontmatter = `---\n${formattedContent}\n---`;
-                template = text.substring(frontmatterRaw.length).trim();
-            }
-
-            // Format template as HTML (with some JSX awareness)
-            // We use js-beautify.html, similar to Svelte/Vue
-            /* eslint-disable */
-            const options: any = {
-                indent_size: 2,
-                indent_char: ' ',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                indent_scripts: 'normal',
-                end_with_newline: false,
-                wrap_line_length: 0,
-                indent_inner_html: false,
-                js: {
-                    indent_size: 2,
-                    indent_char: ' ',
-                    max_preserve_newlines: 2,
-                    preserve_newlines: true,
-                    keep_array_indentation: false,
-                    break_chained_methods: false,
-                    brace_style: 'collapse',
-                    space_before_conditional: true,
-                    unescape_strings: false,
-                    jslint_happy: false,
-                    end_with_newline: false,
-                    wrap_line_length: 0,
-                    comma_first: false,
-                    e4x: true,
-                    indent_empty_lines: false
-                },
-                css: {
-                    indent_size: 2,
-                    indent_char: ' ',
-                    selector_separator_newline: true,
-                    newline_between_rules: true,
-                    end_with_newline: false
-                }
-            };
-            const formattedTemplate = jsbeautify.html(template, options);
-            /* eslint-enable */
-
-            if (frontmatter) {
-                formatted = `${frontmatter}\n\n${formattedTemplate}`;
-            } else {
-                formatted = formattedTemplate;
-            }
-
+            // Use Custom Deep Formatter (Resilient + Alignment)
+            formatted = formatAstroDeep(text, {
+                tabSize: 2,
+                insertSpaces: true
+            });
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Astro: ${error.message}`);
             return;
