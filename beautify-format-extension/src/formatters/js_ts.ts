@@ -1,6 +1,30 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 
+// Helper to load Prettier and Sort Imports Plugin
+async function loadPrettier() {
+    try {
+        const dynamicImport = new Function('specifier', 'return import(specifier)');
+        const prettier = await dynamicImport('prettier');
+        // Handle namespace objects (Prettier v3 has named exports and a default export)
+        // If we get a namespace, prefer .default if it has .format, otherwise fallback
+        const prettierInstance = prettier.default || prettier;
+
+        let pluginInstance = null;
+        try {
+            const sortImportsPlugin = await dynamicImport('@trivago/prettier-plugin-sort-imports');
+            pluginInstance = sortImportsPlugin.default || sortImportsPlugin;
+        } catch (e) {
+            console.warn('Sort imports plugin not found:', e);
+        }
+
+        return { prettier: prettierInstance, plugin: pluginInstance };
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+        return { prettier: null, plugin: null };
+    }
+}
+
 /**
  * Handle JavaScript formatting and validation
  */
@@ -14,9 +38,9 @@ export async function handleJS(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await import('prettier');
-    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
+
+    const { prettier, plugin } = await loadPrettier();
 
     // Validate JavaScript (supports JSX)
     try {
@@ -32,13 +56,18 @@ export async function handleJS(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
+        const plugins = plugin ? [plugin] : [];
+
         // Format JavaScript with Prettier
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'babel',
-            plugins: [sortImportsPlugin.default || sortImportsPlugin],
+            plugins: plugins,
             importOrder: ['<THIRD_PARTY_MODULES>', '^[./]'],
             importOrderSeparation: true,
             importOrderSortSpecifiers: true,
+            importOrderParserPlugins: ['typescript', 'classProperties', 'decorators-legacy', 'jsx'],
             tabWidth: tabSize,
             useTabs: !insertSpaces,
             semi: true,
@@ -109,9 +138,9 @@ export async function handleTS(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await import('prettier');
-    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
+
+    const { prettier, plugin } = await loadPrettier();
 
     // Validate TypeScript
     try {
@@ -127,13 +156,18 @@ export async function handleTS(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
+        const plugins = plugin ? [plugin] : [];
+
         // Format TypeScript with Prettier
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'typescript',
-            plugins: [sortImportsPlugin.default || sortImportsPlugin],
+            plugins: plugins,
             importOrder: ['<THIRD_PARTY_MODULES>', '^[./]'],
             importOrderSeparation: true,
             importOrderSortSpecifiers: true,
+            importOrderParserPlugins: ['typescript', 'classProperties', 'decorators-legacy', 'jsx'],
             tabWidth: tabSize,
             useTabs: !insertSpaces,
             semi: true,
@@ -204,9 +238,9 @@ export async function handleTSX(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await import('prettier');
-    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
+
+    const { prettier, plugin } = await loadPrettier();
 
     // Validate TSX
     try {
@@ -222,13 +256,18 @@ export async function handleTSX(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
+        const plugins = plugin ? [plugin] : [];
+
         // Format TSX with Prettier
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'typescript',
-            plugins: [sortImportsPlugin.default || sortImportsPlugin],
+            plugins: plugins,
             importOrder: ['<THIRD_PARTY_MODULES>', '^[./]'],
             importOrderSeparation: true,
             importOrderSortSpecifiers: true,
+            importOrderParserPlugins: ['typescript', 'classProperties', 'decorators-legacy', 'jsx'],
             tabWidth: tabSize,
             useTabs: !insertSpaces,
             semi: true,
@@ -297,9 +336,9 @@ export async function handleJSX(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const ts = require('typescript');
-    const prettier = await import('prettier');
-    const sortImportsPlugin = await import('@trivago/prettier-plugin-sort-imports');
     const jsbeautify = require('js-beautify');
+
+    const { prettier, plugin } = await loadPrettier();
 
     // Validate JSX
     try {
@@ -315,13 +354,18 @@ export async function handleJSX(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
+        const plugins = plugin ? [plugin] : [];
+
         // Format JSX with Prettier
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'babel',
-            plugins: [sortImportsPlugin.default || sortImportsPlugin],
+            plugins: plugins,
             importOrder: ['<THIRD_PARTY_MODULES>', '^[./]'],
             importOrderSeparation: true,
             importOrderSortSpecifiers: true,
+            importOrderParserPlugins: ['typescript', 'classProperties', 'decorators-legacy', 'jsx'],
             tabWidth: tabSize,
             useTabs: !insertSpaces,
             semi: true,
@@ -388,8 +432,9 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { parse, ParseError } = require('jsonc-parser');
-    const prettier = await import('prettier');
     const jsbeautify = require('js-beautify');
+
+    const { prettier } = await loadPrettier();
 
     // Validate JSONC using jsonc-parser
     const errors: typeof ParseError[] = [];
@@ -401,8 +446,10 @@ export async function handleJSONC(editor: vscode.TextEditor, text: string) {
     }
 
     try {
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
         // Format JSONC
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'json',
             tabWidth: tabSize,
             useTabs: !insertSpaces,
@@ -461,14 +508,18 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
 
     // Lazy load dependencies
     const { jsonrepair } = require('jsonrepair');
-    const prettier = await import('prettier');
     const jsbeautify = require('js-beautify');
+
+    const { prettier } = await loadPrettier();
 
     try {
         // Try standard JSON parse
         JSON.parse(text);
+
+        if (!prettier || !prettier.format) throw new Error('Prettier not loaded');
+
         // If successful, format with prettier
-        formatted = await prettier.default.format(text, {
+        formatted = await prettier.format(text, {
             parser: 'json',
             tabWidth: tabSize,
             useTabs: !insertSpaces,
@@ -483,13 +534,19 @@ export async function handleJSON(editor: vscode.TextEditor, text: string) {
             const parsed = JSON.parse(repairedText);
             // Format the repaired JSON
             const minified = JSON.stringify(parsed);
-            formatted = await prettier.default.format(minified, {
-                parser: 'json',
-                tabWidth: tabSize,
-                useTabs: !insertSpaces,
-                printWidth: 120,
-                endOfLine: 'lf'
-            });
+
+            if (prettier && prettier.format) {
+                formatted = await prettier.format(minified, {
+                    parser: 'json',
+                    tabWidth: tabSize,
+                    useTabs: !insertSpaces,
+                    printWidth: 120,
+                    endOfLine: 'lf'
+                });
+            } else {
+                throw new Error('Prettier not loaded for repair');
+            }
+
             repairMessage = originalError.message;
         } catch (repairError: any) {
             // Fallback to js-beautify if Prettier fails on repaired text (unlikely but possible)
