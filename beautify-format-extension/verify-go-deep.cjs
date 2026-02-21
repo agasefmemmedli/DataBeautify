@@ -130,6 +130,23 @@ func (p Person) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, my name is %s", name, p.Name)
 }
 `
+        },
+        {
+            file: 'test.switch.go',
+            expected: `package main
+
+import "fmt"
+
+func main() {
+	x := 10
+	switch x {
+	case 1:
+		fmt.Println("one")
+	default:
+		fmt.Println("other")
+	}
+}
+`
         }
     ];
 

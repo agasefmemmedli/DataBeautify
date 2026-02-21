@@ -60,7 +60,7 @@ export function formatGoDeep(text: string): string {
                 lineDedent = 1;
             }
             if (first.type === TokenType.Keyword && (first.text === 'case' || first.text === 'default')) {
-                lineDedent = 0;
+                lineDedent = 1;
             }
         }
 
