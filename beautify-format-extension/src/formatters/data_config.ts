@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyEdit, detectDelimiter, parseCSV } from '../utils';
+import { formatSQLDeep } from './sql_deep_formatter';
 
 /**
  * Handle YAML formatting and validation
@@ -722,16 +723,9 @@ export async function handleSQL(editor: vscode.TextEditor, text: string) {
     // Validate SQL
     validationMessage = validateSQL(text);
 
-    // Try Deep Formatting with sql-formatter
+    // Deep Formatting
     try {
-        const { format } = await import('sql-formatter');
-
-        formatted = format(text, {
-            language: 'sql',
-            keywordCase: 'upper',
-            tabWidth: 4,
-            linesBetweenQueries: 2
-        });
+        formatted = await formatSQLDeep(text);
 
         await applyEdit(editor, formatted);
 
@@ -742,7 +736,7 @@ export async function handleSQL(editor: vscode.TextEditor, text: string) {
         }
         return;
     } catch (e: any) {
-        console.warn('sql-formatter failed:', e);
+        console.warn('Deep SQL formatting failed:', e);
         // Fallback to resilient formatting logic
     }
 
