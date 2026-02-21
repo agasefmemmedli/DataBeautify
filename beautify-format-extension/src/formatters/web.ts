@@ -459,9 +459,19 @@ export async function handleLESS(editor: vscode.TextEditor, text: string) {
     let formatted: string;
     let validationMessage: string | undefined;
 
+    // Get editor options
+    const tabSize = editor.options.tabSize as number;
+    const insertSpaces = editor.options.insertSpaces as boolean;
+
     // Lazy load dependencies
     const less = require('less');
     const jsbeautify = require('js-beautify');
+    let prettier: any;
+    try {
+        prettier = await import('prettier');
+    } catch (e) {
+        console.warn('Prettier failed to load:', e);
+    }
 
     // Validate LESS
     try {
@@ -474,25 +484,51 @@ export async function handleLESS(editor: vscode.TextEditor, text: string) {
         }
     }
 
-    /* eslint-disable */
     try {
-        // Format LESS (js-beautify's CSS formatter handles LESS nesting and variables)
-        formatted = jsbeautify.css(text, {
-            indent_size: 2,
-            indent_char: ' ',
-            selector_separator_newline: true,
-            newline_between_rules: true,
-            end_with_newline: true,
-            preserve_newlines: true,
-            max_preserve_newlines: 1,
-            space_around_combinator: true,
-            space_around_selector_separator: true
+        if (!prettier) {
+            throw new Error('Prettier module not available');
+        }
+
+        const format = prettier.format || (prettier.default && prettier.default.format);
+        if (!format) {
+            throw new Error('Prettier format function not found');
+        }
+
+        // Deep Formatting with Prettier
+        formatted = await format(text, {
+            parser: 'less',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: 120,
+            singleQuote: false,
+            bracketSameLine: false
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format LESS: ${error.message}`);
-        return;
+
+    } catch (prettierError: any) {
+        // Fallback to js-beautify
+        /* eslint-disable */
+        try {
+            // Format LESS (js-beautify's CSS formatter handles LESS nesting and variables)
+            formatted = jsbeautify.css(text, {
+                indent_size: tabSize,
+                indent_char: insertSpaces ? ' ' : '\t',
+                selector_separator_newline: true,
+                newline_between_rules: true,
+                end_with_newline: true,
+                preserve_newlines: true,
+                max_preserve_newlines: 1,
+                space_around_combinator: true,
+                space_around_selector_separator: true
+            });
+            if (!validationMessage) {
+                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format LESS: ${error.message}`);
+            return;
+        }
+        /* eslint-enable */
     }
-    /* eslint-enable */
 
     await applyEdit(editor, formatted);
 

@@ -10,3 +10,4 @@
 - [x] C (Deep Formatting Implemented)
 - [x] Swift (Deep Formatting Implemented)
 - [x] SCSS (Deep Formatting Implemented)
+- [x] LESS (Deep Formatting Implemented)
