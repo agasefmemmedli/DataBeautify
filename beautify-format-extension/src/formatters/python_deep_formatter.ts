@@ -200,7 +200,11 @@ export function formatPythonDeep(text: string): string {
                         needSpace = false;
                     }
                 } else if (token.text === '.') {
-                    needSpace = false;
+                    if (nextToken && nextToken.type === TokenType.Keyword && (nextToken.text === 'import' || nextToken.text === 'from')) {
+                         needSpace = true;
+                    } else {
+                         needSpace = false;
+                    }
                 }
             }
             else if (token.type === TokenType.Keyword) {
@@ -297,12 +301,43 @@ function postProcessImports(lines: string[]): string[] {
                 currentIndent = indent;
             }
 
-            if (indent === currentIndent) {
-                importBuffer.push(line);
-            } else {
+            if (indent !== currentIndent) {
                 // Indentation changed - flush previous block
                 flushBuffer();
                 currentIndent = indent;
+            }
+
+            // Check if we need to split multiple imports (e.g. "import os, sys")
+            // Only for "import ..." lines, not "from ... import ..."
+            if (trimmed.startsWith('import ') && !trimmed.startsWith('from ')) {
+                // Split logic that respects comments
+                let codePart = trimmed;
+                let commentPart = '';
+                const commentIdx = trimmed.indexOf('#');
+                if (commentIdx !== -1) {
+                    codePart = trimmed.substring(0, commentIdx);
+                    commentPart = trimmed.substring(commentIdx);
+                }
+
+                // Split by comma
+                // Remove "import " prefix (length 7) from codePart first
+                const importsPart = codePart.substring(7);
+                const parts = importsPart.split(',').map(p => p.trim()).filter(p => p.length > 0);
+
+                if (parts.length > 0) {
+                    const indentStr = line.substring(0, indent);
+                    parts.forEach((part, index) => {
+                        let newLine = `${indentStr}import ${part}`;
+                        // Append comment to the last part if it exists
+                        if (index === parts.length - 1 && commentPart) {
+                            newLine += ' ' + commentPart;
+                        }
+                        importBuffer.push(newLine);
+                    });
+                } else {
+                    importBuffer.push(line);
+                }
+            } else {
                 importBuffer.push(line);
             }
         } else {
