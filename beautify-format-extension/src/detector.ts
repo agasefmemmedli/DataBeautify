@@ -3,8 +3,9 @@ import { detectDelimiter, splitCSVLine } from './utils';
 /**
  * Detect format based on language ID or content
  */
-export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'c' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro' | 'unknown' {
+export function detectFormat(text: string, languageId: string): 'json' | 'jsonc' | 'xml' | 'svg' | 'html' | 'css' | 'scss' | 'sass' | 'less' | 'javascript' | 'typescript' | 'jsx' | 'tsx' | 'vue' | 'svelte' | 'php' | 'yaml' | 'toml' | 'ini' | 'env' | 'csv' | 'graphql' | 'python' | 'java' | 'kotlin' | 'csharp' | 'cpp' | 'c' | 'go' | 'rust' | 'ruby' | 'swift' | 'dart' | 'dockerfile' | 'shell' | 'powershell' | 'hcl' | 'makefile' | 'nginx' | 'sql' | 'prisma' | 'mongodb' | 'markdown' | 'latex' | 'mdx' | 'log' | 'handlebars' | 'twig' | 'liquid' | 'ipynb' | 'gitconfig' | 'editorconfig' | 'astro' | 'properties' | 'unknown' {
     const lang = languageId.toLowerCase();
+    if (lang === 'properties') { return 'properties'; }
     if (lang === 'astro') { return 'astro'; }
     if (lang === 'ipynb' || lang === 'jupyter') { return 'ipynb'; }
     if (lang === 'editorconfig') { return 'editorconfig'; }
@@ -188,6 +189,13 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         (/^[a-z0-9_-]+:\s+.+/im.test(trimmed) && !trimmed.includes('{'))
     ) {
         return 'yaml';
+    }
+
+    // Properties heuristic (Check before INI/ENV as it's more specific if comments are !)
+    if (/^[!#]/.test(trimmed) && !trimmed.startsWith('#!')) {
+         if (trimmed.includes('!') || (/^[a-z0-9._-]+\s*[=:]\s*.+/im.test(trimmed) && !trimmed.startsWith('['))) {
+             return 'properties';
+         }
     }
 
     // ENV heuristic
