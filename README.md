@@ -30,3 +30,4 @@
 - [x] JavaScript/TypeScript (Deep Formatting Implemented)
 - [x] Python (Deep Formatting Implemented)
 - [x] ENV (Deep Formatting Implemented)
+- [x] HCL (Terraform) (Deep Formatting Implemented)

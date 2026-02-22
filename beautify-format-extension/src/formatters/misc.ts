@@ -799,8 +799,18 @@ export async function handleHCL(editor: vscode.TextEditor, text: string) {
                      flushBlockBuffer();
                      // Normalize brace spacing
                      let lineToPrint = trimmed;
-                     if (!lineToPrint.endsWith(' {')) {
-                         lineToPrint = lineToPrint.replace(/\s*\{\s*$/, ' {');
+                     if (lineToPrint.endsWith('{')) {
+                         const braceIdx = lineToPrint.lastIndexOf('{');
+                         if (braceIdx > 0) {
+                             const charBefore = lineToPrint[braceIdx - 1];
+                             if (charBefore === '(' || charBefore === '[') {
+                                 // Ensure NO space before { if preceded by ( or [
+                                 lineToPrint = lineToPrint.replace(/\s*\{\s*$/, '{');
+                             } else {
+                                 // Ensure ONE space before { otherwise
+                                 lineToPrint = lineToPrint.replace(/\s*\{\s*$/, ' {');
+                             }
+                         }
                      }
                      formattedLines.push('  '.repeat(currentIndent) + lineToPrint);
                  }
