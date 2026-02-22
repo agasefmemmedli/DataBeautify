@@ -28,14 +28,14 @@ export class CppTokenizer {
     private line: number = 1;
     private col: number = 1;
 
-    // C++ Keywords
+    // C++ Keywords (Updated for C++20/23)
     private static readonly KEYWORDS = new Set([
         'alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool', 'break',
         'case', 'catch', 'char', 'char8_t', 'char16_t', 'char32_t', 'class', 'compl', 'concept', 'const',
         'consteval', 'constexpr', 'constinit', 'const_cast', 'continue', 'co_await', 'co_return', 'co_yield',
         'decltype', 'default', 'delete', 'do', 'double', 'dynamic_cast', 'else', 'enum', 'explicit',
-        'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long',
-        'mutable', 'namespace', 'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator', 'or', 'or_eq',
+        'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'import', 'inline', 'int', 'long',
+        'module', 'mutable', 'namespace', 'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator', 'or', 'or_eq',
         'private', 'protected', 'public', 'register', 'reinterpret_cast', 'requires', 'return', 'short',
         'signed', 'sizeof', 'static', 'static_assert', 'static_cast', 'struct', 'switch', 'template',
         'this', 'thread_local', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union',
@@ -56,15 +56,10 @@ export class CppTokenizer {
     private readonly reHex = /0x[0-9a-fA-F']+(?:[uU][lL]{0,2}|[lL]{0,2}[uU]?)?/y;
     // Binary: 0b...
     private readonly reBin = /0b[01']+(?:[uU][lL]{0,2}|[lL]{0,2}[uU]?)?/y;
-    // Octal: 0... (starts with 0, followed by octal digits)
-    // Note: 0 is ambiguous (hex/oct/dec), but handled by order or specific regex.
-    // Standard octal: 0[0-7]+. Zero itself is decimal 0 usually.
-    private readonly reOct = /0[0-7']+(?:[uU][lL]{0,2}|[lL]{0,2}[uU]?)?/y;
     // Float/Decimal:
     // Digits . Digits? Exponent? Suffix?
     // Digits Exponent Suffix?
     // . Digits Exponent? Suffix?
-    // We try to match robustly.
     private readonly reNumber = /(\d[\d']*\.?\d*([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?)(?:[fF]|[lL]|[uU])?/y;
 
     constructor(code: string) {
@@ -143,23 +138,18 @@ export class CppTokenizer {
             }
 
             // Preprocessor (#...)
-            // Must be at start of line (possibly indented by spaces/tabs? Standard C allows space before #)
-            // But usually we treat # at any position as operator unless it looks like directive.
-            // C++ tokenizer: # followed by identifier is preprocessor.
-            // But it could be operator in some contexts (e.g. stringizing macro argument).
-            // Simplification: if # is found, check if followed by directive keyword.
             if (char === '#') {
-                // Check if previous non-whitespace was newline? Or just treat as Preprocessor if keyword matches.
-                // Scan forward
+                // Check if identifier follows (possibly after spaces)
                 let k = this.pos + 1;
                 while (k < this.code.length && /[ \t]/.test(this.code[k])) k++;
-                // Check if identifier follows
+
                 this.reIdentifier.lastIndex = k;
                 const match = this.reIdentifier.exec(this.code);
                 if (match) {
                     const directive = match[0];
-                    if (['include', 'define', 'undef', 'if', 'ifdef', 'ifndef', 'else', 'elif', 'endif', 'error', 'line', 'pragma', 'version', 'extension'].includes(directive)) {
-                        // It's a preprocessor directive. Consume until end of line (handling backslash continuations)
+                    // Common C/C++ preprocessor directives
+                    if (['include', 'define', 'undef', 'if', 'ifdef', 'ifndef', 'else', 'elif', 'endif', 'error', 'line', 'pragma', 'version', 'extension', 'warning', 'region', 'endregion'].includes(directive)) {
+                        // Consume until logical end of line (handling backslash continuations)
                         let end = this.pos;
                         while (end < this.code.length) {
                             if (this.code[end] === '\n' || this.code[end] === '\r') {
@@ -167,7 +157,7 @@ export class CppTokenizer {
                                 let backslashPos = end - 1;
                                 while (backslashPos >= this.pos && /[ \t]/.test(this.code[backslashPos])) backslashPos--;
                                 if (backslashPos >= this.pos && this.code[backslashPos] === '\\') {
-                                    // Continuation, skip newline
+                                    // Continuation, skip newline char
                                     end++;
                                     if (end < this.code.length && this.code[end] === '\n') end++; // Handle \r\n
                                     continue;
@@ -205,48 +195,24 @@ export class CppTokenizer {
             }
             // Prefixed String (L"...", u8"...", u"...", U"...")
             if ((char === 'L' || char === 'u' || char === 'U') && this.pos + 1 < this.code.length) {
-                // Check next char
                 let offset = 1;
                 if (char === 'u' && this.code[this.pos + 1] === '8') offset = 2;
 
                 if (this.pos + offset < this.code.length && this.code[this.pos + offset] === '"') {
                      const prefix = this.code.substring(this.pos, this.pos + offset);
-                     // Advance manually past prefix to use matchString logic, then prepend
-                     // Actually easier to just implement matchString with offset logic or manual check
+                     // Temporarily advance to parse string content
                      this.pos += offset;
-                     this.col += offset;
+                     this.col += offset; // Approximate
                      const str = this.matchString();
+                     // Revert
+                     this.pos -= offset;
+                     this.col -= offset;
+
                      if (str) {
-                         // Backtrack pos/col logically for token creation?
-                         // We advanced pos/col. So we push token with original start.
-                         // But matchString returns the string content including quotes.
-                         // Let's reconstruct.
-                         tokens.push({ type: TokenType.String, text: prefix + str, line: this.line, col: this.col - offset });
-                         this.advanceStr(str);
-                         // Wait, matchString does NOT advance. It just returns string.
-                         // My logic above for standard string: push token, THEN advanceStr.
-                         // Here I advanced pos/col manually.
-                         // Let's fix.
-                         // Reset pos/col
-                         this.pos -= offset;
-                         this.col -= offset;
-                         // Just manually advance properly
-                         this.pos += offset; // skip prefix
-                         // col update? advanceStr handles line/col.
-                         // If I use matchString() which relies on this.code[this.pos] being ", it works.
-                         // But matchString uses this.code and this.pos.
-                         // So I temporarily advanced.
-                         // The string returned is just "..." part.
-                         // I need to join them.
                          const fullStr = prefix + str;
-                         // Reset pos to start of prefix
-                         this.pos -= offset;
                          tokens.push({ type: TokenType.String, text: fullStr, line: this.line, col: this.col });
                          this.advanceStr(fullStr);
                          continue;
-                     } else {
-                         this.pos -= offset;
-                         this.col -= offset;
                      }
                 }
             }
@@ -263,22 +229,20 @@ export class CppTokenizer {
             // Prefixed Char (L'...', u'...', U'...')
             if ((char === 'L' || char === 'u' || char === 'U') && this.pos + 1 < this.code.length) {
                 let offset = 1;
-                if (char === 'u' && this.code[this.pos + 1] === '8') offset = 2; // u8 character literal in C++17? Actually C++17 added u8 character literals.
+                if (char === 'u' && this.code[this.pos + 1] === '8') offset = 2;
 
                 if (this.pos + offset < this.code.length && this.code[this.pos + offset] === '\'') {
                     this.pos += offset;
                     this.col += offset;
                     const ch = this.matchChar();
+                    this.pos -= offset;
+                    this.col -= offset;
+
                     if (ch) {
-                        const fullChar = this.code.substring(this.pos - offset, this.pos) + ch;
-                        this.pos -= offset;
-                        this.col -= offset;
+                        const fullChar = this.code.substring(this.pos, this.pos + offset) + ch;
                         tokens.push({ type: TokenType.Char, text: fullChar, line: this.line, col: this.col });
                         this.advanceStr(fullChar);
                         continue;
-                    } else {
-                        this.pos -= offset;
-                        this.col -= offset;
                     }
                 }
             }
@@ -298,7 +262,7 @@ export class CppTokenizer {
 
             // Number
             if (/\d/.test(char) || (char === '.' && this.pos + 1 < this.code.length && /\d/.test(this.code[this.pos + 1]))) {
-                // Check Hex/Bin/Oct first
+                // Check Hex/Bin first
                 this.reHex.lastIndex = this.pos;
                 const hex = this.reHex.exec(this.code);
                 if (hex) {
@@ -314,7 +278,7 @@ export class CppTokenizer {
                     continue;
                 }
 
-                // Then general number (includes float, octal, decimal)
+                // General number
                 this.reNumber.lastIndex = this.pos;
                 const num = this.reNumber.exec(this.code);
                 if (num) {
