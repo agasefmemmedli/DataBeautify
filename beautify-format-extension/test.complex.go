@@ -27,9 +27,9 @@ fmt.Println("x is less than y")
 	}
 
 	p := Person{
-		Name: "John",
-Age: 30,
-			Address: "123 Main St",
+		Name: "John"
+Age: 30
+			Address: "123 Main St"
 	}
 
 	fmt.Printf("Person: %+v\n", p)

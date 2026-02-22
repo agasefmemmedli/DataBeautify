@@ -33,3 +33,4 @@
 - [x] HCL (Terraform) (Deep Formatting Implemented)
 - [x] Makefile (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)
+- [x] Go (Deep Formatting Implemented)

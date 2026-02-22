@@ -161,7 +161,6 @@
     "onLanguage:editorconfig",
     "onLanguage:astro"
   ],
-  "type": "module",
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [

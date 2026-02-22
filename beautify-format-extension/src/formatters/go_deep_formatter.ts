@@ -28,6 +28,9 @@ export function formatGoDeep(text: string): string {
     // 3. Apply Standard Spacing
     applySpacing(lines);
 
+    // NEW: Enforce Trailing Commas
+    enforceTrailingCommas(lines);
+
     // 4. Align Blocks
     alignBlocks(lines);
 
@@ -200,6 +203,85 @@ function applySpacing(lines: Token[][]) {
         }
         lines[i] = newLine;
     }
+}
+
+// --- Trailing Comma Logic ---
+
+function enforceTrailingCommas(lines: Token[][]) {
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const relevant = line.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
+        if (relevant.length === 0) continue;
+
+        const last = relevant[relevant.length - 1];
+        if (last.text === '{') {
+            // Check if it is a literal start
+            if (isCompositeLiteralStart(line, last)) {
+                // It is a literal.
+                // Find the closing brace.
+                let balance = 1;
+                let j = i + 1;
+                while (j < lines.length) {
+                    const l = lines[j];
+                    for (const t of l) {
+                        if (t.text === '{') balance++;
+                        if (t.text === '}') balance--;
+                    }
+                    if (balance === 0) break;
+                    j++;
+                }
+
+                if (j < lines.length && j > i) {
+                    // It is multiline (since j > i)
+                    // Iterate lines inside
+                    for (let k = i + 1; k < j; k++) {
+                        const innerLine = lines[k];
+                        const innerRel = innerLine.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
+                        if (innerRel.length === 0) continue;
+
+                        const innerLast = innerRel[innerRel.length - 1];
+                        if (innerLast.text !== ',' && innerLast.text !== '{') {
+                            // Needs comma
+                            // Insert comma token
+                            const comma: Token = { type: TokenType.Punctuation, text: ',', line: 0, col: 0 };
+
+                            // Find where to insert (after innerLast)
+                            const realLastIdx = innerLine.lastIndexOf(innerLast);
+                            // If there are comments on the line, we should insert before them?
+                            // innerLast is the last non-comment token.
+                            // So inserting immediately after it is correct.
+                            innerLine.splice(realLastIdx + 1, 0, comma);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function isCompositeLiteralStart(line: Token[], braceToken: Token): boolean {
+    const relevant = line.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
+    const idx = relevant.indexOf(braceToken);
+    if (idx <= 0) return false;
+
+    const prev = relevant[idx - 1];
+
+    // Check immediate predecessor
+    if (prev.text === 'struct' || prev.text === 'interface') return false;
+
+    // Check flow control
+    for (let k = idx - 1; k >= 0; k--) {
+        const t = relevant[k];
+        if (t.type === TokenType.Keyword) {
+            if (['if', 'for', 'switch', 'select', 'case', 'default', 'else', 'func', 'package', 'import', 'type'].includes(t.text)) {
+                return false;
+            }
+            if (['return', 'go', 'defer', 'const', 'var'].includes(t.text)) {
+                return true;
+            }
+        }
+    }
+    return true;
 }
 
 function isUnaryContext(prev: Token): boolean {
