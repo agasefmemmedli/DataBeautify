@@ -50,6 +50,7 @@ export function formatDartDeep(text: string): string {
     let inParen = 0;
     let inBracket = 0;
     let inBrace = 0;
+    let inInitializerList = false;
 
     // Switch State Tracking
     // Stack stores the indent level of the 'switch' keyword
@@ -163,11 +164,23 @@ export function formatDartDeep(text: string): string {
             }
         }
 
+        // Initializer List Logic (commas force newline AFTER comma)
+        if (inInitializerList && prev && prev.text === ',') {
+            forceNewline = true;
+        }
+
         // Constructor Initializers :
-        if (token.text === ':' && inParen === 0 && inBrace === 1 && switchStack.length === 0) {
+        // Note: This simple heuristic (inBrace >= 1) might incorrectly identify ternary operators in field initializers if they end with ')'
+        if (token.text === ':' && inParen === 0 && inBrace >= 1 && switchStack.length === 0) {
             if (prev && prev.text === ')') {
                  forceNewline = true;
+                 inInitializerList = true; // Enter Initializer List
             }
+        }
+
+        // End Initializer List
+        if (inInitializerList && (token.text === '{' || token.text === ';')) {
+            inInitializerList = false;
         }
 
         // Append to output
@@ -179,6 +192,11 @@ export function formatDartDeep(text: string): string {
 
             // Calc indent
             let currentIndent = indentLevel;
+
+            if (inInitializerList) {
+                // If we are in initializer list, and it's a new line, we should be indented +2 relative to constructor start (indentLevel)
+                currentIndent = indentLevel + 2;
+            }
 
             // Switch Case Body Indentation
             if (switchStack.length > 0) {
@@ -193,14 +211,14 @@ export function formatDartDeep(text: string): string {
             if (token.text === '..' || token.text === '?..') {
                 currentIndent += 2;
             }
-            // Adjust for constructor initializer
+            // Adjust for constructor initializer colon
             if (token.text === ':') {
                  if (prev && prev.text === ')') {
-                      currentIndent += 2; // Indent initializer list
+                      currentIndent = indentLevel + 2; // Indent initializer list start
                  }
             }
+
             // Adjust for wrapped arguments/parameters
-            // Only if we forced a newline inside parens and it's not a block start
             if ((inParen > 0 || inBracket > 0) && forceNewline) {
                  // Check if we are inside a parameter list that wraps
                  // Simple heuristic: if previous was comma or opening paren
@@ -209,7 +227,7 @@ export function formatDartDeep(text: string): string {
                  } else {
                      // Continuation indent
                      if (!['}', ']'].includes(token.text)) { // Don't indent closing on new line
-                        currentIndent += 1;
+                        // No additional indentation needed here for block format
                      }
                  }
             }
@@ -317,7 +335,7 @@ export function formatDartDeep(text: string): string {
             if (token.text === ')' || token.text === ']') spaceBefore = false;
             if (token.text === '(') {
                  if (prev && (prev.type === TokenType.Identifier || prev.type === TokenType.Keyword)) {
-                     if (['if', 'for', 'while', 'switch', 'catch'].includes(prev.text)) spaceBefore = true;
+                     if (['if', 'for', 'while', 'switch', 'catch', 'var'].includes(prev.text)) spaceBefore = true;
                      else spaceBefore = false;
                  }
                  else if (prev && prev.text === '>') {
