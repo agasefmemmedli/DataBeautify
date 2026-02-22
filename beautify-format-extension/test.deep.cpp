@@ -1,76 +1,123 @@
 #include <iostream>
 #include <vector>
+#include <map>
 #include <string>
+#include <type_traits>
 
-// Namespace
-namespace MyNamespace {
+// Macros
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define PRINT(x) std::cout << #x << " = " << x << std::endl
 
-// Template Class
-template <typename T>
-class MyClass {
+// Forward declaration
+template<typename T>
+class MyContainer;
+
+// Enumeration
+enum class Color {
+    Red,
+    Green,
+    Blue
+};
+
+// Struct with attributes
+struct [[nodiscard]] Point {
+    int x;
+    int y;
+};
+
+// Class with inheritance and templates
+template<typename T, typename U = std::string>
+class MyClass : public std::vector<T> {
 public:
-    // Constructor
-    MyClass(T val) : value(val) {}
+    using value_type = T;
 
-    // Method with pointer and reference
-    void process(T* ptr, T& ref) {
-        if (ptr != nullptr) {
-            *ptr = ref * 2; // Binary multiply and Unary dereference
+    // Constructor with initializer list
+    MyClass(int size) : std::vector<T>(size), m_name("default") {
+        if (size > 100) {
+            this->reserve(size * 2);
         }
     }
 
-    // Accessor
-    T getValue() const {
-        return value;
+    // Function with trailing return type and noexcept
+    auto getName() const noexcept -> const std::string& {
+        return m_name;
     }
+
+    // Template member function
+    template<typename V>
+    void process(V&& value) {
+        // Lambda expression
+        auto lambda = [this, &value](int x) -> bool {
+            return x > 0 && value != T{};
+        };
+
+        if (lambda(1)) {
+            m_data.push_back(std::forward<V>(value));
+        }
+    }
+
+protected:
+    std::vector<U> m_data;
 
 private:
-    T value;
+    std::string m_name;
+    int* m_ptr = nullptr; // Pointer syntax
+    int& m_ref = *m_ptr;  // Reference syntax
 };
 
-} // namespace MyNamespace
+// Concept (C++20)
+template<typename T>
+concept Addable = requires(T a, T b) {
+    { a + b } -> std::convertible_to<T>;
+};
 
-// Main function
-int main() {
-    using namespace MyNamespace;
-
-    // Object creation
-    MyClass<int> obj(10);
-    int x = 5;
-    int y = 20;
-
-    // Comparison
-    if (x < y) {
-        std::cout << "x is less than y" << std::endl;
-    }
-
-    // Function call
-    obj.process(&x, y);
-
-    // Lambda
-    auto lambda = [](int a, int b) {
-        return a + b;
-    };
-
-    // Vector
-    std::vector<std::string> items;
-    items.push_back("Hello");
-
+// Function using concept
+void add(Addable auto a, Addable auto b) {
     // Switch case
-    switch (x) {
-        case 5:
-            std::cout << "Five" << std::endl;
+    switch (a) {
+        case 0: {
+            std::cout << "Zero";
             break;
+        }
+        case 1:
+            std::cout << "One";
+            [[fallthrough]];
         default:
-            std::cout << "Other" << std::endl;
+            std::cout << "Many";
             break;
     }
+}
 
-    // Raw String
-    std::string raw = R"(
-        Line 1
-        Line 2
+// Global variable with complex type
+std::map<std::string, std::vector<int>> g_map = {
+    {"one", {1}},
+    {"two", {1, 2}}
+};
+
+int main() {
+    MyClass<int> obj(10);
+    obj.process(42);
+
+    // Initializer list logic
+    std::vector<int> vec = {1, 2, 3, 4, 5};
+
+    // Complex expression
+    int result = (1 + 2) * (3 - 4) / 5 % 6;
+    bool check = (result > 0) && (result < 10) || !(result == 5);
+
+    // Raw string literal
+    const char* raw = R"(
+        This is a raw string
+        spanning multiple lines.
     )";
+
+    // Nested templates
+    std::vector<std::vector<int>> matrix;
+
+    // Pointer alignment check
+    int * p1; // Should be int* p1
+    int* p2;
+    int *p3;
 
     return 0;
 }
