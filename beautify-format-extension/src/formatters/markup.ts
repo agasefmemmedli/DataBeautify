@@ -5,6 +5,7 @@ import { formatMarkdownDeep } from './markdown_deep_formatter';
 import { formatAstroDeep } from './astro_deep_formatter';
 import { formatLaTeXDeep } from './latex_deep_formatter';
 import { formatHandlebarsDeep } from './handlebars_deep_formatter';
+import { formatTwigDeep } from './twig_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -762,120 +763,7 @@ export async function handleTwig(editor: vscode.TextEditor, text: string) {
 
         // Resilient formatting logic
         try {
-            const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-
-        // Void tags that don't need closing
-        const voidTags = [
-            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-            'link', 'meta', 'param', 'source', 'track', 'wbr'
-        ];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Check for dedentation triggers at the start of the line
-            let currentIndent = indentLevel;
-
-            // Closing Twig block: {% endif %}, {% endblock %}, etc.
-            if (/^{%\s*end(if|for|block|macro|embed|apply|sandbox|autoescape|verbatim|set|with|filter|trans)\b/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Middle Twig block: {% else %}, {% elseif %}
-            else if (/^{%\s*(else|elseif)\b/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Closing HTML tag: </div>
-            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Closing brace } or ]
-            else if (trimmed.startsWith('}') || trimmed.startsWith(']')) {
-                 currentIndent = Math.max(0, indentLevel - 1);
-            }
-
-            // Apply indentation
-            formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-            // Calculate indentation for the NEXT line
-            let netChange = 0;
-
-            // Remove comments for analysis
-            const lineNoComments = line.replace(/{#[\s\S]*?#}/g, '').replace(/<!--[\s\S]*?-->/g, '');
-
-            // Check for Twig block openers/closers
-            const twigTagRegex = /{%-?\s*([a-zA-Z0-9_]+)([^%]*?)-?%}/g;
-            let twigMatch;
-            let twigOpeners = 0;
-            let twigClosers = 0;
-
-            while ((twigMatch = twigTagRegex.exec(lineNoComments)) !== null) {
-                const tagName = twigMatch[1];
-                const content = twigMatch[2];
-
-                if (/^end/.test(tagName)) {
-                    twigClosers++;
-                } else if (/^(block|if|for|macro|embed|apply|sandbox|autoescape|verbatim|with|filter|trans)$/.test(tagName)) {
-                    twigOpeners++;
-                } else if (tagName === 'set') {
-                    // Only count as opener if it's a block set (no '=' assignment)
-                    if (!content.includes('=')) {
-                        twigOpeners++;
-                    }
-                }
-            }
-
-            // Check for HTML tag openers
-            let htmlOpeners = 0;
-            let htmlClosers = 0;
-
-            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
-            let match;
-            while ((match = tagRegex.exec(lineNoComments)) !== null) {
-                const fullTag = match[0];
-                const tagName = match[1].toLowerCase();
-                const isClosing = fullTag.startsWith('</');
-                const isSelfClosing = fullTag.endsWith('/>');
-
-                if (isClosing) {
-                    htmlClosers++;
-                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
-                    htmlOpeners++;
-                }
-            }
-
-            // Check for brace openers/closers (approximate for objects/arrays)
-            const braceOpeners = (lineNoComments.match(/\{|\[/g) || []).length;
-            const braceClosers = (lineNoComments.match(/\}|\]/g) || []).length;
-            // Ignore double braces used for Twig {{ }}
-            const variableOpeners = (lineNoComments.match(/{{/g) || []).length;
-            const variableClosers = (lineNoComments.match(/}}/g) || []).length;
-
-            // Adjust brace count by removing variable braces
-            // Each {{ is 2 {, each }} is 2 }
-            const realBraceOpeners = braceOpeners - (variableOpeners * 2);
-            const realBraceClosers = braceClosers - (variableClosers * 2);
-
-            // Only count if positive (simple heuristic)
-            const netBraceChange = Math.max(0, realBraceOpeners) - Math.max(0, realBraceClosers);
-
-            netChange = (twigOpeners - twigClosers) + (htmlOpeners - htmlClosers) + netBraceChange;
-
-            // Special handling for intermediate tags: they essentially reset indent for themselves but keep it for content
-            // Logic handled by dedent at start, so just ensure we don't double count if we consider them openers?
-            // No, 'else' is not in the openers regex above. So it's fine.
-
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-
-        formatted = formattedLines.join('\n');
+            formatted = formatTwigDeep(text);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Twig: ${error.message}`);
             return;

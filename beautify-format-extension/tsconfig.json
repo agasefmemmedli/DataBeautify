@@ -16,15 +16,10 @@
   "exclude": [
     "node_modules",
     ".vscode-test",
-    "test.ts",
-    "test.js",
-    "test.css",
-    "test.less",
-    "test.jsx",
-    "test-broken.jsx",
-    "test.tsx",
-    "test.complex.ts",
-    "test.complex.tsx",
-    "test.deep.ts"
+    "test*.ts",
+    "test*.tsx",
+    "test*.js",
+    "src/test",
+    "src/verify-*.ts"
   ]
 }
