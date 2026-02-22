@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
 import { formatMarkdownDeep } from './markdown_deep_formatter';
+import { formatMDXDeep } from './mdx_deep_formatter';
 import { formatAstroDeep } from './astro_deep_formatter';
 import { formatLaTeXDeep } from './latex_deep_formatter';
 import { formatHandlebarsDeep } from './handlebars_deep_formatter';
@@ -137,168 +138,9 @@ export async function handleMDX(editor: vscode.TextEditor, text: string) {
     } catch (prettierError: any) {
         console.warn('Prettier MDX formatting failed, falling back to custom formatter', prettierError);
 
-        // Resilient formatting logic (Fallback)
+        // Resilient formatting logic (Deep Formatting Fallback)
         try {
-            const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let inCodeBlock = false;
-        let inTable = false;
-        let tableRows: string[][] = [];
-        let inFrontmatter = false;
-        let jsxIndentLevel = 0;
-
-        const flushTable = (rows: string[][]) => {
-            if (rows.length === 0) return;
-            const maxWidths: number[] = [];
-            rows.forEach(row => {
-                row.forEach((cell, i) => {
-                    maxWidths[i] = Math.max(maxWidths[i] || 0, cell.trim().length);
-                });
-            });
-
-            rows.forEach((row, rowIndex) => {
-                const isSeparator = rowIndex === 1 && row.every(cell => /^\s*:?-+:?\s*$/.test(cell));
-                const formattedRow = row.map((cell, i) => {
-                    const trimmed = cell.trim();
-                    if (isSeparator) {
-                        const hasLeftColon = trimmed.startsWith(':');
-                        const hasRightColon = trimmed.endsWith(':');
-                        let content = '-'.repeat(Math.max(3, maxWidths[i]));
-                        if (hasLeftColon && hasRightColon) {
-                            content = ':' + '-'.repeat(Math.max(1, maxWidths[i] - 2)) + ':';
-                        } else if (hasLeftColon) {
-                            content = ':' + '-'.repeat(Math.max(2, maxWidths[i] - 1));
-                        } else if (hasRightColon) {
-                            content = '-'.repeat(Math.max(2, maxWidths[i] - 1)) + ':';
-                        }
-                        return content;
-                    }
-                    return ' ' + trimmed.padEnd(maxWidths[i]) + ' ';
-                }).join('|');
-                formattedLines.push('|' + formattedRow + '|');
-            });
-        };
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            // Frontmatter
-            if (i === 0 && trimmed === '---') {
-                inFrontmatter = true;
-                formattedLines.push(trimmed);
-                continue;
-            }
-            if (inFrontmatter) {
-                formattedLines.push(line);
-                if (trimmed === '---') {
-                    inFrontmatter = false;
-                }
-                continue;
-            }
-
-            // ESM imports/exports
-            if (!inCodeBlock && /^(import|export)\b/.test(trimmed)) {
-                formattedLines.push(trimmed);
-                continue;
-            }
-
-            // Code blocks
-            if (trimmed.startsWith('```')) {
-                if (inTable) {
-                    flushTable(tableRows);
-                    tableRows = [];
-                    inTable = false;
-                }
-                inCodeBlock = !inCodeBlock;
-                if (inCodeBlock && formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(trimmed);
-                continue;
-            }
-
-            if (inCodeBlock) {
-                formattedLines.push(line);
-                continue;
-            }
-
-            // Tables
-            if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2) {
-                inTable = true;
-                const cells = trimmed.split('|').slice(1, -1);
-                tableRows.push(cells);
-                continue;
-            } else if (inTable) {
-                flushTable(tableRows);
-                tableRows = [];
-                inTable = false;
-            }
-
-            // Empty lines
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // JSX elements
-            if (trimmed.startsWith('<') || trimmed.startsWith('</') || jsxIndentLevel > 0) {
-                // Determine indentation for this line
-                let currentLineIndent = jsxIndentLevel;
-                if (trimmed.startsWith('</') || trimmed.startsWith('/>')) {
-                    currentLineIndent = Math.max(0, jsxIndentLevel - 1);
-                }
-
-                formattedLines.push('  '.repeat(currentLineIndent) + trimmed);
-
-                // Update indent level for next line
-                const openTags = (trimmed.match(/<[a-zA-Z][a-zA-Z0-9]*/g) || []).length;
-                const closeTags = (trimmed.match(/<\/[a-zA-Z][a-zA-Z0-9]*>|\/>/g) || []).length;
-                jsxIndentLevel = Math.max(0, jsxIndentLevel + openTags - closeTags);
-                continue;
-            }
-
-            // Headers
-            if (trimmed.startsWith('#')) {
-                const match = trimmed.match(/^(#+)(.*)$/);
-                if (match) {
-                    const level = match[1];
-                    const content = match[2].trim();
-                    if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                        formattedLines.push('');
-                    }
-                    formattedLines.push(`${level} ${content}`);
-                    continue;
-                }
-            }
-
-            // Lists
-            const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
-            if (listMatch) {
-                const indent = listMatch[1];
-                let marker = listMatch[2];
-                if (marker === '*' || marker === '+') marker = '-';
-                const content = listMatch[3].trim();
-                formattedLines.push(`${indent}${marker} ${content}`);
-                continue;
-            }
-
-            // Blockquotes
-            if (trimmed.startsWith('>')) {
-                const content = trimmed.substring(1).trim();
-                formattedLines.push(`> ${content}`);
-                continue;
-            }
-
-            // Regular text
-            formattedLines.push(trimmed);
-        }
-
-        if (inTable) {
-            flushTable(tableRows);
-        }
-
-        formatted = formattedLines.join('\n');
+            formatted = formatMDXDeep(text);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format MDX: ${error.message}`);
             return;
