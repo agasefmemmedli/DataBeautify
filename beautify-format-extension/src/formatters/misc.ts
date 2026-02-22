@@ -3,6 +3,7 @@ import { applyEdit } from '../utils';
 import { formatDockerfileDeep } from './dockerfile_deep_formatter';
 import { formatPropertiesDeep } from './properties_deep_formatter';
 import { formatMakefileDeep } from './makefile_deep_formatter';
+import { formatNginxDeep } from './nginx_deep_formatter';
 
 /**
  * Handle Dockerfile formatting and validation
@@ -104,144 +105,7 @@ export async function handleNginx(editor: vscode.TextEditor, text: string) {
 
     // Deep Formatting Logic
     try {
-        const lines = text.split('\n');
-        let tokens: string[] = [];
-
-        // Robust Tokenizer
-        for (let line of lines) {
-            line = line.trim();
-            if (!line) continue;
-
-            // Preserve full-line comments immediately
-            if (line.startsWith('#')) {
-                // If we have previous tokens and the last one wasn't a structural delimiter or comment,
-                // we might need to handle it carefully.
-                // But generally, full line comments are standalone tokens.
-                tokens.push(line);
-                continue;
-            }
-
-            let currentToken = '';
-            let inString = false;
-            let quoteChar = '';
-
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-
-                if (inString) {
-                    currentToken += char;
-                    if (char === '\\') {
-                        i++;
-                        if (i < line.length) currentToken += line[i];
-                    } else if (char === quoteChar) {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (char === '#') {
-                    if (currentToken.trim()) tokens.push(currentToken.trim());
-                    currentToken = '';
-                    // Rest of line is a comment token
-                    tokens.push(line.substring(i).trim());
-                    break;
-                }
-
-                if (char === '{' || char === '}' || char === ';') {
-                    if (currentToken.trim()) tokens.push(currentToken.trim());
-                    tokens.push(char);
-                    currentToken = '';
-                } else if (/\s/.test(char)) {
-                    if (currentToken.trim()) {
-                        tokens.push(currentToken.trim());
-                        currentToken = '';
-                    }
-                } else if (char === '"' || char === "'") {
-                    if (currentToken.trim()) {
-                        tokens.push(currentToken.trim());
-                        currentToken = '';
-                    }
-                    inString = true;
-                    quoteChar = char;
-                    currentToken += char;
-                } else {
-                    currentToken += char;
-                }
-            }
-            if (currentToken.trim()) tokens.push(currentToken.trim());
-        }
-
-        // Reconstruction
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let currentLine = '';
-
-        for (let i = 0; i < tokens.length; i++) {
-            const token = tokens[i];
-
-            if (token === '}') {
-                if (currentLine.trim()) formattedLines.push('    '.repeat(indentLevel) + currentLine.trim());
-                currentLine = '';
-                indentLevel = Math.max(0, indentLevel - 1);
-                formattedLines.push('    '.repeat(indentLevel) + '}');
-                continue;
-            }
-
-            if (token === '{') {
-                currentLine = currentLine.trim() + ' {';
-                formattedLines.push('    '.repeat(indentLevel) + currentLine);
-                currentLine = '';
-                indentLevel++;
-                continue;
-            }
-
-            if (token === ';') {
-                currentLine = currentLine.trim() + ';';
-                formattedLines.push('    '.repeat(indentLevel) + currentLine);
-                currentLine = '';
-                continue;
-            }
-
-            if (token.startsWith('#')) {
-                if (currentLine.trim()) {
-                    // Inline comment
-                    formattedLines.push('    '.repeat(indentLevel) + currentLine.trim() + ' ' + token);
-                    currentLine = '';
-                } else {
-                    // Standalone comment
-                    formattedLines.push('    '.repeat(indentLevel) + token);
-                }
-                continue;
-            }
-
-            // Directive or Argument
-            if (currentLine === '') {
-                // Start of new line
-                // Insert blank lines before major blocks if they are not the first thing in a block
-                const majorDirectives = ['http', 'server', 'events', 'location', 'upstream', 'types', 'map', 'geo'];
-                if (majorDirectives.includes(token)) {
-                    if (formattedLines.length > 0 && !formattedLines[formattedLines.length - 1].trim().endsWith('{')) {
-                        // Avoid double empty lines
-                        if (formattedLines[formattedLines.length - 1] !== '') {
-                             formattedLines.push('');
-                        }
-                    }
-                }
-                currentLine = token;
-            } else {
-                currentLine += ' ' + token;
-            }
-        }
-
-        if (currentLine.trim()) {
-            formattedLines.push('    '.repeat(indentLevel) + currentLine.trim());
-        }
-
-        formatted = formattedLines.join('\n');
-
-        // Final polish: remove triple newlines if any slipped through
-        formatted = formatted.replace(/\n\n\n+/g, '\n\n');
-
+        formatted = formatNginxDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Nginx: ${error.message}`);
         return;
