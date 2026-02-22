@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatDockerfileDeep } from './dockerfile_deep_formatter';
+import { formatPropertiesDeep } from './properties_deep_formatter';
 
 /**
  * Handle Dockerfile formatting and validation
@@ -939,7 +940,7 @@ function validateHCL(text: string): string | undefined {
 
             if (char === '{' || char === '[' || char === '(') {
                 stack.push({ char, line: i + 1, col: j + 1 });
-            } else if (char === '}' || char === ']' || char === ')') {
+            } else if (char === '}' || char === ')' || char === ']') {
                 if (stack.length === 0) {
                     return `Unexpected closing character '${char}' at line ${i + 1}, col ${j + 1}`;
                 }
@@ -1537,4 +1538,49 @@ function validateLog(text: string): string | undefined {
     }
 
     return 'No recognized timestamp patterns found in the first few lines.';
+}
+
+/**
+ * Handle Properties formatting and validation
+ */
+export async function handleProperties(editor: vscode.TextEditor, text: string) {
+    let formatted: string;
+    let validationMessage: string | undefined;
+
+    // Validate Properties
+    validationMessage = validateProperties(text);
+
+    // Deep Formatting logic
+    try {
+        formatted = formatPropertiesDeep(text);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format Properties: ${error.message}`);
+        return;
+    }
+
+    await applyEdit(editor, formatted);
+
+    if (validationMessage) {
+        vscode.window.showWarningMessage(`Properties file has potential issues but was beautified. ${validationMessage}`);
+    } else {
+        vscode.window.showInformationMessage('Properties file formatted successfully!');
+    }
+}
+
+/**
+ * Custom resilient Properties validator
+ */
+function validateProperties(text: string): string | undefined {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '' || trimmed.startsWith('#') || trimmed.startsWith('!')) {
+            continue;
+        }
+
+        // No strict validation for properties as almost anything is valid key
+    }
+    return undefined;
 }

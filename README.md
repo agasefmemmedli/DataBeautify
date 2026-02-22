@@ -27,3 +27,4 @@
 - [x] CSS (Deep Formatting Implemented)
 - [x] SASS (Deep Formatting Implemented)
 - [x] Dart (Deep Formatting Implemented)
+- [x] Properties (Deep Formatting Implemented)
