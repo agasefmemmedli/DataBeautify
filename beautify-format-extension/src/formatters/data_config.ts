@@ -5,6 +5,7 @@ import { formatSQLDeep } from './sql_deep_formatter';
 import { formatYAMLDeep } from './yaml_deep_formatter';
 import { formatTOMLDeep } from './toml_deep_formatter';
 import { formatCSVDeep, validateCSV } from './csv_deep_formatter';
+import { formatENVDeep } from './env_deep_formatter';
 
 /**
  * Handle YAML formatting and validation
@@ -301,99 +302,10 @@ export async function handleINI(editor: vscode.TextEditor, text: string) {
  */
 export async function handleENV(editor: vscode.TextEditor, text: string) {
     let formatted: string;
-    let validationMessage: string | undefined;
 
     // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            // Handle comments and empty lines
-            if (trimmed === '' || trimmed.startsWith('#')) {
-                formattedLines.push(trimmed);
-                continue;
-            }
-
-            // Handle export KEY=VALUE or KEY=VALUE
-            // KEY must start with letter or underscore, followed by letters, numbers or underscores
-            const match = trimmed.match(/^(export\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*)$/);
-
-            if (match) {
-                const prefix = match[1] ? 'export ' : '';
-                const key = match[2];
-                let remainder = match[3].trim();
-                let value = '';
-                let comment = '';
-
-                // Value parsing logic
-                if (remainder.length > 0) {
-                    const firstChar = remainder[0];
-                    if (firstChar === '"' || firstChar === "'") {
-                        // Quoted value
-                        const quoteChar = firstChar;
-                        let endQuoteIdx = -1;
-                        for (let j = 1; j < remainder.length; j++) {
-                            if (remainder[j] === quoteChar && remainder[j-1] !== '\\') {
-                                endQuoteIdx = j;
-                                break;
-                            }
-                        }
-
-                        if (endQuoteIdx !== -1) {
-                            value = remainder.substring(0, endQuoteIdx + 1);
-                            const afterValue = remainder.substring(endQuoteIdx + 1).trim();
-                            if (afterValue.startsWith('#')) {
-                                comment = afterValue;
-                            }
-                        } else {
-                            // Unclosed quote, treat as raw value
-                             if (!validationMessage) {
-                                validationMessage = `Unclosed quote at line ${i + 1}`;
-                            }
-                            value = remainder;
-                        }
-                    } else {
-                        // Unquoted value
-                        // Find comment start
-                        let commentIdx = -1;
-                        for (let j = 0; j < remainder.length; j++) {
-                            // Basic check for comment start (space followed by #)
-                            if (remainder[j] === '#' && (j === 0 || /\s/.test(remainder[j-1]))) {
-                                commentIdx = j;
-                                break;
-                            }
-                        }
-
-                        if (commentIdx !== -1) {
-                            value = remainder.substring(0, commentIdx).trim();
-                            comment = remainder.substring(commentIdx).trim();
-                        } else {
-                            value = remainder;
-                        }
-
-                        // Apply quoting if needed (contains spaces or special chars)
-                        // Special chars: # (handled above), =, $, spaces
-                        // If value is empty, leave empty.
-                        if (value.length > 0 && (/\s/.test(value) || value.includes('='))) {
-                             value = `"${value}"`;
-                        }
-                    }
-                }
-
-                formattedLines.push(`${prefix}${key}=${value}${comment ? ' ' + comment : ''}`);
-            } else {
-                // If it doesn't match the pattern, it's a potential syntax error
-                if (!validationMessage && trimmed.length > 0) {
-                     validationMessage = `Potential issue at line ${i + 1}: "${trimmed}"`;
-                }
-                formattedLines.push(trimmed);
-            }
-        }
-        formatted = formattedLines.join('\n');
+        formatted = formatENVDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format ENV: ${error.message}`);
         return;
@@ -401,11 +313,7 @@ export async function handleENV(editor: vscode.TextEditor, text: string) {
 
     await applyEdit(editor, formatted);
 
-    if (validationMessage) {
-        vscode.window.showWarningMessage(`ENV has syntax issues but was beautified. ${validationMessage}`);
-    } else {
-        vscode.window.showInformationMessage('ENV formatted successfully!');
-    }
+    vscode.window.showInformationMessage('ENV formatted successfully!');
 }
 
 /**
