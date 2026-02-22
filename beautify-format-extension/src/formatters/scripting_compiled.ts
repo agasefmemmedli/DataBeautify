@@ -9,6 +9,7 @@ import { formatCSharpDeep } from './csharp_deep_formatter';
 import { formatDartDeep } from './dart_deep_formatter';
 import { formatSwiftDeep } from './swift_deep_formatter';
 import { formatRubyDeep } from './ruby_deep_formatter';
+import { formatShellDeep } from './shell_deep_formatter';
 
 /**
  * Handle Python formatting and validation
@@ -517,14 +518,14 @@ export async function handleShell(editor: vscode.TextEditor, text: string) {
 
         // Resilient fallback logic
         try {
-            formatted = formatShellCustom(text);
+            formatted = formatShellDeep(text);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Shell: ${error.message}`);
             return;
         }
 
         if (!validationMessage) {
-             validationMessage = "Deep formatting (Prettier) failed. Applied basic formatting.";
+             validationMessage = "Deep formatting (Prettier) failed. Applied deep formatting.";
         }
     }
 
@@ -535,72 +536,6 @@ export async function handleShell(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Shell Script formatted successfully!');
     }
-}
-
-/**
- * Custom resilient Shell formatter (Fallback)
- */
-function formatShellCustom(text: string): string {
-    const lines = text.split('\n');
-    const formattedLines: string[] = [];
-    let indentLevel = 0;
-    let inHeredoc = false;
-    let heredocDelimiter = '';
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        if (trimmed === '' && !inHeredoc) {
-            formattedLines.push('');
-            continue;
-        }
-
-        // Handle Heredoc
-        if (inHeredoc) {
-            formattedLines.push(line);
-            if (trimmed === heredocDelimiter) {
-                inHeredoc = false;
-            }
-            continue;
-        }
-
-        const heredocMatch = line.match(/<<-?\s*["']?([A-Z0-9_]+)["']?/i);
-        if (heredocMatch) {
-            inHeredoc = true;
-            heredocDelimiter = heredocMatch[1];
-        }
-
-        // Indentation adjustment
-        const closers = /^(fi|done|esac|\}|\]|\]\])\b|^(\)\s*$)/;
-        const intermediates = /^(then|do|else|elif|;;)\b/;
-
-        let currentIndent = indentLevel;
-        if (closers.test(trimmed) || intermediates.test(trimmed)) {
-            currentIndent = Math.max(0, indentLevel - 1);
-        }
-
-        // Apply indentation
-        formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-        // Calculate indent for NEXT line
-        const openers = /^(if|for|while|until|case)\b|(\{|\(|\[|\[\[)$/;
-        const isOpener = openers.test(trimmed);
-        const isCloser = closers.test(trimmed);
-
-        // Special check for 'then' or 'do' at end of line
-        const endsWithOpener = /[; \t](then|do)$/.test(trimmed);
-
-        if (isOpener || endsWithOpener || intermediates.test(trimmed)) {
-            indentLevel = currentIndent + 1;
-        } else if (isCloser) {
-            indentLevel = Math.max(0, currentIndent);
-        } else if (trimmed.endsWith(')')) {
-            // Potential case pattern
-            indentLevel = currentIndent + 1;
-        }
-    }
-    return formattedLines.join('\n');
 }
 
 /**
