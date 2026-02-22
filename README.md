@@ -40,3 +40,4 @@
 - [x] PowerShell (Deep Formatting Implemented)
 - [x] Git Config (Deep Formatting Implemented)
 - [x] MDX (Deep Formatting Implemented)
+- [x] Prisma (Deep Formatting Implemented)
