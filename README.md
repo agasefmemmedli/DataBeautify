@@ -35,3 +35,4 @@
 - [x] Nginx (Deep Formatting Implemented)
 - [x] LaTeX (Deep Formatting Implemented)
 - [x] YAML (Deep Formatting Implemented)
+- [x] Handlebars (Deep Formatting Implemented)

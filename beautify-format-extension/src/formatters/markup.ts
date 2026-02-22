@@ -4,6 +4,7 @@ import { formatPythonDeep } from './python_deep_formatter';
 import { formatMarkdownDeep } from './markdown_deep_formatter';
 import { formatAstroDeep } from './astro_deep_formatter';
 import { formatLaTeXDeep } from './latex_deep_formatter';
+import { formatHandlebarsDeep } from './handlebars_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -628,111 +629,11 @@ export async function handleHandlebars(editor: vscode.TextEditor, text: string) 
 
         // Resilient formatting logic (Fallback)
         try {
-            const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-
-        // Void tags that don't need closing
-        const voidTags = [
-            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-            'link', 'meta', 'param', 'source', 'track', 'wbr'
-        ];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Check for dedentation triggers at the start of the line
-            let currentIndent = indentLevel;
-
-            // Closing Handlebars block: {{/if}}, {{/each}}, etc.
-            if (/^{{\/[a-zA-Z0-9_.-]+/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Middle Handlebars block: {{else}}, {{^}}
-            else if (/^{{\s*(else|\^)/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Closing HTML tag: </div>
-            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-
-            // Apply indentation
-            formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-            // Calculate indentation for the NEXT line
-            let netChange = 0;
-
-            // Remove comments for analysis
-            const lineNoComments = line.replace(/{{!--[\s\S]*?--}}/g, '').replace(/{{![\s\S]*?}}/g, '').replace(/<!--[\s\S]*?-->/g, '');
-
-            // Check for Handlebars block openers
-            // {{#if ...}}, {{#each ...}}, {{#with ...}}, {{#block ...}}
-            // Excluding self-closing or inline usage if any (though standard block helpers are usually multiline)
-            const hbsOpeners = (lineNoComments.match(/{{#[a-zA-Z0-9_.-]+[^}]*}}/g) || []).length;
-            const hbsClosers = (lineNoComments.match(/{{\/[a-zA-Z0-9_.-]+}}/g) || []).length;
-
-            // Check for HTML tag openers
-            // <div ...> but not <img ...> or <div ... />
-            let htmlOpeners = 0;
-            let htmlClosers = 0;
-
-            // Simple regex for HTML tags - this is resilient/approximate
-            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
-            let match;
-            while ((match = tagRegex.exec(lineNoComments)) !== null) {
-                const fullTag = match[0];
-                const tagName = match[1].toLowerCase();
-                const isClosing = fullTag.startsWith('</');
-                const isSelfClosing = fullTag.endsWith('/>');
-
-                if (isClosing) {
-                    htmlClosers++;
-                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
-                    htmlOpeners++;
-                }
-            }
-
-            // Middle blocks (else, ^) don't change net indent for next line relative to previous
-            // but effectively we dedented current line, so we need to indent back for content
-            if (/^{{\s*(else|\^)/.test(trimmed)) {
-                // If we had {{else}}, we printed it at indent-1.
-                // The next line should be at indent.
-                // So if currentIndent was indent-1, next indent is currentIndent + 1 = indent.
-                // No net change to the *base* indentLevel from the start of this line's processing perspective?
-                // Actually:
-                // if (cond)
-                //   stuff
-                // else
-                //   stuff
-                // /if
-                // Initial: 0.
-                // {{#if}}: current=0, next=1.
-                // stuff: current=1, next=1.
-                // {{else}}: current=0 (dedented), next=1 (indented back).
-                // stuff: current=1, next=1.
-                // {{/if}}: current=0 (dedented), next=0.
-
-                // So for {{else}}, we want netChange to be 0 relative to the state *before* the dedent logic?
-                // No, indentLevel is the state at start of loop.
-                // If line is {{else}}, we used indentLevel-1.
-                // Next line should be indentLevel.
-                // So indentLevel (next) = indentLevel (current).
-                // So netChange = 0.
-                // BUT, hbsOpeners/Closers might be 0.
-            }
-
-            netChange = (hbsOpeners - hbsClosers) + (htmlOpeners - htmlClosers);
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-
-        formatted = formattedLines.join('\n');
+            // Use Custom Deep Formatter (Resilient + Alignment)
+            formatted = formatHandlebarsDeep(text, {
+                tabSize: 2,
+                insertSpaces: true
+            });
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Handlebars: ${error.message}`);
             return;
