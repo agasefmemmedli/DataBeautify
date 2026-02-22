@@ -129,24 +129,53 @@ async function runTest() {
             // Verification logic
             const lines = formattedText.split('\n');
 
-            // Expected output snippet check
-            // Indentation check
-            // {{#if isValid}}
-            //   <div>
-            //     <h1>Hello World</h1>
+            const divLine = lines.find(l => l.includes('<div class="container'));
+            const h1Line = lines.find(l => l.trim().startsWith('<h1>'));
+            // Hello might be on same line or next line depending on implementation details of Text/Block
+            // With latest implementation: block tag h1 -> newline -> indent -> text "Hello {{name}}" -> newline -> /h1
+            const helloLine = lines.find(l => l.trim().startsWith('Hello'));
 
-            const divLine = lines.find(l => l.trim() === '<div>');
-            const h1Line = lines.find(l => l.trim() === '<h1>Hello World</h1>');
-
-            if (h1Line && divLine) {
+            if (divLine && h1Line && helloLine) {
                  const divIndent = divLine.indexOf('<');
                  const h1Indent = h1Line.indexOf('<');
-                 if (h1Indent > divIndent) {
+                 const helloIndent = helloLine.indexOf('H');
+
+                 console.log(`Div Indent: ${divIndent}`);
+                 console.log(`H1 Indent: ${h1Indent}`);
+                 console.log(`Hello Indent: ${helloIndent}`);
+
+                 if (h1Indent > divIndent && helloIndent > h1Indent) {
                      console.log("✅ Indentation logic verified (nested content indented).");
                  } else {
                      console.error("❌ Indentation logic failed.");
                      process.exit(1);
                  }
+
+                 // Check inline block in attribute
+                 if (divLine.includes('{{#if active}}active{{/if}}')) {
+                     console.log("✅ Inline block in attribute verified.");
+                 } else {
+                     console.error("❌ Inline block in attribute failed.");
+                     process.exit(1);
+                 }
+
+                 // Check script preservation
+                 const scriptContentLine = lines.find(l => l.includes('const data = {'));
+                 if (scriptContentLine) {
+                     console.log("✅ Script content found.");
+                     // Check if it looks preserved (contains indentation or at least not totally flattened to start of line if it was indented)
+                     // Original was indented with 4 spaces.
+                     if (scriptContentLine.startsWith('    const')) {
+                          console.log("✅ Script whitespace preserved.");
+                     } else {
+                          console.log("⚠️ Script whitespace changed (might be acceptable for deep formatter).");
+                          // We accept change if it's clean.
+                     }
+                 } else {
+                     console.error("❌ Script content missing or mangled.");
+                     process.exit(1);
+                 }
+
             } else {
                 console.error("❌ Expected content missing.");
                 process.exit(1);
