@@ -28,3 +28,4 @@
 - [x] SASS (Deep Formatting Implemented)
 - [x] Dart (Deep Formatting Implemented)
 - [x] Properties (Deep Formatting Implemented)
+- [x] JavaScript/TypeScript (Deep Formatting Implemented)
