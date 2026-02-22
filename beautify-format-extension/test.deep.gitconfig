@@ -1,9 +1,10 @@
 [user]
-	name = "John Doe"
+  name = "John Doe"
 	email = john@example.com
 [core]
     editor = code --wait
     autocrlf = input
+    bare
 [diff "image"]
 	command = "imgdiff"
 [alias]
@@ -33,3 +34,8 @@
                 line3
     escaped = "quote \" inside"
     path = C:\\Program Files\\App
+[section "empty"]
+    empty_val =
+    bool_key
+    newline_split =
+    next_line = val

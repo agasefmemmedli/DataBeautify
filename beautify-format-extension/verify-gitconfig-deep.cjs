@@ -130,20 +130,15 @@ async function runTest() {
     // Verification Logic
     const lines = formattedText.split('\n');
 
-    // 1. Check for tab indentation (or 4 spaces if I decide to change it, but keeping tab for now as per current)
-    // Wait, deep formatting usually prefers spaces (4) for config files in many standards, but Git Config often uses tabs.
-    // Let's check what I will implement. "Standard Style" for git config: `man git-config` says "syntax is fairly flexible".
-    // Most examples use tabs. I'll stick to tabs `\t`.
-
-    // Check indentation of keys
-    const nameLine = lines.find(l => l.trim().startsWith('name ='));
+    // 1. Check for tab indentation
+    const nameLine = lines.find(l => l.trim().startsWith('name'));
     if (!nameLine || !nameLine.startsWith('\t')) {
         console.error("❌ 'name' property not indented with tab.");
         process.exit(1);
     }
 
-    // 2. Check spacing around =
-    if (!nameLine.includes('name = "John Doe"')) {
+    // 2. Check spacing around = (allowing for alignment)
+    if (!nameLine.match(/name\s+=\s+"John Doe"/)) {
         console.error("❌ 'name' property spacing incorrect (expected 'key = value').");
         process.exit(1);
     }
@@ -161,19 +156,38 @@ async function runTest() {
     }
 
     // 5. Check multiline preservation
-    const multilineIndex = lines.findIndex(l => l.trim().startsWith('multiline ='));
+    const multilineIndex = lines.findIndex(l => l.trim().startsWith('multiline'));
     if (multilineIndex === -1) {
         console.error("❌ 'multiline' property not found.");
         process.exit(1);
     }
-    // Check if continuation lines exist and are indented
-    // Git config continuation: line ends with \, next line is value continuation.
-    // Deep formatting should probably indent continuation lines.
 
     // 6. Check comments
     if (!lines.find(l => l.trim().startsWith('# This is a comment'))) {
         console.error("❌ Comment '# This is a comment' lost.");
         process.exit(1);
+    }
+
+    // 7. Check empty value
+    if (!lines.find(l => l.trim().match(/^empty_val\s*=\s*$/))) { // empty value MUST have =
+        console.error("❌ 'empty_val' property not formatted correctly (expected 'key =').");
+        process.exit(1);
+    }
+
+    // 8. Check boolean key
+    if (!lines.find(l => l.trim() === 'bool_key')) {
+        console.error("❌ 'bool_key' property not formatted correctly (expected 'key' without =).");
+        process.exit(1);
+    }
+
+    // 9. Check key = \n key2 parsing
+    if (!lines.find(l => l.trim().match(/^newline_split\s*=\s*$/))) {
+         console.error("❌ 'newline_split' property not correctly identified as empty value.");
+         process.exit(1);
+    }
+    if (!lines.find(l => l.trim().startsWith('next_line'))) {
+         console.error("❌ 'next_line' property lost or corrupted.");
+         process.exit(1);
     }
 
     console.log('✅ Git Config verification passed!');

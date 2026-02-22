@@ -4,6 +4,7 @@ import { formatDockerfileDeep } from './dockerfile_deep_formatter';
 import { formatPropertiesDeep } from './properties_deep_formatter';
 import { formatMakefileDeep } from './makefile_deep_formatter';
 import { formatNginxDeep } from './nginx_deep_formatter';
+import { formatGitConfigDeep } from './gitconfig_deep_formatter';
 
 /**
  * Handle Dockerfile formatting and validation
@@ -673,77 +674,7 @@ export async function handleGitConfig(editor: vscode.TextEditor, text: string) {
 
     // Resilient Deep Formatting logic
     try {
-        const lines = text.split(/\r?\n/);
-        const formattedLines: string[] = [];
-        let isContinuation = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i].trim();
-
-            if (line === '') {
-                if (!isContinuation) {
-                    // Only add blank line if the previous line is not blank
-                    if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                        formattedLines.push('');
-                    }
-                } else {
-                    // Empty line inside continuation might break standard, but we preserve strictness
-                    formattedLines.push('');
-                }
-                continue;
-            }
-
-            // Handle comments
-            if (line.startsWith('#') || line.startsWith(';')) {
-                if (isContinuation) {
-                    // Indent comment inside continuation
-                    formattedLines.push('\t\t' + line);
-                } else {
-                    // Standard comment
-                    formattedLines.push(line);
-                }
-                continue;
-            }
-
-            // Handle sections [section]
-            if (line.startsWith('[')) {
-                // Ensure blank line before section if not at the start
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(line);
-                isContinuation = false;
-                continue;
-            }
-
-            // Handle continuation line
-            if (isContinuation) {
-                formattedLines.push('\t\t' + line);
-                isContinuation = line.endsWith('\\');
-                continue;
-            }
-
-            // Handle key = value
-            const eqIndex = line.indexOf('=');
-            if (eqIndex !== -1) {
-                const key = line.substring(0, eqIndex).trim();
-                const val = line.substring(eqIndex + 1).trim();
-                formattedLines.push(`\t${key} = ${val}`);
-                isContinuation = val.endsWith('\\');
-                continue;
-            }
-
-            // Fallback (boolean key or weird line)
-            formattedLines.push('\t' + line);
-            isContinuation = line.endsWith('\\');
-        }
-
-        // Remove trailing empty lines
-        while (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] === '') {
-            formattedLines.pop();
-        }
-
-        formatted = formattedLines.join('\n');
+        formatted = formatGitConfigDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Git Config: ${error.message}`);
         return;
