@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatPythonDeep } from './python_deep_formatter';
+import { formatJavaDeep } from './java_deep_formatter';
 import { formatGoDeep } from './go_deep_formatter';
 import { formatRustDeep } from './rust_deep_formatter';
 import { formatCppDeep } from './cpp_deep_formatter';
@@ -105,37 +106,18 @@ export async function handleJava(editor: vscode.TextEditor, text: string) {
             trailingComma: "none",
         });
     } catch (prettierError: any) {
-        console.warn('Prettier Java formatting failed, falling back to js-beautify', prettierError);
+        console.warn('Prettier Java formatting failed, falling back to custom formatter', prettierError);
 
-        const jsbeautify = require('js-beautify');
-        /* eslint-disable */
+        // Custom resilient formatter logic (Deep Formatting)
         try {
-            // Format Java (using js-beautify's JS formatter which handles Java well)
-            formatted = jsbeautify.js(text, {
-                indent_size: 4,
-                indent_char: ' ',
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: false,
-                wrap_line_length: 0,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false
-            });
+            formatted = formatJavaDeep(text);
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format Java: ${error.message}`);
-            return;
+             vscode.window.showErrorMessage(`Failed to format Java: ${error.message}`);
+             return;
         }
-        /* eslint-enable */
 
         if (!validationMessage) {
-             validationMessage = "Deep formatting failed (likely syntax error). Applied basic formatting.";
+             validationMessage = "Deep formatting (Prettier) failed. Applied resilient deep formatting.";
         }
     }
 
