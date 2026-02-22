@@ -1,220 +1,251 @@
-export function formatTwigDeep(text: string): string {
-    const lines = text.split('\n');
-    const formattedLines: string[] = [];
+import { TwigTokenizer, Token, TokenType } from './twig_tokenizer';
+
+interface FormatterOptions {
+    tabSize?: number;
+    insertSpaces?: boolean;
+}
+
+export function formatTwigDeep(input: string, options: FormatterOptions = { tabSize: 2, insertSpaces: true }): string {
+    const tokenizer = new TwigTokenizer(input);
+    const tokens = tokenizer.tokenize();
+    const tabSize = options.tabSize || 2;
+    const insertSpaces = options.insertSpaces !== false;
+    const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
+
+    let formatted = '';
     let indentLevel = 0;
 
-    // Void tags that don't need closing (self-closing or empty)
+    const getIndent = () => indentString.repeat(Math.max(0, indentLevel));
+
+    // Void elements
     const voidTags = new Set([
         'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
         'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
     ]);
 
-    // Twig block tags that increase indentation
-    const blockTags = new Set([
-        'block', 'if', 'for', 'macro', 'embed', 'apply', 'sandbox',
-        'autoescape', 'verbatim', 'with', 'filter', 'trans', 'spaceless',
-        'autoescape'
+    // Inline elements
+    const inlineTags = new Set([
+        'a', 'abbr', 'b', 'bdo', 'button', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img', 'ins', 'kbd', 'label', 'map', 'object', 'q', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'tt', 'var'
     ]);
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
+    // Tags where whitespace must be preserved exactly
+    const preserveWhitespaceTags = new Set(['pre', 'textarea', 'script', 'style']);
 
-        if (trimmed === '') {
-            formattedLines.push('');
-            continue;
+    let currentTagName = '';
+    let inlineLevel = 0;
+    let inPreserveWhitespace = false;
+
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+
+        if (token.type === TokenType.Whitespace) continue;
+
+        // If in preserved block (like pre, script), output everything exactly until closing tag
+        if (inPreserveWhitespace && token.type !== TokenType.TagClose && token.type !== TokenType.RawBlock) {
+             // For RawBlock (verbatim), we handle it separately
+             // But if we are in <pre>, we should preserve token text?
+             // The tokenizer doesn't return Whitespace tokens by default (it skips them in loop unless readText captures them?).
+             // Wait, `readText` captures newlines/spaces if they are not skipped?
+             // My tokenizer `tokenize` loop does NOT skip whitespace explicitly except inside `readHTMLTagOpen`.
+             // But `readText` consumes until it hits a tag start. So it captures whitespace.
+             // So `TokenType.Text` contains the whitespace.
+             // My tokenizer does not emit `TokenType.Whitespace` explicitly.
+             // So the check `if (token.type === TokenType.Whitespace)` is redundant but harmless.
         }
 
-        // --- Analysis Phase ---
-        // Calculate indentation for THIS line (tempIndent)
-        // and change for NEXT line (netChange).
+        switch (token.type) {
+            case TokenType.TagOpen:
+                // <div or {% include
+                // Distinguish between HTML TagOpen and Twig TagOpen?
+                // The tokenizer uses TokenType.TagOpen for both generic Twig tags and HTML tags.
+                // But my tokenizer `readHTMLTagOpen` returns `TagOpen` with `<div`.
+                // `readTwigTag` returns `TagOpen` with `{% include ... %}`.
 
-        let tempIndent = indentLevel;
-        let lineNetChange = 0;
+                if (token.text.startsWith('<')) {
+                    // HTML Tag
+                    const tagName = token.text.substring(1).toLowerCase();
 
-        // Dedent Check (at start of line)
-        // We look for closing tokens at the very beginning
-        const isClosingBlock = /^{%-?\s*end(if|for|block|macro|embed|apply|sandbox|autoescape|verbatim|set|with|filter|trans|spaceless)\b/.test(trimmed);
-        const isMiddleBlock = /^{%-?\s*(else|elseif)\b/.test(trimmed);
-        const isClosingHtml = /^<\/[a-zA-Z0-9]+/.test(trimmed);
-        const isClosingBrace = /^[}\])]/.test(trimmed); // } ] )
-
-        if (isClosingBlock || isMiddleBlock || isClosingHtml || isClosingBrace) {
-            tempIndent = Math.max(0, indentLevel - 1);
-        }
-
-        formattedLines.push('  '.repeat(tempIndent) + trimmed);
-
-        // --- Net Change Calculation (State Machine) ---
-        let j = 0;
-        const len = line.length;
-
-        while (j < len) {
-            const char = line[j];
-            const next = line[j + 1];
-
-            // 1. Comments
-            if (char === '{' && next === '#') {
-                // Twig Comment: {# ... #}
-                j += 2;
-                while (j < len) {
-                    if (line[j] === '#' && line[j + 1] === '}') {
-                        j += 1; // consume #
-                        break;
-                    }
-                    j++;
-                }
-                j++; // consume }
-                continue;
-            }
-            if (char === '<' && next === '!' && line.substr(j, 4) === '<!--') {
-                // HTML Comment: <!-- ... -->
-                j += 4;
-                while (j < len && !line.startsWith('-->', j)) {
-                    j++;
-                }
-                j += 2; // consume --
-                continue;
-            }
-
-            // 2. Strings
-            if (char === '"' || char === "'") {
-                const quote = char;
-                j++;
-                while (j < len) {
-                    if (line[j] === '\\') {
-                        j += 2; // skip escaped char
-                        continue;
-                    }
-                    if (line[j] === quote) {
-                        break;
-                    }
-                    j++;
-                }
-                j++; // consume closing quote
-                continue;
-            }
-
-            // 3. Twig Tags
-            if (char === '{' && next === '%') {
-                // Found {%
-                const match = line.substring(j).match(/^{%-?\s*([a-zA-Z0-9_]+)/);
-                if (match) {
-                    const tagName = match[1];
-                    if (tagName.startsWith('end')) {
-                        lineNetChange--;
-                    } else if (tagName === 'else' || tagName === 'elseif') {
-                        // else/elseif: dedent current, indent content -> net 0 change relative to block start?
-                        // If we are inside `if`, indent is +1.
-                        // `else` line dedents (handled by isMiddleBlock).
-                        // Content after `else` should be indented +1.
-                        // So net change is 0 (relative to current level which is +1).
-                        // Wait, if indentLevel is 1.
-                        // `{% else %}` line prints at 0.
-                        // Next line prints at 1.
-                        // So net change for THIS line is 0.
-                        // Correct.
-                    } else if (blockTags.has(tagName) || tagName === 'set') {
-                        // Check for `set` block vs inline
-                        const tagContentMatch = line.substring(j).match(/^{%-?\s*set\s+([^%]+)%}/);
-                        if (tagName === 'set' && tagContentMatch) {
-                            if (tagContentMatch[1].includes('=')) {
-                                // Inline assignment: {% set x = 1 %} -> No change
-                            } else {
-                                // Block assignment: {% set x %} ... {% endset %} -> +1
-                                lineNetChange++;
-                            }
-                        } else if (tagName !== 'set') {
-                            lineNetChange++;
+                    if (inlineTags.has(tagName)) {
+                        if (inlineLevel === 0) {
+                             if (formatted.length > 0 && !formatted.endsWith('\n') && !formatted.endsWith(' ')) {
+                                 formatted += ' ';
+                             } else if (formatted.endsWith('\n')) {
+                                 formatted += getIndent();
+                             }
                         }
-                    }
-                }
-                // Skip to end of tag %}
-                j += 2;
-                while (j < len) {
-                    if (line[j] === '%' && line[j + 1] === '}') {
-                        j += 1;
-                        break;
-                    }
-                    j++;
-                }
-                j++;
-                continue;
-            }
-
-            // 4. HTML Tags
-            if (char === '<' && /[a-zA-Z/]/.test(next)) {
-                const isClosing = (next === '/');
-                const start = j + (isClosing ? 2 : 1);
-
-                // Read tag name
-                let k = start;
-                while (k < len && /[a-zA-Z0-9:-]/.test(line[k])) {
-                    k++;
-                }
-                const tagName = line.substring(start, k).toLowerCase();
-
-                // Scan to end of tag to check for self-closing />
-                let m = k;
-                let isSelfClosing = false;
-                let inTagString: string | null = null;
-
-                while (m < len) {
-                    if (inTagString) {
-                        if (line[m] === '\\') { m += 2; continue; }
-                        if (line[m] === inTagString) inTagString = null;
-                        m++;
-                        continue;
-                    }
-                    if (line[m] === '"' || line[m] === "'") {
-                        inTagString = line[m];
-                        m++;
-                        continue;
-                    }
-                    if (line[m] === '>') {
-                        if (line[m - 1] === '/') isSelfClosing = true;
-                        break;
-                    }
-                    m++;
-                }
-
-                if (!voidTags.has(tagName) && !isSelfClosing) {
-                    if (isClosing) {
-                        lineNetChange--;
+                        inlineLevel++;
+                        formatted += token.text;
                     } else {
-                        lineNetChange++;
+                        // Block tag
+                        if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                        formatted += getIndent() + token.text;
+                    }
+                    currentTagName = tagName;
+                } else {
+                    // Twig Tag (standalone like include, extends)
+                    if (inlineLevel > 0) {
+                        formatted += ' ' + token.text;
+                    } else {
+                        if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                        formatted += getIndent() + token.text;
                     }
                 }
-                j = m + 1; // Move past >
-                continue;
-            }
+                break;
 
-            // 5. Braces (for objects/arrays/functions)
-            // Ignore {{ (print tags)
-            if (char === '{' && next === '{') {
-                j += 2;
-                while (j < len) {
-                    if (line[j] === '}' && line[j + 1] === '}') {
-                        j += 1;
-                        break;
-                    }
-                    j++;
+            case TokenType.AttributeName:
+                formatted += ' ' + token.text;
+                break;
+
+            case TokenType.AttributeValue:
+                formatted += '=' + token.text;
+                break;
+
+            case TokenType.TagEnd:
+                // >
+                formatted += token.text;
+                if (!voidTags.has(currentTagName) && !inlineTags.has(currentTagName) && !token.text.startsWith('%}')) {
+                    // Only indent if it was an HTML tag end >
+                    // And not void/inline.
+                    indentLevel++;
                 }
-                j++;
-                continue;
-            }
 
-            if (char === '{' || char === '[' || char === '(') {
-                lineNetChange++;
-            } else if (char === '}' || char === ']' || char === ')') {
-                lineNetChange--;
-            }
+                if (preserveWhitespaceTags.has(currentTagName)) {
+                    inPreserveWhitespace = true;
+                }
 
-            j++;
+                currentTagName = '';
+                break;
+
+            case TokenType.TagSelfClose:
+                formatted += token.text; // />
+                if (inlineTags.has(currentTagName)) {
+                    inlineLevel = Math.max(0, inlineLevel - 1);
+                }
+                currentTagName = '';
+                break;
+
+            case TokenType.TagClose:
+                // </div>
+                const closeTagName = token.text.substring(2, token.text.length - 1).toLowerCase();
+
+                if (inlineTags.has(closeTagName)) {
+                    inlineLevel = Math.max(0, inlineLevel - 1);
+                    formatted += token.text;
+                } else {
+                    indentLevel = Math.max(0, indentLevel - 1);
+
+                    if (inPreserveWhitespace) {
+                        formatted += token.text;
+                        inPreserveWhitespace = false;
+                    } else {
+                        if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                        formatted += getIndent() + token.text;
+                    }
+                }
+                break;
+
+            case TokenType.BlockOpen:
+                // {% block ... %}
+                if (inlineLevel > 0) {
+                    formatted += ' ' + token.text;
+                } else {
+                    if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                    formatted += getIndent() + token.text;
+                    indentLevel++;
+                }
+                break;
+
+            case TokenType.BlockClose:
+                // {% endblock %}
+                if (inlineLevel > 0) {
+                    formatted += ' ' + token.text;
+                } else {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                    formatted += getIndent() + token.text;
+                }
+                break;
+
+            case TokenType.BlockInverse:
+                // {% else %}
+                if (inlineLevel > 0) {
+                    formatted += ' ' + token.text;
+                } else {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                    formatted += getIndent() + token.text;
+                    indentLevel++;
+                }
+                break;
+
+            case TokenType.OutputOpen:
+                // {{
+                if (inlineLevel > 0) {
+                    formatted += token.text; // Start immediately? Or add space?
+                    // Usually {{ ... }} has spaces inside.
+                    // But before {{ ?
+                    // If previous was text, it depends.
+                    // Let's assume text token handles trailing spaces.
+                } else {
+                    if (formatted.length > 0 && !formatted.endsWith('\n')) {
+                         // Check if we should wrap? For now, append inline or new line?
+                         // If we are in block context, usually we want {{ }} on new line if it's substantial?
+                         // But simple vars {{ page.title }} are often inline.
+                         // Let's look at next tokens.
+                         // But deep formatter usually enforces structure.
+                         // Let's stick to: if we are in block context (inlineLevel == 0), prefer new line.
+                         formatted += '\n' + getIndent() + token.text;
+                    } else {
+                         formatted += getIndent() + token.text;
+                    }
+                }
+                break; // Wait, OutputOpen is just `{{`. We need to handle content inside?
+                // The tokenizer returns `OutputOpen` with full text `{{ ... }}` in my implementation?
+                // Let's check `readTwigOutput` in tokenizer.
+                // It returns `TokenType.OutputOpen` with the FULL text `{{ ... }}`.
+                // So this case handles the whole output block.
+                break;
+
+            case TokenType.Comment:
+                // {# ... #}
+                if (inlineLevel > 0) {
+                    formatted += ' ' + token.text;
+                } else {
+                    if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                    formatted += getIndent() + token.text;
+                }
+                break;
+
+            case TokenType.RawBlock:
+                // {% verbatim %}...{% endverbatim %}
+                if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                formatted += getIndent() + token.text;
+                break;
+
+            case TokenType.Text:
+                if (inPreserveWhitespace) {
+                    formatted += token.text;
+                } else if (inlineLevel > 0) {
+                     // Inside inline tag: collapse whitespace
+                     const collapsed = token.text.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ');
+                     formatted += collapsed;
+                } else {
+                     // Block context text: split and indent
+                     const lines = token.text.split('\n');
+                     for (const line of lines) {
+                         const trimmed = line.trim();
+                         if (trimmed.length > 0) {
+                             if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
+                             formatted += getIndent() + trimmed;
+                         }
+                     }
+                }
+                break;
+
+            default:
+                formatted += token.text;
         }
-
-        indentLevel = Math.max(0, indentLevel + lineNetChange);
     }
 
-    return formattedLines.join('\n');
+    return formatted + '\n';
 }
