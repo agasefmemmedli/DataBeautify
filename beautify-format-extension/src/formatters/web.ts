@@ -5,6 +5,7 @@ import { formatXMLDeep } from './xml_deep_formatter';
 import { formatHTMLDeep } from './html_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
 import { formatSvelteDeep } from './svelte_deep_formatter';
+import { formatSassDeep } from './sass_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -469,17 +470,27 @@ export async function handleSASS(editor: vscode.TextEditor, text: string) {
     }
 
     try {
-        // Format SASS
-        formatted = SassFormatter.Format(text, {
-            tabSize: 2,
-            insertSpaces: true,
-            setPropertySpace: true,
-            deleteEmptyRows: false,
-            lineEnding: 'LF'
-        });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format SASS: ${error.message}`);
-        return;
+        // Try Deep Formatting (Fault Tolerant)
+        formatted = formatSassDeep(text);
+
+    } catch (deepError: any) {
+        console.warn('SASS Deep Formatting failed, falling back to SassFormatter', deepError);
+        // Fallback to SassFormatter
+        try {
+            formatted = SassFormatter.Format(text, {
+                tabSize: 2,
+                insertSpaces: true,
+                setPropertySpace: true,
+                deleteEmptyRows: false,
+                lineEnding: 'LF'
+            });
+            if (!validationMessage) {
+                 validationMessage = `Deep formatting failed. Used standard formatter. ${deepError.message}`;
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format SASS: ${error.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);
