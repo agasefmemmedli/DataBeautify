@@ -34,18 +34,11 @@ function alignYAML(text: string): string {
     const lines = text.split('\n');
     const result: string[] = [];
 
-    // Buffer for alignment group
-    let group: { line: string, indent: string, key: string, value: string }[] = [];
+    // Grouping buffer
+    let group: { line: string, prefix: string, key: string, suffix: string, indentCols: number }[] = [];
 
     const flushGroup = () => {
         if (group.length === 0) return;
-
-        // Check if group has size > 1 (otherwise no need to align)
-        if (group.length === 1) {
-            result.push(group[0].line);
-            group = [];
-            return;
-        }
 
         // Calculate max key length
         let maxKeyLen = 0;
@@ -58,92 +51,77 @@ function alignYAML(text: string): string {
         // Reconstruct lines
         for (const item of group) {
             const padding = ' '.repeat(maxKeyLen - item.key.length);
-            // Rebuild line: indent + key + ":" + padding + " " + value
-            result.push(`${item.indent}${item.key}:${padding} ${item.value}`);
+            // Rebuild line: prefix + key + ":" + padding + suffix
+            // suffix includes the leading space if it existed.
+            // If suffix is empty (no value), we might not want padding?
+            // But usually we align for future values.
+
+            result.push(`${item.prefix}${item.key}:${padding}${item.suffix}`);
         }
         group = [];
     };
 
+    // Regex to identify Key-Value pair
+    // Captures:
+    // 1. Prefix: Indentation + optional '- '
+    // 2. Key: The key itself (quoted or unquoted)
+    // 3. Suffix: The rest of the line (separator space + value, or empty)
+    // Note: Matches 'key: value', 'key:', '- key: value'
+    // Non-greedy match for key ensures we stop at the first valid ': ' or ':$'
+    const kvRegex = /^(\s*(?:-\s+)?)((?:(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|.+?)):(\s+.*|\s*)$/;
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const trimmed = line.trim();
 
         // Skip empty lines (flush group)
-        if (trimmed === '') {
+        if (line.trim() === '') {
             flushGroup();
             result.push(line);
             continue;
         }
 
-        // Skip comments (flush group)
-        if (trimmed.startsWith('#')) {
+        // Check for comment-only line (flush group)
+        // Note: Comments attached to lines are handled by kvRegex or fallback
+        if (line.trim().startsWith('#')) {
             flushGroup();
             result.push(line);
             continue;
         }
 
-        // Check for list item '-' (flush group)
-        if (trimmed.startsWith('-')) {
-            flushGroup();
-            result.push(line);
-            continue;
-        }
+        const match = line.match(kvRegex);
+        if (match) {
+            const prefix = match[1];
+            const key = match[2];
+            const suffix = match[3];
 
-        // Identify Key and Value split
-        const indent = line.substring(0, line.indexOf(trimmed));
-        let keyEndIndex = -1; // Index of ':' relative to trimmed string
+            // Determine indentation level for grouping
+            // We use the length of the prefix as the "indent column"
+            // This handles '- key' and '  key' correctly if they align visually
+            const indentCols = prefix.length;
 
-        if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
-            const quoteChar = trimmed[0];
-            let j = 1;
-            while (j < trimmed.length) {
-                if (trimmed[j] === '\\') j++;
-                else if (trimmed[j] === quoteChar) break;
-                j++;
+            // Check if we should continue the current group
+            if (group.length > 0) {
+                const last = group[group.length - 1];
+                // Group by strict indentation alignment
+                if (last.indentCols !== indentCols) {
+                    flushGroup();
+                }
             }
-            if (j < trimmed.length && trimmed[j + 1] === ':') {
-                keyEndIndex = j + 1;
-            }
+
+            group.push({
+                line,
+                prefix,
+                key,
+                suffix,
+                indentCols
+            });
         } else {
-            // Simple key
-            // Use indexOf(':') but ensure it's not inside a flow structure or comment?
-            // Standard stringify usually keeps it simple.
-            keyEndIndex = trimmed.indexOf(':');
-        }
-
-        // If no colon or it's at end (nested map start or complex key without value on same line)
-        if (keyEndIndex === -1 || keyEndIndex === trimmed.length - 1) {
+            // Not a KV line (e.g. array item start without key, or multiline string content)
             flushGroup();
             result.push(line);
-            continue;
         }
-
-        // Check for space after colon (YAML requires it)
-        if (trimmed[keyEndIndex + 1] !== ' ') {
-            // Maybe it's compact? "key:val" is not valid YAML usually, but check.
-            // Standard stringify puts space.
-            flushGroup();
-            result.push(line);
-            continue;
-        }
-
-        const keyPart = trimmed.substring(0, keyEndIndex);
-        const valPart = trimmed.substring(keyEndIndex + 2); // Skip ": "
-
-        // Check indentation compatibility
-        if (group.length > 0 && group[0].indent !== indent) {
-            flushGroup();
-        }
-
-        group.push({
-            line,
-            indent,
-            key: keyPart,
-            value: valPart
-        });
     }
 
     flushGroup();
-
     return result.join('\n');
 }
