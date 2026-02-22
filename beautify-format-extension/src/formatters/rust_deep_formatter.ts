@@ -25,6 +25,9 @@ export function formatRustDeep(text: string): string {
 
     // Context
     let inGenerics = 0;
+    let inClosureParams = false;
+    let inWhereClause = false;
+
     const delimiterStack: string[] = []; // Track { [ (
 
     const TAB = '    '; // 4 spaces
@@ -65,14 +68,39 @@ export function formatRustDeep(text: string): string {
         if (token.text === '}') {
             indentLevel = Math.max(0, indentLevel - 1);
             forceNewline();
+
+            if (inWhereClause) {
+                inWhereClause = false;
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+        }
+
+        // Where Clause Start
+        if (token.text === 'where' && token.type === TokenType.Keyword) {
+            forceNewline();
+            if (!inWhereClause) {
+                inWhereClause = true;
+                indentLevel++;
+            }
+        }
+
+        // End of where clause
+        if (inWhereClause && (token.text === '{' || token.text === ';')) {
+            inWhereClause = false;
+            indentLevel = Math.max(0, indentLevel - 1);
+        }
+
+        // Method Chaining: .method()
+        if (token.text === '.' && prev && (prev.text === ')' || prev.text === '}' || prev.type === TokenType.String)) {
+             forceNewline();
         }
 
         // --- 2. Spacing Logic ---
         let spaceBefore = false;
 
         if (prev) {
-            // Identifier
-            if (token.type === TokenType.Identifier) {
+            // Identifier & Macro
+            if (token.type === TokenType.Identifier || token.type === TokenType.Macro) {
                 if (prev.type === TokenType.Keyword || prev.type === TokenType.Identifier ||
                     prev.type === TokenType.Number || prev.type === TokenType.String ||
                     prev.type === TokenType.Char || prev.type === TokenType.Lifetime ||
@@ -84,6 +112,8 @@ export function formatRustDeep(text: string): string {
                 else if (prev.text === '->' || prev.text === '=>') spaceBefore = true;
 
                 if (prev.text === '<' && inGenerics > 0) spaceBefore = false;
+
+                if (inClosureParams) spaceBefore = false;
             }
             // Number
             else if (token.type === TokenType.Number) {
@@ -107,6 +137,7 @@ export function formatRustDeep(text: string): string {
                 spaceBefore = true;
                 if (prev.text === '::') spaceBefore = false;
                 if (prev.text === '.') spaceBefore = false;
+                if (prev.text === '(' && inClosureParams) spaceBefore = false;
             }
             // Lifetime
             else if (token.type === TokenType.Lifetime) {
@@ -171,25 +202,42 @@ export function formatRustDeep(text: string): string {
             // Punctuation
             else if (token.text === ',' || token.text === ';' || token.text === '.') {
                 spaceBefore = false;
+                if (token.text === '.' && prev.text === '.') spaceBefore = false;
+
+                if (token.text === ',' && inClosureParams) spaceBefore = false;
             }
             else if (token.text === ':') {
                 spaceBefore = false;
+                if (inClosureParams) spaceBefore = false;
             }
             else if (token.text === '::') {
                 spaceBefore = false;
             }
             // Operators
             else if (token.type === TokenType.Operator) {
-                if (['&', '*', '!', '?'].includes(token.text)) {
-                     // Space before UNLESS prev is tight prefix/opener
-                     if (['(', '[', '{', '!', '&', '*', '?', '::', '.'].includes(prev.text)) {
+                if (token.text === '|') {
+                    if (!inClosureParams) {
+                        if (['(', '[', '{', ',', 'return', ':', '=', 'in', 'move'].includes(prev.text) || prev.type === TokenType.Operator) {
+                            inClosureParams = true;
+                            spaceBefore = true;
+                            if (prev.text === '(' || prev.text === '[') spaceBefore = false;
+                        } else {
+                             spaceBefore = true;
+                        }
+                    } else {
+                        inClosureParams = false;
+                        spaceBefore = false;
+                    }
+                }
+                else if (['&', '*', '!', '?'].includes(token.text)) {
+                     if (['(', '[', '{', '!', '&', '*', '?', '::', '.', '|'].includes(prev.text)) {
                          spaceBefore = false;
                      } else {
                          spaceBefore = true;
                      }
 
-                     if (token.text === '!' && prev.type === TokenType.Identifier) {
-                         spaceBefore = false; // macro
+                     if (token.text === '!' && (prev.type === TokenType.Identifier || prev.type === TokenType.Macro)) {
+                         spaceBefore = false;
                      }
                 }
                 else if (token.text === '..' || token.text === '..=') {
@@ -200,7 +248,9 @@ export function formatRustDeep(text: string): string {
                     }
                 }
                 else if (token.text === '->' || token.text === '=>') spaceBefore = true;
-                else spaceBefore = true;
+                else {
+                    spaceBefore = true;
+                }
             }
 
             // Overrides based on Previous
@@ -211,6 +261,12 @@ export function formatRustDeep(text: string): string {
             if (prev.text === '..' || prev.text === '..=') spaceBefore = false;
 
             if (prev.text === 'macro_rules!') spaceBefore = true;
+
+            // Inside closure params overrides
+            if (inClosureParams) {
+                 if (prev.text === '|') spaceBefore = false;
+                 if (prev.text === ',' || prev.text === ':') spaceBefore = true;
+            }
         }
 
         // --- 3. Append ---
@@ -247,15 +303,12 @@ export function formatRustDeep(text: string): string {
         else if (token.text === ',') {
             const currentBlock = delimiterStack.length > 0 ? delimiterStack[delimiterStack.length - 1] : '';
 
-            if (inGenerics === 0 && currentBlock === '{') {
+            if (inGenerics === 0 && currentBlock === '{' && !inClosureParams) {
                 forceNewline();
             }
         }
         else if (token.type === TokenType.Comment) {
             forceNewline();
-        }
-        else if (token.text === '=>') {
-             append(' ');
         }
     }
 
