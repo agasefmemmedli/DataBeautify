@@ -34,3 +34,4 @@
 - [x] Makefile (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)
 - [x] LaTeX (Deep Formatting Implemented)
+- [x] YAML (Deep Formatting Implemented)
