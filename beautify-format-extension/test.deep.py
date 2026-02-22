@@ -1,22 +1,34 @@
 
-def foo(x,y):
-  # comment
-  if x>y:
-    return x+y
-  else:
-    return 0
+import sys,os
+from datetime import datetime
+import json
+
+# top level comment
+def func_with_args( a,b,c=1, *args, **kwargs ):
+  if a>b: return a+b
+  else: return b-a
 
 @decorator
-class Bar:
-  def baz(self,a=1):
-    return a*2
+class MyClass:
+  def __init__(self):
+    self.x={'key':1,'list':[1,2,3]}
 
-x={'a':1,'b':2}
-y=[1,2,3]
-z=x['a']
-long_string = """
-  This is a long string
-  with indent
+  async def async_method( self ):
+    await some_coro()
+
+x = 1+2*3
+y = [ 1, 2, 3 ]
+z = { 'a': 1, 'b': 2 }
+slice = my_list[ 1 : 2 : 3 ]
+formatted = f"Value: { x }"
+multiline = """
+    Line 1
+    Line 2
 """
-f_string = f"Value: {x['a']}"
-raw_string = r"Raw \ string"
+
+try:
+  raise ValueError("Error")
+except ValueError as e:
+  print(e)
+finally:
+  pass

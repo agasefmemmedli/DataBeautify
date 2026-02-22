@@ -64,7 +64,7 @@ async function runTests() {
         process.exit(1);
     }
 
-    const testFile = 'test.complex.py';
+    const testFile = 'test.deep.py';
     const filePath = path.join(__dirname, testFile);
 
     if (!fs.existsSync(filePath)) {
@@ -125,15 +125,31 @@ async function runTests() {
              process.exit(1);
         }
 
-        // Check if class method is indented
-        const classMethod = formattedText.match(/class MyClass:[\s\S]*?def greet/);
-        if (classMethod && !classMethod[0].includes('    def greet')) {
-             console.warn('⚠️ Warning: Class method might not be indented correctly.');
+        // Check for specific deep formatting markers
+        // 1. imports sorted? (not strictly required but nice)
+        // 2. Spaces around operators? e.g. "a > b"
+        // 3. No spaces inside parentheses? e.g. "(a, b)" vs "( a, b )"
+        // 4. Blank lines?
+
+        if (formattedText.includes('if a>b')) {
+             console.warn('⚠️ Warning: Space missing around ">" operator.');
         }
 
-        // Check if list is formatted
-        if (formattedText.includes('[1, 2, 3, 4, 5, 6]')) {
-             console.log('ℹ️ List was collapsed (acceptable but deep formatting might preserve multiline).');
+        if (formattedText.includes('( a,b,c=1')) {
+             console.warn('⚠️ Warning: Space inside parentheses was not fixed.');
+        }
+
+        if (formattedText.includes('c=1')) {
+             // In calls/definitions, kwarg '=' should NOT have spaces in some contexts, but PEP8 recommends around '=' for assignment, but not for keyword arguments.
+             // Wait, PEP8 says: "Don't use spaces around the = sign when used to indicate a keyword argument or a default parameter value."
+             // So `c=1` is correct for function definition.
+             // But `x = 1` is correct for assignment.
+        }
+
+        if (formattedText.includes('x = 1+2*3')) {
+             // Correct: x = 1 + 2 * 3
+             // But priority might dictate `x = 1 + 2*3`? PEP8 allows omitting spaces around high priority operators.
+             // Let's stick to consistent spacing: `x = 1 + 2 * 3` is safer.
         }
 
         console.log('✅ Verification run completed.');

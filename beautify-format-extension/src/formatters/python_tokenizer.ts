@@ -144,12 +144,12 @@ export class PythonTokenizer {
             // Operators (multi-char first)
             let opMatch = '';
             // Try 3 chars (e.g. **=, //=, ...)
-            const threeChars = this.code.substr(this.pos, 3);
+            const threeChars = this.code.substring(this.pos, this.pos + 3);
             if (PythonTokenizer.OPERATORS.has(threeChars)) {
                 opMatch = threeChars;
             } else {
                 // Try 2 chars
-                const twoChars = this.code.substr(this.pos, 2);
+                const twoChars = this.code.substring(this.pos, this.pos + 2);
                 if (PythonTokenizer.OPERATORS.has(twoChars)) {
                     opMatch = twoChars;
                 } else {

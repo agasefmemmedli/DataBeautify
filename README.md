@@ -29,3 +29,4 @@
 - [x] Dart (Deep Formatting Implemented)
 - [x] Properties (Deep Formatting Implemented)
 - [x] JavaScript/TypeScript (Deep Formatting Implemented)
+- [x] Python (Deep Formatting Implemented)
