@@ -6,6 +6,7 @@ import { formatAstroDeep } from './astro_deep_formatter';
 import { formatLaTeXDeep } from './latex_deep_formatter';
 import { formatHandlebarsDeep } from './handlebars_deep_formatter';
 import { formatTwigDeep } from './twig_deep_formatter';
+import { formatLiquidDeep } from './liquid_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -892,90 +893,7 @@ export async function handleLiquid(editor: vscode.TextEditor, text: string) {
 
         // Resilient formatting logic
         try {
-            const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-
-        // Void tags that don't need closing
-        const voidTags = [
-            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-            'link', 'meta', 'param', 'source', 'track', 'wbr'
-        ];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '') {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Check for dedentation triggers at the start of the line
-            let currentIndent = indentLevel;
-
-            // Closing Liquid block: {% endif %}, {% endfor %}, etc.
-            if (/^{%\s*end(if|unless|case|for|tablerow|capture|form|paginate|comment|schema|style|javascript|stylesheet)\b/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Middle Liquid block: {% else %}, {% elsif %}, {% when %}
-            else if (/^{%\s*(else|elsif|when)\b/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-            // Closing HTML tag: </div>
-            else if (/^<\/[a-zA-Z0-9]+/.test(trimmed)) {
-                currentIndent = Math.max(0, indentLevel - 1);
-            }
-
-            // Apply indentation
-            formattedLines.push('  '.repeat(currentIndent) + trimmed);
-
-            // Calculate indentation for the NEXT line
-            let netChange = 0;
-
-            // Remove comments for analysis
-            const lineNoComments = line.replace(/{% comment %}[\s\S]*?{% endcomment %}/g, '').replace(/<!--[\s\S]*?-->/g, '');
-
-            // Check for Liquid block openers/closers
-            const liquidTagRegex = /{%-?\s*([a-zA-Z0-9_]+)([^%]*?)-?%}/g;
-            let liquidMatch;
-            let liquidOpeners = 0;
-            let liquidClosers = 0;
-
-            while ((liquidMatch = liquidTagRegex.exec(lineNoComments)) !== null) {
-                const tagName = liquidMatch[1];
-
-                if (/^end/.test(tagName)) {
-                    liquidClosers++;
-                } else if (/^(if|unless|case|for|tablerow|capture|form|paginate|comment|schema|style|javascript|stylesheet)$/.test(tagName)) {
-                    liquidOpeners++;
-                }
-            }
-
-            // Check for HTML tag openers
-            let htmlOpeners = 0;
-            let htmlClosers = 0;
-
-            const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
-            let match;
-            while ((match = tagRegex.exec(lineNoComments)) !== null) {
-                const fullTag = match[0];
-                const tagName = match[1].toLowerCase();
-                const isClosing = fullTag.startsWith('</');
-                const isSelfClosing = fullTag.endsWith('/>');
-
-                if (isClosing) {
-                    htmlClosers++;
-                } else if (!isSelfClosing && !voidTags.includes(tagName)) {
-                    htmlOpeners++;
-                }
-            }
-
-            netChange = (liquidOpeners - liquidClosers) + (htmlOpeners - htmlClosers);
-            indentLevel = Math.max(0, indentLevel + netChange);
-        }
-
-        formatted = formattedLines.join('\n');
+            formatted = formatLiquidDeep(text);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Failed to format Liquid: ${error.message}`);
             return;
