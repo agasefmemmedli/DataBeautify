@@ -31,3 +31,4 @@
 - [x] Python (Deep Formatting Implemented)
 - [x] ENV (Deep Formatting Implemented)
 - [x] HCL (Terraform) (Deep Formatting Implemented)
+- [x] Makefile (Deep Formatting Implemented)
