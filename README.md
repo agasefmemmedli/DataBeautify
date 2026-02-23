@@ -38,3 +38,4 @@
 - [x] Log Files (Deep Formatting Implemented)
 - [x] Rust (Deep Formatting Implemented)
 - [x] EditorConfig (Deep Formatting Implemented)
+- [x] Go (Deep Formatting Implemented)

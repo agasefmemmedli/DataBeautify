@@ -110,7 +110,9 @@ function applySpacing(lines: Token[][]) {
             // 2. Keywords
             else if ((prev.type as any) === TokenType.Keyword) {
                 if (prev.text === 'func' && curr.text === '(') {
-                    needSpace = true;
+                    // Space for method receivers (func at start of line), no space for anonymous functions
+                    if (prev === line[0]) needSpace = true;
+                    else needSpace = false;
                 }
                 else if (prev.text === 'import' && curr.text === '(') needSpace = true;
                 else if (curr.type === TokenType.Punctuation && ':;,)'.includes(curr.text)) needSpace = false;
