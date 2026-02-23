@@ -28,19 +28,42 @@ export function formatRustDeep(text: string): string {
     let inClosureParams = false;
     let inWhereClause = false;
 
+    // Buffer for sorting imports
+    let importBuffer: string[] = [];
+
     const delimiterStack: string[] = []; // Track { [ (
 
     const TAB = '    '; // 4 spaces
 
     const append = (text: string) => {
         if (currentLine === '') {
-            currentLine = TAB.repeat(indentLevel);
+            let effectiveIndent = indentLevel;
+            if (text.startsWith('.')) effectiveIndent++;
+            currentLine = TAB.repeat(effectiveIndent);
         }
         currentLine += text;
     };
 
     const pushLine = () => {
-        if (currentLine.trim().length > 0) {
+        const trimmed = currentLine.trim();
+
+        // Import Sorting Logic
+        // Capture simple 'use ...;' statements that are single-line
+        if (trimmed.startsWith('use ') && trimmed.endsWith(';') && !trimmed.includes('{')) {
+            importBuffer.push(currentLine);
+            currentLine = '';
+            return;
+        }
+
+        // If we have something else, flush import buffer first
+        if (importBuffer.length > 0) {
+            // Sort imports alphabetically
+            importBuffer.sort((a, b) => a.trim().localeCompare(b.trim()));
+            outputLines.push(...importBuffer);
+            importBuffer = [];
+        }
+
+        if (trimmed.length > 0) {
             outputLines.push(currentLine);
         }
         currentLine = '';
@@ -50,11 +73,38 @@ export function formatRustDeep(text: string): string {
         if (currentLine.trim().length > 0) pushLine();
     };
 
+    const pushEmptyLine = () => {
+        forceNewline(); // Ensure current line is pushed
+
+        // Flush imports if any (though forceNewline -> pushLine handles it,
+        // if the current line was empty, pushLine might not have been called to flush?
+        // Wait, pushLine flushes if importBuffer > 0? No, only if it pushes currentLine or...
+        // Actually, if currentLine is empty, pushLine does nothing with currentLine.
+        // But we might have pending imports.
+        // We should explicitly flush imports if we are inserting an empty line break.
+        if (importBuffer.length > 0) {
+            importBuffer.sort((a, b) => a.trim().localeCompare(b.trim()));
+            outputLines.push(...importBuffer);
+            importBuffer = [];
+        }
+
+        outputLines.push('');
+    };
+
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const prev = i > 0 ? tokens[i-1] : null;
         const next = i + 1 < tokens.length ? tokens[i+1] : null;
         const prevPrev = i > 1 ? tokens[i-2] : null;
+
+        // --- 0. Preserve Vertical Spacing ---
+        if (prev) {
+            const prevEndLine = prev.line + (prev.text.match(/\n/g) || []).length;
+            const lineDiff = token.line - prevEndLine;
+            if (lineDiff > 1) {
+                pushEmptyLine();
+            }
+        }
 
         // --- 1. Indentation & Newlines (Pre) ---
 
@@ -130,7 +180,7 @@ export function formatRustDeep(text: string): string {
             // String / Char
             else if (token.type === TokenType.String || token.type === TokenType.Char) {
                 if (prev.type === TokenType.Keyword || prev.text === ',' || prev.text === ';' || prev.text === ':') spaceBefore = true;
-                else if (prev.type === TokenType.Operator && !['(', '[', '{', '.', '::'].includes(prev.text)) spaceBefore = true;
+                else if (prev.type === TokenType.Operator && !['.', '::', '!', '?', '&', '*', '(', '[', '{'].includes(prev.text)) spaceBefore = true;
             }
             // Keyword
             else if (token.type === TokenType.Keyword) {
@@ -292,7 +342,7 @@ export function formatRustDeep(text: string): string {
             if (next && (next.text === ';' || next.text === ',')) {
                 // Keep
             } else if (next && next.text === 'else') {
-                append(' ');
+                // Don't force newline, let standard spacing handle the space
             } else {
                 forceNewline();
             }
@@ -310,6 +360,12 @@ export function formatRustDeep(text: string): string {
         else if (token.type === TokenType.Comment) {
             forceNewline();
         }
+    }
+
+    // Flush any remaining imports
+    if (importBuffer.length > 0) {
+        importBuffer.sort((a, b) => a.trim().localeCompare(b.trim()));
+        outputLines.push(...importBuffer);
     }
 
     forceNewline();
