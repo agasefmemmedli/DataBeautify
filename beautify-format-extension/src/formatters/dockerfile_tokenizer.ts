@@ -23,18 +23,45 @@ export function tokenizeDockerfile(text: string): DockerToken[] {
 
         if (trimmed === '') {
             if (buffer.length > 0) {
-                // Should not happen if logic is correct, empty lines break continuations?
-                // Actually, empty lines inside a continuation are valid in Docker but weird.
-                // But usually empty line means end of previous instruction if not escaped.
-                // If previous line ended with \, and this is empty... strictly speaking it's part of the command (as a newline literal).
-                // But most formatters treat empty line as a break.
-                // Let's assume standard behavior: empty line is empty token.
+                // If previous line ended with \, and we hit empty line.
+                // Technically breaks continuation.
+                const fullRaw = buffer.join('\n');
+                const keywordMatch = fullRaw.trim().match(/^([a-zA-Z]+)\s/);
+                let keyword = '';
+                if (keywordMatch) {
+                    keyword = keywordMatch[1].toUpperCase();
+                } else {
+                    keyword = fullRaw.trim().split(/\s/)[0].toUpperCase();
+                }
+                tokens.push({
+                    type: 'INSTRUCTION',
+                    raw: fullRaw,
+                    keyword: keyword,
+                    lines: Array.from({ length: buffer.length }, (_, k) => startLine + k)
+                });
+                buffer = [];
             }
             tokens.push({ type: 'EMPTY', raw: line, lines: [i] });
             continue;
         }
 
         if (trimmed.startsWith('#')) {
+            // Check for continuation
+            let continued = false;
+            if (buffer.length > 0) {
+                const lastLine = buffer[buffer.length - 1];
+                // Check if last line ends with \ (ignoring trailing whitespace)
+                if (lastLine.trimEnd().endsWith('\\')) {
+                    continued = true;
+                }
+            }
+
+            if (continued) {
+                // Comment inside continuation. Treat as part of instruction to preserve context/indentation
+                buffer.push(line);
+                continue;
+            }
+
             if (buffer.length > 0) {
                 // Flush previous instruction
                 const fullRaw = buffer.join('\n');
@@ -53,9 +80,7 @@ export function tokenizeDockerfile(text: string): DockerToken[] {
                 });
                 buffer = [];
             }
-            // Comment
-            // Comments cannot be continued with \ (strictly speaking).
-            // But some parsers might allow it. Standard Dockerfile: # is comment.
+            // Standalone Comment
             tokens.push({ type: 'COMMENT', raw: line, lines: [i] });
             continue;
         }
@@ -64,12 +89,6 @@ export function tokenizeDockerfile(text: string): DockerToken[] {
         buffer.push(line);
 
         // Check if line continues
-        // A line continues if it ends with \
-        // Note: comments can handle \? No.
-        // Strip trailing whitespace to find \
-        // But be careful about comments at end of line? Docker doesn't support inline comments in instructions usually, except with specific parsers.
-        // Standard Dockerfile: no inline comments in instruction arguments.
-
         let effectiveLine = line;
         // Check for continuation
         if (!effectiveLine.trimEnd().endsWith('\\')) {
@@ -81,7 +100,6 @@ export function tokenizeDockerfile(text: string): DockerToken[] {
             if (keywordMatch) {
                 keyword = keywordMatch[1].toUpperCase();
             } else {
-                // Maybe just a single word instruction like 'USER root' or just 'ARG' (invalid but possible partial)
                 keyword = fullRaw.trim().split(/\s/)[0].toUpperCase();
             }
 

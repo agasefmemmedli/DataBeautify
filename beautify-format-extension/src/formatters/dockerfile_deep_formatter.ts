@@ -8,6 +8,12 @@ export function formatDockerfileDeep(text: string): string {
     const indent = '    ';
     let lastWasEmpty = false;
 
+    const standardInstructions = new Set([
+        'FROM', 'RUN', 'CMD', 'LABEL', 'EXPOSE', 'ENV', 'ADD', 'COPY',
+        'ENTRYPOINT', 'VOLUME', 'USER', 'WORKDIR', 'ARG', 'ONBUILD',
+        'STOPSIGNAL', 'HEALTHCHECK', 'SHELL', 'MAINTAINER'
+    ]);
+
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
 
@@ -27,8 +33,26 @@ export function formatDockerfileDeep(text: string): string {
 
         if (token.type === 'INSTRUCTION') {
             let formattedInstruction = '';
-            const keyword = token.keyword || '';
-            const rawArgs = token.raw.substring(keyword.length).trim();
+            // Determine keyword from raw text to be safe, or use token.keyword
+            // token.keyword might be inferred incorrectly if tokenizer had issues, but we trust it mostly.
+            // Let's re-extract to handle casing properly.
+            const firstWordMatch = token.raw.trim().match(/^([a-zA-Z]+)/);
+            let keyword = firstWordMatch ? firstWordMatch[1].toUpperCase() : '';
+
+            if (!standardInstructions.has(keyword)) {
+                // If not standard, maybe keep original casing?
+                // But token.keyword is usually uppercased by tokenizer.
+                // Let's use token.keyword if valid.
+                if (standardInstructions.has(token.keyword || '')) {
+                    keyword = token.keyword!;
+                } else {
+                    // Unknown instruction, use as is (uppercased by tokenizer default) or original?
+                    // Tokenizer uppercases. Let's trust standard list more.
+                    keyword = (token.keyword || '').toUpperCase();
+                }
+            }
+
+            const rawArgs = token.raw.replace(/^[a-zA-Z]+\s*/, '').trim();
 
             if (keyword === 'FROM' && lines.length > 0 && lines[lines.length - 1] !== '') {
                 lines.push('');
@@ -37,31 +61,29 @@ export function formatDockerfileDeep(text: string): string {
             // JSON Array Handling
             if (['CMD', 'ENTRYPOINT', 'SHELL', 'RUN', 'VOLUME'].includes(keyword) && rawArgs.startsWith('[')) {
                 try {
-                    // Handle multiline JSON array arguments (remove \ and newlines inside array?)
-                    // Docker shell treats \ as line continuation before parsing JSON exec form.
                     let jsonStr = rawArgs.replace(/\\\r?\n/g, '');
-
-                    // Use jsonrepair for robust parsing (handles single quotes, trailing commas, etc.)
                     const repaired = jsonrepair(jsonStr);
                     const parsed = JSON.parse(repaired);
 
                     if (Array.isArray(parsed)) {
-                        formattedInstruction = `${keyword} ${JSON.stringify(parsed)}`;
+                        // Add spaces after commas for readability
+                        const spaced = JSON.stringify(parsed).replace(/,(?=[^ ])/g, ', ');
+                        formattedInstruction = `${keyword} ${spaced}`;
                     }
                 } catch (e) {
-                    // Fallback to generic formatting if JSON parse fails
+                    // Fallback
                 }
             }
 
             if (!formattedInstruction) {
-                 // Generic formatting with sorting and alignment
                  const rawLines = token.raw.split(/\r?\n/);
                  const newInstructionLines: string[] = [];
 
                  let firstLine = rawLines[0].trim();
+                 // Uppercase instruction
                  const firstWord = firstLine.split(/\s/)[0];
-                 if (firstWord.toUpperCase() === keyword) {
-                     firstLine = keyword + firstLine.substring(firstWord.length);
+                 if (standardInstructions.has(firstWord.toUpperCase())) {
+                     firstLine = firstWord.toUpperCase() + firstLine.substring(firstWord.length);
                  }
                  newInstructionLines.push(firstLine);
 
@@ -69,76 +91,108 @@ export function formatDockerfileDeep(text: string): string {
                      newInstructionLines.push(`${indent}${rawLines[j].trim()}`);
                  }
 
-                 // Align Backslashes First (to have clean lines for sorting)
-                 let maxLen = 0;
-                 for (const l of newInstructionLines) {
-                     if (l.endsWith('\\')) maxLen = Math.max(maxLen, l.length);
-                 }
-
-                 const alignedLines = newInstructionLines.map((l, idx) => {
-                     if (idx === newInstructionLines.length - 1) return l;
-                     if (l.endsWith('\\')) {
-                         const content = l.substring(0, l.length - 1).trimEnd();
-                         const padding = ' '.repeat(Math.max(1, maxLen - content.length));
-                         return `${content}${padding}\\`;
-                     }
-                     return l;
-                 });
-
                  // Sorting Logic
                  let processed = false;
                  if (keyword === 'RUN' && rawLines.length > 1) {
-                      // Safety check: Don't sort if shell operators are present to avoid breaking chains
-                      const hasOperators = rawLines.some(l => /(&&|\|\||;|\||>)/.test(l));
+                      // Safety check: Don't sort if shell operators are present (ignoring comments)
+                      const hasOperators = rawLines.some(l => !l.trim().startsWith('#') && /(&&|\|\||;|\||>)/.test(l));
 
-                      if (!hasOperators && /apt-get\s+install|apk\s+add|pip\s+install/i.test(firstLine)) {
-                           // Extract packages from lines 1..N
-                           // Assumption: First line is command (e.g. RUN apt-get install -y \), rest are packages.
-                           const packages: string[] = [];
-                           const header = alignedLines[0];
+                      if (!hasOperators && /apt-get\s+install|apk\s+add|pip\s+install|yum\s+install|dnf\s+install/i.test(firstLine)) {
+                           const items: { text: string, comment?: string, sortKey: string }[] = [];
+                           const header = newInstructionLines[0]; // First line (RUN ...)
+                           let pendingComment: string | null = null;
 
-                           // Check if header ends with \
-                           if (header.endsWith('\\')) {
-                                for (let k = 1; k < alignedLines.length; k++) {
-                                    packages.push(alignedLines[k].replace(/\\$/, '').trim());
-                                }
+                           // Extract items from lines 1..N
+                           // We need to be careful about matching lines.
+                           // alignedLines logic from previous version is useful for calculation but here we need structure.
 
-                                packages.sort((a, b) => {
-                                    if (a.startsWith('-') && !b.startsWith('-')) return -1;
-                                    if (!a.startsWith('-') && b.startsWith('-')) return 1;
-                                    return a.localeCompare(b);
-                                });
+                           for (let k = 1; k < newInstructionLines.length; k++) {
+                               const line = newInstructionLines[k];
+                               const trimmed = line.trim();
 
-                                // Reconstruct block with sorting
-                                // Recalculate max length for this sorted block
-                                let blockMaxLen = header.replace(/\\$/, '').trim().length;
-                                packages.forEach(p => {
-                                    blockMaxLen = Math.max(blockMaxLen, p.length + indent.length);
-                                });
+                               if (trimmed.startsWith('#')) {
+                                   if (pendingComment) pendingComment += '\n' + trimmed;
+                                   else pendingComment = trimmed;
+                                   continue;
+                               }
 
-                                const finalBlock: string[] = [];
-                                // Header
-                                const headerClean = header.replace(/\\$/, '').trim();
-                                const headerPad = ' '.repeat(Math.max(1, blockMaxLen - headerClean.length));
-                                finalBlock.push(`${headerClean}${headerPad}\\`);
-
-                                for (let k = 0; k < packages.length; k++) {
-                                    const p = packages[k];
-                                    if (k === packages.length - 1) {
-                                        // Last one
-                                        finalBlock.push(`${indent}${p}`);
-                                    } else {
-                                        const pad = ' '.repeat(Math.max(1, blockMaxLen - (p.length + indent.length)));
-                                        finalBlock.push(`${indent}${p}${pad}\\`);
-                                    }
-                                }
-                                formattedInstruction = finalBlock.join('\n');
-                                processed = true;
+                               // It's a package
+                               const pkg = trimmed.replace(/\\$/, '').trim();
+                               if (pkg) {
+                                   items.push({
+                                       text: pkg,
+                                       comment: pendingComment || undefined,
+                                       sortKey: pkg.startsWith('-') ? 'zzz' + pkg : pkg // Options at end or beginning? usually beginning.
+                                       // Actually options like -y usually go in header or top.
+                                       // If they are in list, sort them?
+                                       // Let's stick to simple alphabetical, flags first?
+                                       // -flag should come before package? 'a' < 'z'. '-' char code is 45. 'a' is 97.
+                                       // So '-' comes first. Good.
+                                   });
+                                   pendingComment = null;
+                               }
                            }
+
+                           // Sort items
+                           items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+                           // Reconstruct
+                           // First line needs \
+                           const headerClean = header.replace(/\\$/, '').trim();
+                           const finalBlock: string[] = [];
+
+                           // Calculate max len for alignment
+                           let maxLen = headerClean.length;
+                           items.forEach(item => {
+                               maxLen = Math.max(maxLen, item.text.length + indent.length);
+                           });
+
+                           // Header
+                           const headerPad = ' '.repeat(Math.max(1, maxLen - headerClean.length));
+                           finalBlock.push(`${headerClean}${headerPad}\\`);
+
+                           items.forEach((item, index) => {
+                               // Add comment if any (indented)
+                               if (item.comment) {
+                                   const commentLines = item.comment.split('\n');
+                                   commentLines.forEach(c => finalBlock.push(`${indent}${c}`));
+                               }
+
+                               const isLast = index === items.length - 1;
+                               const text = item.text;
+
+                               if (isLast) {
+                                   finalBlock.push(`${indent}${text}`);
+                               } else {
+                                   const pad = ' '.repeat(Math.max(1, maxLen - (text.length + indent.length)));
+                                   finalBlock.push(`${indent}${text}${pad}\\`);
+                               }
+                           });
+
+                           formattedInstruction = finalBlock.join('\n');
+                           processed = true;
                       }
                  }
 
                  if (!processed) {
+                     // Align Backslashes
+                     let maxLen = 0;
+                     for (const l of newInstructionLines) {
+                         if (l.trim().startsWith('#')) continue; // Don't align based on comments
+                         if (l.endsWith('\\')) maxLen = Math.max(maxLen, l.length);
+                     }
+
+                     const alignedLines = newInstructionLines.map((l, idx) => {
+                         if (idx === newInstructionLines.length - 1) return l;
+                         if (l.trim().startsWith('#')) return l; // Don't add \ to comments
+
+                         if (l.endsWith('\\')) {
+                             const content = l.substring(0, l.length - 1).trimEnd();
+                             const padding = ' '.repeat(Math.max(1, maxLen - content.length));
+                             return `${content}${padding}\\`;
+                         }
+                         return l;
+                     });
                      formattedInstruction = alignedLines.join('\n');
                  }
             }
