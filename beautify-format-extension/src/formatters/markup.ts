@@ -8,6 +8,7 @@ import { formatLaTeXDeep } from './latex_deep_formatter';
 import { formatHandlebarsDeep } from './handlebars_deep_formatter';
 import { formatTwigDeep } from './twig_deep_formatter';
 import { formatLiquidDeep } from './liquid_deep_formatter';
+import { formatIPYNBDeep } from './ipynb_deep_formatter';
 
 /**
  * Handle Markdown formatting and validation
@@ -851,80 +852,8 @@ export async function handleIPYNB(editor: vscode.TextEditor, text: string) {
     // Validate IPYNB
     validationMessage = validateIPYNB(text);
 
-    // Lazy load dependencies
-    const { jsonrepair } = require('jsonrepair');
-
     try {
-        let notebook: any;
-        try {
-            notebook = JSON.parse(text);
-        } catch (e) {
-            // Fault-tolerance: try to repair JSON if parsing fails
-            const repairedText = jsonrepair(text);
-            notebook = JSON.parse(repairedText);
-        }
-
-        // Deep Formatting for Cells
-        if (notebook.cells && Array.isArray(notebook.cells)) {
-            // We need Prettier for Markdown cells
-            let prettier: any;
-            try {
-                prettier = await import('prettier');
-            } catch (e) {
-                console.warn('Prettier not available for Markdown cells inside Notebook.');
-            }
-
-            for (const cell of notebook.cells) {
-                if (cell.source) {
-                    let source = '';
-                    let isArray = Array.isArray(cell.source);
-
-                    if (isArray) {
-                        source = cell.source.join('');
-                    } else {
-                        source = cell.source;
-                    }
-
-                    let formattedSource = source;
-
-                    if (cell.cell_type === 'code') {
-                        try {
-                            formattedSource = formatPythonDeep(source);
-                        } catch (e: any) {
-                            console.warn('Failed to format Python cell:', e);
-                        }
-                    } else if (cell.cell_type === 'markdown' && prettier) {
-                        try {
-                            formattedSource = await prettier.format(source, {
-                                parser: "markdown",
-                                tabWidth: 2,
-                                useTabs: false,
-                                proseWrap: "preserve",
-                                printWidth: 80,
-                            });
-                        } catch (e: any) {
-                            console.warn('Failed to format Markdown cell:', e);
-                        }
-                    }
-
-                    // Convert back to array of strings if needed (Jupyter convention: lines end with \n)
-                    if (isArray) {
-                        const lines = formattedSource.split('\n');
-                        cell.source = lines.map((line, i) => {
-                            if (i < lines.length - 1) {
-                                return line + '\n';
-                            }
-                            return line;
-                        });
-                    } else {
-                        cell.source = formattedSource;
-                    }
-                }
-            }
-        }
-
-        // Jupyter notebooks standardly use 1-space indentation for JSON
-        formatted = JSON.stringify(notebook, null, 1);
+        formatted = await formatIPYNBDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Jupyter Notebook: ${error.message}`);
         return;
