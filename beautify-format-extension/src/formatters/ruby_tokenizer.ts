@@ -60,6 +60,8 @@ export class RubyTokenizer {
         let heredocIndent = false; // <<-EOF or <<~EOF allow indent
 
         while (this.pos < this.text.length) {
+            const startLine = this.line;
+            const startColumn = this.column;
             const char = this.text[this.pos];
 
             // Heredoc Handling
@@ -74,23 +76,19 @@ export class RubyTokenizer {
                 // Check for end delimiter
                 if (trimmedContent === heredocDelimiter) {
                     // This is the end
-                    tokens.push(this.createToken(TokenType.HeredocEnd, lineContent));
+                    tokens.push(this.createToken(TokenType.HeredocEnd, lineContent, startLine, startColumn));
                     inHeredoc = false;
                     heredocDelimiter = '';
                 } else {
-                    tokens.push(this.createToken(TokenType.HeredocBody, lineContent));
+                    tokens.push(this.createToken(TokenType.HeredocBody, lineContent, startLine, startColumn));
                 }
 
                 this.advance(lineContent.length);
                 if (this.pos < this.text.length && this.text[this.pos] === '\n') {
-                    // Add newline as whitespace/heredoc body part?
-                    // Usually heredoc body includes the newline.
-                    // But tokenizing line-by-line is safer.
-                    // The newline will be picked up as whitespace in next iteration?
-                    // No, `lineEnd` index points to `\n`.
-                    // If we advanced by lineContent.length, we are AT `\n`.
-                    // We should consume it.
-                    tokens.push(this.createToken(TokenType.Whitespace, '\n'));
+                    // Consume newline
+                    const nlLine = this.line;
+                    const nlCol = this.column;
+                    tokens.push(this.createToken(TokenType.Whitespace, '\n', nlLine, nlCol));
                     this.advance(1);
                 }
                 continue;
@@ -99,11 +97,12 @@ export class RubyTokenizer {
             // Whitespace
             if (/\s/.test(char)) {
                 let value = '';
+                // Note: we advanced one by one, so capturing startLine/startColumn is correct for the block
                 while (this.pos < this.text.length && /\s/.test(this.text[this.pos])) {
                     value += this.text[this.pos];
                     this.advance(1);
                 }
-                tokens.push(this.createToken(TokenType.Whitespace, value));
+                tokens.push(this.createToken(TokenType.Whitespace, value, startLine, startColumn));
                 continue;
             }
 
@@ -114,7 +113,7 @@ export class RubyTokenizer {
                     value += this.text[this.pos];
                     this.advance(1);
                 }
-                tokens.push(this.createToken(TokenType.Comment, value));
+                tokens.push(this.createToken(TokenType.Comment, value, startLine, startColumn));
                 continue;
             }
 
@@ -138,7 +137,7 @@ export class RubyTokenizer {
                         break;
                     }
                 }
-                tokens.push(this.createToken(TokenType.String, value));
+                tokens.push(this.createToken(TokenType.String, value, startLine, startColumn));
                 continue;
             }
 
@@ -194,8 +193,8 @@ export class RubyTokenizer {
                     }
 
                     // Identify type
-                    if (next === 'r') tokens.push(this.createToken(TokenType.Regex, value));
-                    else tokens.push(this.createToken(TokenType.String, value));
+                    if (next === 'r') tokens.push(this.createToken(TokenType.Regex, value, startLine, startColumn));
+                    else tokens.push(this.createToken(TokenType.String, value, startLine, startColumn));
                     continue;
                 }
             }
@@ -249,7 +248,7 @@ export class RubyTokenizer {
                         value += this.text[this.pos];
                         this.advance(1);
                     }
-                    tokens.push(this.createToken(TokenType.Regex, value));
+                    tokens.push(this.createToken(TokenType.Regex, value, startLine, startColumn));
                     continue;
                 }
             }
@@ -257,10 +256,6 @@ export class RubyTokenizer {
             // Heredoc Start
             // <<EOF, <<-EOF, <<~EOF, <<'EOF', <<"EOF"
             if (char === '<' && this.text[this.pos+1] === '<') {
-                // Check if it is left shift operator `<<` followed by space or number?
-                // Heredoc delimiter must immediately follow `<<` (maybe with - or ~)
-                // And delimiter must be identifier or quoted string.
-
                 const remaining = this.text.substring(this.pos);
                 const heredocMatch = remaining.match(/^<<([-~]?)(["']?)([a-zA-Z0-9_]+)\2/);
 
@@ -271,7 +266,7 @@ export class RubyTokenizer {
                     heredocDelimiter = heredocMatch[3];
 
                     const fullMatch = heredocMatch[0];
-                    tokens.push(this.createToken(TokenType.HeredocStart, fullMatch));
+                    tokens.push(this.createToken(TokenType.HeredocStart, fullMatch, startLine, startColumn));
                     this.advance(fullMatch.length);
                     continue;
                 }
@@ -286,7 +281,7 @@ export class RubyTokenizer {
                      // But :symbol is standard.
                      // Also :: is scope resolution.
                      if (this.text[this.pos + 1] === ':') {
-                         tokens.push(this.createToken(TokenType.Operator, '::'));
+                         tokens.push(this.createToken(TokenType.Operator, '::', startLine, startColumn));
                          this.advance(2);
                          continue;
                      }
@@ -322,7 +317,7 @@ export class RubyTokenizer {
                              this.advance(1);
                          }
                      }
-                     tokens.push(this.createToken(TokenType.Symbol, value));
+                     tokens.push(this.createToken(TokenType.Symbol, value, startLine, startColumn));
                      continue;
                 }
             }
@@ -336,7 +331,7 @@ export class RubyTokenizer {
                     value += this.text[this.pos];
                     this.advance(1);
                 }
-                tokens.push(this.createToken(TokenType.Number, value));
+                tokens.push(this.createToken(TokenType.Number, value, startLine, startColumn));
                 continue;
             }
 
@@ -348,7 +343,7 @@ export class RubyTokenizer {
                     value += this.text[this.pos];
                     this.advance(1);
                 }
-                tokens.push(this.createToken(TokenType.Identifier, value));
+                tokens.push(this.createToken(TokenType.Identifier, value, startLine, startColumn));
                 continue;
             }
 
@@ -367,15 +362,15 @@ export class RubyTokenizer {
                      if (this.text[this.pos+1] !== ':') {
                          value += ':';
                          this.advance(1);
-                         tokens.push(this.createToken(TokenType.Identifier, value)); // Treated as identifier (key)
+                         tokens.push(this.createToken(TokenType.Identifier, value, startLine, startColumn)); // Treated as identifier (key)
                          continue;
                      }
                 }
 
                 if (this.keywords.has(value)) {
-                    tokens.push(this.createToken(TokenType.Keyword, value));
+                    tokens.push(this.createToken(TokenType.Keyword, value, startLine, startColumn));
                 } else {
-                    tokens.push(this.createToken(TokenType.Identifier, value));
+                    tokens.push(this.createToken(TokenType.Identifier, value, startLine, startColumn));
                 }
                 continue;
             }
@@ -385,7 +380,7 @@ export class RubyTokenizer {
             if (this.pos + 2 < this.text.length) {
                 const threeChars = char + this.text[this.pos+1] + this.text[this.pos+2];
                 if (this.operators.has(threeChars)) {
-                    tokens.push(this.createToken(TokenType.Operator, threeChars));
+                    tokens.push(this.createToken(TokenType.Operator, threeChars, startLine, startColumn));
                     this.advance(3);
                     continue;
                 }
@@ -395,26 +390,26 @@ export class RubyTokenizer {
             if (this.pos + 1 < this.text.length) {
                 const twoChars = char + this.text[this.pos+1];
                 if (this.operators.has(twoChars)) {
-                    tokens.push(this.createToken(TokenType.Operator, twoChars));
+                    tokens.push(this.createToken(TokenType.Operator, twoChars, startLine, startColumn));
                     this.advance(2);
                     continue;
                 }
             }
 
             if (this.operators.has(char)) {
-                tokens.push(this.createToken(TokenType.Operator, char));
+                tokens.push(this.createToken(TokenType.Operator, char, startLine, startColumn));
                 this.advance(1);
                 continue;
             }
 
             if (/[(){}\[\],;.]/.test(char)) {
-                tokens.push(this.createToken(TokenType.Punctuation, char));
+                tokens.push(this.createToken(TokenType.Punctuation, char, startLine, startColumn));
                 this.advance(1);
                 continue;
             }
 
             // Unknown
-            tokens.push(this.createToken(TokenType.Unknown, char));
+            tokens.push(this.createToken(TokenType.Unknown, char, startLine, startColumn));
             this.advance(1);
         }
 
@@ -435,16 +430,12 @@ export class RubyTokenizer {
         }
     }
 
-    private createToken(type: TokenType, text: string): Token {
+    private createToken(type: TokenType, text: string, line: number, column: number): Token {
         return {
             type,
             text,
-            line: this.line, // Line at END of token? Or start?
-            // My advance logic updates line as it consumes.
-            // Ideally should capture start line.
-            // But for simple formatting, current state roughly works if we use it for relative positioning.
-            // Let's refine if needed.
-            column: this.column
+            line,
+            column
         };
     }
 
