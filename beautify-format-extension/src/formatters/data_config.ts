@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { applyEdit } from '../utils';
 import { formatGraphQLDeep } from './graphql_deep_formatter';
-import { formatSQLDeep } from './sql_deep_formatter';
+import { formatSQLDeep, formatSQLFallback } from './sql_deep_formatter';
 import { formatYAMLDeep } from './yaml_deep_formatter';
 import { formatTOMLDeep } from './toml_deep_formatter';
 import { formatCSVDeep, validateCSV } from './csv_deep_formatter';
@@ -310,151 +310,18 @@ export async function handleSQL(editor: vscode.TextEditor, text: string) {
     // Validate SQL
     validationMessage = validateSQL(text);
 
-    // Deep Formatting
+    // Deep Formatting (Resilient)
     try {
         formatted = await formatSQLDeep(text);
-
-        await applyEdit(editor, formatted);
-
-        if (validationMessage) {
-            vscode.window.showWarningMessage(`SQL has syntax issues but was beautified. ${validationMessage}`);
-        } else {
-            vscode.window.showInformationMessage('SQL formatted successfully!');
-        }
-        return;
-    } catch (e: any) {
-        console.warn('Deep SQL formatting failed:', e);
-        // Fallback to resilient formatting logic
-    }
-
-    // Resilient formatting logic
-    try {
-        const keywords = [
-            'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
-            'INNER', 'OUTER', 'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT', 'SET', 'VALUES', 'CREATE',
-            'TABLE', 'DROP', 'ALTER', 'UNION', 'ALL', 'AND', 'OR', 'IN', 'EXISTS', 'BETWEEN', 'LIKE',
-            'IS', 'NULL', 'NOT', 'DISTINCT', 'AS', 'ON', 'USING', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
-            'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'DEFAULT', 'UNIQUE', 'CHECK', 'INDEX', 'VIEW',
-            'DATABASE', 'SCHEMA', 'TRIGGER', 'PROCEDURE', 'FUNCTION', 'DECLARE', 'BEGIN', 'COMMIT', 'ROLLBACK'
-        ];
-
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inString = false;
-        let quoteChar = '';
-        let inBlockComment = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            const trimmed = line.trim();
-
-            if (trimmed === '' && !inString && !inBlockComment) {
-                formattedLines.push('');
-                continue;
-            }
-
-            // Keyword normalization and basic indentation
-            // We'll process the line to find keywords and upper-case them
-            let processedLine = '';
-            let currentWord = '';
-
-            for (let j = 0; j < line.length; j++) {
-                const char = line[j];
-                const nextChar = line[j + 1];
-
-                if (inBlockComment) {
-                    processedLine += char;
-                    if (char === '*' && nextChar === '/') {
-                        inBlockComment = false;
-                        processedLine += '/';
-                        j++;
-                    }
-                    continue;
-                }
-
-                if (inString) {
-                    processedLine += char;
-                    if (char === quoteChar && nextChar === quoteChar) {
-                        processedLine += nextChar;
-                        j++;
-                    } else if (char === '\\') {
-                        if (nextChar) {
-                            processedLine += nextChar;
-                            j++;
-                        }
-                    } else if (char === quoteChar) {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (char === '-' && nextChar === '-') {
-                    processedLine += line.substring(j);
-                    break;
-                }
-
-                if (char === '/' && nextChar === '*') {
-                    inBlockComment = true;
-                    processedLine += '/*';
-                    j++;
-                    continue;
-                }
-
-                if (char === '"' || char === "'") {
-                    inString = true;
-                    quoteChar = char;
-                    processedLine += char;
-                    continue;
-                }
-
-                if (/[a-zA-Z_]/.test(char)) {
-                    currentWord += char;
-                } else {
-                    if (currentWord) {
-                        if (keywords.includes(currentWord.toUpperCase())) {
-                            processedLine += currentWord.toUpperCase();
-                        } else {
-                            processedLine += currentWord;
-                        }
-                        currentWord = '';
-                    }
-                    processedLine += char;
-                }
-            }
-            if (currentWord) {
-                if (keywords.includes(currentWord.toUpperCase())) {
-                    processedLine += currentWord.toUpperCase();
-                } else {
-                    processedLine += currentWord;
-                }
-            }
-
-            const trimmedProcessed = processedLine.trim();
-
-            // Adjust indent for leading closing parenthesis
-            let currentLineIndent = indentLevel;
-            if (trimmedProcessed.startsWith(')')) {
-                // Peek at current state to decide if we should outdent
-                // Since we haven't updated indentLevel yet for this line,
-                // if it starts with ')', it should be outdented.
-                currentLineIndent--;
-            }
-
-            // Apply indentation
-            formattedLines.push('    '.repeat(Math.max(0, currentLineIndent)) + trimmedProcessed);
-
-            // Calculate indent for next line
-            if (!inBlockComment && !inString) {
-                const openParens = (trimmedProcessed.match(/\(/g) || []).length;
-                const closeParens = (trimmedProcessed.match(/\)/g) || []).length;
-                indentLevel += (openParens - closeParens);
-            }
-        }
-        formatted = formattedLines.join('\n');
     } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format SQL: ${error.message}`);
-        return;
+        console.warn('Deep SQL formatting failed (even fallback):', error);
+        // Fallback explicitly if needed (though formatSQLDeep handles it)
+        try {
+            formatted = formatSQLFallback(text);
+        } catch (fallbackError: any) {
+            vscode.window.showErrorMessage(`Failed to format SQL: ${fallbackError.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);
