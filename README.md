@@ -41,3 +41,4 @@
 - [x] Jupyter Notebook (Deep Formatting Implemented)
 - [x] Java (Deep Formatting Implemented)
 - [x] SVG (Deep Formatting Implemented)
+- [x] MongoDB Shell (Deep Formatting Implemented)
