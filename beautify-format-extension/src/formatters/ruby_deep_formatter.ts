@@ -34,7 +34,7 @@ export function formatRubyDeep(text: string): string {
             }
         } else if (token.type === TokenType.Comment) {
              enhancedTokens.push({ ...token, precedingNewlines: newlines, precedingSpaces: spaces, index: tokenIndex++ });
-             newlines = 0; // Let subsequent whitespace handle newlines
+             newlines = 0;
              spaces = 0;
         } else {
             enhancedTokens.push({ ...token, precedingNewlines: newlines, precedingSpaces: spaces, index: tokenIndex++ });
@@ -65,7 +65,7 @@ export function formatRubyDeep(text: string): string {
             if (prev.text === 'else' || prev.text === 'elsif') return true;
             if (prev.text === '=') return true; // x = if ...
             if (prev.text === 'return') return false; // return if ... (modifier)
-            if (prev.text === 'do') return true;
+            if (prev.text === 'do') return true; // while ... do ... (loop)
             if (prev.text === '(' || prev.text === '[') return true;
             // Otherwise, likely a modifier: x = 1 if true
             return false;
@@ -74,6 +74,9 @@ export function formatRubyDeep(text: string): string {
     };
 
     let prevIsUnary = false;
+
+    // Block parameter state
+    let inBlockParams = false;
 
     for (let i = 0; i < enhancedTokens.length; i++) {
         const token = enhancedTokens[i];
@@ -109,34 +112,45 @@ export function formatRubyDeep(text: string): string {
             if (endKeywords.has(token.text) || intermediateKeywords.has(token.text)) {
                 forceNewline = true;
             }
-            // `def` etc usually start new line
-            if (blockKeywords.has(token.text) && prev && prev.text !== ';') {
-                 // Unless it's `do` (inline block)
-                 if (token.text !== 'do') {
+            if (blockKeywords.has(token.text)) {
+                 if (token.text === 'do') {
+                     // `do` stays on same line usually, unless multiline needed?
+                     // Standard: method call do ... end
+                     // forceNewline = false;
+                 } else {
                      // Check if it's start of line already
                      if (token.precedingNewlines === 0 && prev) {
-                         // e.g. private def foo
-                         // Allow modifiers?
-                         // For deep formatting, maybe force newline?
-                         // No, `private class` or `private def` is valid on one line?
-                         // Usually `private` is on its own line.
-                         // But `x = if ...` -> `if` is not on new line.
-                         if (!conditionalKeywords.has(token.text)) {
-                             // forceNewline = true; // Risk of breaking valid inline constructs
+                         // private def foo -> no newline
+                         // x = if -> no newline
+                         if (!conditionalKeywords.has(token.text) && prev.text !== 'private' && prev.text !== 'protected' && prev.text !== 'public') {
+                             // Force newline?
+                             // Module/Class usually start on new line.
+                             if (['module', 'class', 'def'].includes(token.text)) {
+                                 // Unless after ;
+                                 if (prev.text !== ';') forceNewline = true;
+                             }
                          }
                      }
                  }
             }
         }
 
-        // Handle Heredoc Body/End - preserve exact structure if possible
+        // Method Chaining Alignment: if dot is on new line
+        if (token.text === '.' || token.text === '&.') {
+             if (token.precedingNewlines > 0) {
+                 forceNewline = true;
+             }
+        }
+
+        // Handle Heredoc Body/End - preserve exact structure
         if (token.type === TokenType.HeredocBody || token.type === TokenType.HeredocEnd) {
-             // forceNewline determined by precedingNewlines
+             // forceNewline determined by precedingNewlines (which comes from tokenizer whitespace preservation)
         }
 
         // Output Construction
         if (forceNewline || (currentLine.length === 0 && output.length > 0)) {
              if (output.length > 0) {
+                 output = output.trimEnd(); // Remove trailing spaces on previous line
                  output += '\n';
                  if (blankLine) output += '\n';
              }
@@ -144,12 +158,14 @@ export function formatRubyDeep(text: string): string {
              // Indentation for this line
              let currentIndent = indentLevel;
 
+             // Method chaining indentation
+             if (token.text === '.' || token.text === '&.') {
+                 currentIndent++; // Indent 1 level deep for chained calls on new line
+             }
+
              // Handle Heredoc Indentation
              if (token.type === TokenType.HeredocBody || token.type === TokenType.HeredocEnd) {
-                  currentIndent = 0; // Don't indent heredoc content/delimiter (user controlled or handled by token content)
-                  // Unless it's `<<-` or `<<~`?
-                  // Custom formatter preserved it. Tokenizer returns raw content.
-                  // So 0 indent is correct to preserve original.
+                  currentIndent = 0;
              }
 
              output += INDENT_STRING.repeat(currentIndent);
@@ -159,50 +175,88 @@ export function formatRubyDeep(text: string): string {
              let spaceBefore = false;
              if (token.precedingSpaces > 0) spaceBefore = true;
 
-             // Rules
+             // --- Rule Refinements ---
              if (prev) {
-                 if (token.text === ',') spaceBefore = false;
-                 if (token.text === ';') spaceBefore = false;
-                 if (token.text === '.') spaceBefore = false;
+                 // No space before punctuation
+                 if (token.text === ',' || token.text === ';' || token.text === '.') spaceBefore = false;
                  if (token.text === '::') spaceBefore = false;
                  if (prev.text === '::') spaceBefore = false;
                  if (prev.text === '.') spaceBefore = false;
 
                  // Operators
                  if (token.type === TokenType.Operator) {
-                      // Calculate isUnary for current token (to start)
+                      // Calculate isUnary for current token
                       if (['+', '-', '*', '&', '!', '~'].includes(token.text)) {
-                           if (prev.type === TokenType.Operator || prev.type === TokenType.Keyword || prev.type === TokenType.Punctuation) {
+                           if (prev.type === TokenType.Operator || prev.type === TokenType.Keyword || prev.type === TokenType.Punctuation || prev.text === '=') {
                                if (!['end', ')', ']', '}', '\'', '"'].includes(prev.text)) {
                                     isUnary = true;
                                }
                            }
+                           // Special case for blocks: &block
+                           if (token.text === '&' && (prev.text === ',' || prev.text === '(')) isUnary = true;
                       }
 
-                      // Unary operators? !, ~, +, -
-                      // Heuristic: space around binary operators.
-                      if (['+', '-', '*', '/', '%', '=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '+=', '-=', '=>'].includes(token.text)) {
+                      // Binary operators: space around
+                      if (['+', '-', '*', '/', '%', '=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '+=', '-=', '=>', '<<', '>>'].includes(token.text)) {
                           if (!isUnary) spaceBefore = true;
+                      }
+
+                      // Pipe | for blocks
+                      if (token.text === '|') {
+                          // Check if it's block param start or end
+                          // If prev is { or do, it's start.
+                          // If we are inBlockParams, it's end.
+                          if (prev.text === '{' || prev.text === 'do') {
+                              inBlockParams = true;
+                              spaceBefore = true; // space before start pipe: { |x|
+                          } else if (inBlockParams) {
+                              inBlockParams = false;
+                              spaceBefore = false; // no space before end pipe: |x|
+                          } else {
+                              // bitwise OR
+                              spaceBefore = true;
+                          }
                       }
                  }
 
                  if (prev.type === TokenType.Operator) {
                       // Space after operator?
-                      // x = 1
                       spaceBefore = true;
 
                       // Exception: unary
                       if (prevIsUnary) spaceBefore = false;
 
                       // Other exceptions
-                      if (['.', '::', '..', '...', '&'].includes(prev.text)) spaceBefore = false;
+                      if (['.', '::', '..', '...', '&.'].includes(prev.text)) spaceBefore = false;
+
+                      // Pipe |
+                      if (prev.text === '|') {
+                          if (inBlockParams) {
+                              // Just started params: |x| -> no space after first pipe
+                              spaceBefore = false;
+                          } else {
+                              // Closed params: |x| ... -> space after
+                              spaceBefore = true;
+                          }
+                      }
                  }
+
+                 // Block Param handling (Comma inside pipes)
+                 if (inBlockParams && token.text === ',') {
+                     spaceBefore = false;
+                 }
+                 if (inBlockParams && prev.text === ',') {
+                     spaceBefore = true;
+                 }
+                 // Remove spaces inside pipes if strictly parameters
+                 // Actually, spaceBefore logic above handles it?
+                 // |x|
+                 // Pipe start: spaceBefore=true (after {). inBlockParams=true.
+                 // x: prev=|. inBlockParams=true. We need spaceBefore=false.
+                 // Correct: "Just started params: |x| -> no space after first pipe" (above)
 
                  // Brackets/Parens
                  if (token.text === '(' || token.text === '[') {
-                      // Space before ( ?
-                      // if (expr) -> yes
-                      // func(expr) -> no
                       if (prev.type === TokenType.Keyword) {
                           if (['if', 'unless', 'while', 'until', 'case', 'switch', 'for'].includes(prev.text)) spaceBefore = true;
                           else spaceBefore = false; // super()
@@ -215,6 +269,27 @@ export function formatRubyDeep(text: string): string {
                  if (token.text === '{') spaceBefore = true;
                  if (prev.text === '{') spaceBefore = true; // { |x| ...
                  if (token.text === '}') spaceBefore = true;
+
+                 // Hash rocket or key: spacing
+                 if (prev.text === ':') {
+                     // Check if it was symbol (:sym) or key (key:)
+                     // Tokenizer doesn't distinguish fully, but if it is TokenType.Symbol, it starts with :
+                     // If prev is : (Punctuation/Operator), it might be key: (if we split it) or :sym
+                     // Wait, my tokenizer emits Symbol token for :foo. So prev wouldn't be just ':'.
+                     // If prev is ':', it's likely a hash key ending in colon (if I parsed it that way?)
+                     // My tokenizer parses `key:` as identifier `key` then punctuation `:`.
+                     // So if prev.text is `:`, it is likely end of key.
+                     spaceBefore = true;
+                 }
+                 if (token.type === TokenType.Symbol) {
+                     // :foo
+                     // Space before unless inside parens/brackets
+                     if (prev.text === '(' || prev.text === '[' || prev.text === '{') spaceBefore = false;
+                     // key: :value -> space before :value
+                     if (prev.text === ':') spaceBefore = true;
+                     // => :value
+                     if (prev.text === '=>') spaceBefore = true;
+                 }
              }
 
              if (spaceBefore && currentLine.length > 0 && !currentLine.endsWith(' ')) {
