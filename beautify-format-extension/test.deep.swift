@@ -81,6 +81,52 @@ func testGenerics() {
     if count > 0 {
         print("Greater")
     }
+
+    let dict: Dictionary<String, Array<Int>> = [
+        "key": [1, 2, 3],
+        "other": []
+    ]
+}
+
+// Complex Closures and Alignment
+func complexClosures() {
+    UIView.animate(withDuration: 0.3, animations: {
+        print("Animating")
+    }, completion: { finished in
+        if finished {
+            print("Done")
+        }
+    })
+
+    let items = [1, 2, 3].map { number -> Int in
+        let result = number * 2
+        return result
+    }.filter { $0 > 2 }
+}
+
+// Multiline function definition
+func multilineFunction(
+    param1: String,
+    param2: Int,
+    param3: Bool
+) -> String {
+    return "\(param1) \(param2)"
+}
+
+// Guard with multiline conditions
+func check(a: Int, b: Int) {
+    guard a > 0,
+          b > 0,
+          a + b < 100 else {
+        return
+    }
+    print("OK")
+}
+
+// Enum with associated values
+enum Result<T, E: Error> {
+    case success(T)
+    case failure(E)
 }
 
 // Strings
