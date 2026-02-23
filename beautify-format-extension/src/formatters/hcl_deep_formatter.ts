@@ -37,7 +37,7 @@ export function formatHCLDeep(text: string): string {
         // Deduce if dedent needed
         let dedent = 0;
         const first = line[0];
-        if (first.type === TokenType.Punctuation && (first.text === '}' || first.text === ']')) {
+        if (first.type === TokenType.Punctuation && (first.text === '}' || first.text === ']' || first.text === ')')) {
             dedent = 1;
         }
 
