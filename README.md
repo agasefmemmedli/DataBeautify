@@ -15,7 +15,6 @@
 - [x] Dart (Deep Formatting Implemented)
 - [x] Properties (Deep Formatting Implemented)
 - [x] JavaScript/TypeScript (Deep Formatting Implemented)
-- [x] Python (Deep Formatting Implemented)
 - [x] ENV (Deep Formatting Implemented)
 - [x] Makefile (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)

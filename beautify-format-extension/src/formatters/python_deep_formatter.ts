@@ -251,7 +251,11 @@ export function formatPythonDeep(text: string): string {
                      if (nextToken.type === TokenType.Punctuation && '([{:,'.includes(nextToken.text)) needSpace = false;
                      else needSpace = true;
                 } else {
-                     needSpace = true;
+                     if (nextToken.type === TokenType.Punctuation && nextToken.text === ':') {
+                         needSpace = false; // else:
+                     } else {
+                         needSpace = true;
+                     }
                 }
             }
             // 5. Identifiers/Numbers/Strings
@@ -298,13 +302,15 @@ export function formatPythonDeep(text: string): string {
 
             if (needSpace) formattedLine += ' ';
 
-            // Update nesting levels with includes() for safety
-            if (token.text.includes('(')) parenLevel++;
-            if (token.text.includes('[')) bracketLevel++;
-            if (token.text.includes('{')) braceLevel++;
-            if (token.text.includes(')')) parenLevel--;
-            if (token.text.includes(']')) bracketLevel--;
-            if (token.text.includes('}')) braceLevel--;
+            // Update nesting levels
+            if (token.type === TokenType.Punctuation || token.type === TokenType.Operator) {
+                if (token.text === '(') parenLevel++;
+                else if (token.text === '[') bracketLevel++;
+                else if (token.text === '{') braceLevel++;
+                else if (token.text === ')') parenLevel = Math.max(0, parenLevel - 1);
+                else if (token.text === ']') bracketLevel = Math.max(0, bracketLevel - 1);
+                else if (token.text === '}') braceLevel = Math.max(0, braceLevel - 1);
+            }
         }
 
         outputLines.push(formattedLine);
