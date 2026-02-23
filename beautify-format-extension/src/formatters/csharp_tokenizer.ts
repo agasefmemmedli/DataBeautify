@@ -180,9 +180,17 @@ export class CsharpTokenizer {
                     }
                 }
             }
-            // $"{...}" (Interpolated) - handled same as normal string but different prefix?
+            // $"{...}" (Interpolated)
+            if (char === '$' && this.pos + 1 < this.code.length && this.code[this.pos + 1] === '"') {
+                const str = this.matchInterpolatedString();
+                if (str) {
+                    tokens.push({ type: TokenType.String, text: str, line: this.line, col: this.col });
+                    this.advanceStr(str);
+                    continue;
+                }
+            }
             // "..."
-            if (char === '"' || (char === '$' && this.pos + 1 < this.code.length && this.code[this.pos + 1] === '"')) {
+            if (char === '"') {
                 const str = this.matchString();
                 if (str) {
                     tokens.push({ type: TokenType.String, text: str, line: this.line, col: this.col });
@@ -191,7 +199,6 @@ export class CsharpTokenizer {
                 }
             }
             // Raw string literals """...""" (C# 11)
-            // Starts with at least 3 quotes.
             if (char === '"' && this.pos + 2 < this.code.length && this.code[this.pos + 1] === '"' && this.code[this.pos + 2] === '"') {
                 const str = this.matchRawString();
                 if (str) {
@@ -210,14 +217,6 @@ export class CsharpTokenizer {
                     continue;
                 }
             }
-
-            // Attribute ([...])
-            // Attributes appear before classes, methods, properties, parameters.
-            // Distinguishing [Attribute] from array[index] or collection expression [1, 2].
-            // Heuristic: If it's at start of line or after preprocessor/comment/semicolon/brace, it's likely attribute.
-            // But we tokenize everything. We can tag it as Attribute if it looks like one?
-            // Actually, for formatting, treating [ ... ] as punctuation/operator is fine, but if we can identify attributes we can force newlines.
-            // Let's stick to standard tokenizing and handle context in formatter.
 
             // Number
             if (/\d/.test(char) || (char === '.' && this.pos + 1 < this.code.length && /\d/.test(this.code[this.pos + 1]))) {
@@ -316,12 +315,10 @@ export class CsharpTokenizer {
     }
 
     private matchString(): string | null {
-        // "..." or $"..."
-        let start = this.pos;
-        if (this.code[start] === '$') start++;
-        if (this.code[start] !== '"') return null;
+        // "..."
+        if (this.code[this.pos] !== '"') return null;
 
-        let currentPos = start + 1;
+        let currentPos = this.pos + 1;
         while (currentPos < this.code.length) {
             const char = this.code[currentPos];
             if (char === '\\') {
@@ -333,6 +330,69 @@ export class CsharpTokenizer {
             currentPos++;
         }
         return null;
+    }
+
+    private matchInterpolatedString(): string | null {
+        // $"..."
+        // Handles brace balancing for interpolation
+        if (this.code[this.pos] !== '$' || this.code[this.pos + 1] !== '"') return null;
+
+        let currentPos = this.pos + 2;
+        let braceDepth = 0;
+
+        while (currentPos < this.code.length) {
+            const char = this.code[currentPos];
+
+            if (char === '\\') {
+                currentPos += 2;
+                continue;
+            }
+
+            if (char === '"') {
+                if (braceDepth === 0) {
+                    return this.code.substring(this.pos, currentPos + 1);
+                } else {
+                    // Start of string inside interpolation expression?
+                    // Need to match inner string to skip it
+                    let endStr = this.scanString(currentPos);
+                    if (endStr !== -1) {
+                        currentPos = endStr; // Pointing to closing quote
+                    }
+                }
+            } else if (char === '{') {
+                if (currentPos + 1 < this.code.length && this.code[currentPos + 1] === '{') {
+                    currentPos += 2; // Escaped brace {{
+                    continue;
+                }
+                braceDepth++;
+            } else if (char === '}') {
+                if (currentPos + 1 < this.code.length && this.code[currentPos + 1] === '}') {
+                    currentPos += 2; // Escaped brace }}
+                    continue;
+                }
+                if (braceDepth > 0) braceDepth--;
+            }
+
+            currentPos++;
+        }
+        return null;
+    }
+
+    // Helper to scan a standard string from a given position, returns index of closing quote
+    private scanString(startIdx: number): number {
+        if (this.code[startIdx] !== '"') return -1;
+        let i = startIdx + 1;
+        while (i < this.code.length) {
+            if (this.code[i] === '\\') {
+                i += 2;
+                continue;
+            }
+            if (this.code[i] === '"') {
+                return i;
+            }
+            i++;
+        }
+        return -1;
     }
 
     private matchVerbatimString(): string | null {

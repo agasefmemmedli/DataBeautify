@@ -1,6 +1,10 @@
 
 import { CsharpTokenizer, Token, TokenType } from './csharp_tokenizer';
 
+interface FormatterToken extends Token {
+    hasPrecedingSpace: boolean;
+}
+
 export function formatCSharpDeep(text: string): string {
     const tokenizer = new CsharpTokenizer(text);
     const tokens = tokenizer.tokenize();
@@ -11,8 +15,19 @@ export function formatCSharpDeep(text: string): string {
     const INDENT_SIZE = 4;
     const INDENT_STRING = ' '.repeat(INDENT_SIZE);
 
-    // Filter out whitespace and newlines
-    const meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Newline);
+    // Filter out whitespace and newlines but mark tokens
+    const meaningfulTokens: FormatterToken[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type === TokenType.Whitespace || t.type === TokenType.Newline) continue;
+
+        let hasSpace = false;
+        if (i > 0) {
+            const prevT = tokens[i-1];
+            if (prevT.type === TokenType.Whitespace || prevT.type === TokenType.Newline) hasSpace = true;
+        }
+        meaningfulTokens.push({ ...t, hasPrecedingSpace: hasSpace });
+    }
 
     let outputLines: string[] = [];
     let currentLine = '';
@@ -45,10 +60,17 @@ export function formatCSharpDeep(text: string): string {
             let offset = 0;
             const trimmedStr = str.trim();
 
-            // Dedent '}' is handled by loop logic decrementing indentLevel
-
-            if (trimmedStr === 'case' || trimmedStr === 'default' || (trimmedStr.endsWith(':') && !trimmedStr.startsWith('case') && !trimmedStr.startsWith('default'))) {
+            if (trimmedStr.startsWith('case') || trimmedStr.startsWith('default') || (trimmedStr.endsWith(':') && !trimmedStr.startsWith('?') && !trimmedStr.startsWith('//') && !trimmedStr.startsWith('/*'))) {
+                // switch case labels de-indent
                 offset = -1;
+            }
+            if (trimmedStr.startsWith('.') || trimmedStr.startsWith('?.')) {
+                // Method chaining indent
+                offset = 1;
+            }
+            if (trimmedStr.startsWith('where') || trimmedStr.startsWith('orderby') || trimmedStr.startsWith('select') || trimmedStr.startsWith('group') || trimmedStr.startsWith('join')) {
+                // LINQ indentation
+                offset = 1;
             }
 
             if (trimmedStr.startsWith('#')) {
@@ -67,6 +89,7 @@ export function formatCSharpDeep(text: string): string {
              return ['bool', 'byte', 'char', 'decimal', 'double', 'float', 'int', 'long', 'object', 'sbyte', 'short', 'string', 'uint', 'ulong', 'ushort', 'void', 'dynamic', 'var'].includes(t.text);
          }
          if (t.type === TokenType.Identifier) {
+             // Heuristic: PascalCase usually Types.
              return /^[A-Z]/.test(t.text);
          }
          return false;
@@ -77,46 +100,72 @@ export function formatCSharpDeep(text: string): string {
         const next = i + 1 < meaningfulTokens.length ? meaningfulTokens[i+1] : null;
         const prev = i > 0 ? meaningfulTokens[i-1] : null;
 
+        // --- Pre-Analysis ---
+        let isAutoPropContext = false;
+        if (token.text === '{') {
+            if (next && ['get', 'set', 'init'].includes(next.text)) {
+                let k = i + 1;
+                while (k < meaningfulTokens.length) {
+                    const t = meaningfulTokens[k];
+                    if (t.text === '}') {
+                        isAutoPropContext = true;
+                        break;
+                    }
+                    if (t.text === '{' || t.text === '(' || t.text === '=' || t.text === '=>') {
+                        isAutoPropContext = false;
+                        break;
+                    }
+                    k++;
+                }
+            }
+        }
+
         // --- Newline / Indentation Logic ---
 
         let forceNewline = false;
         let preserveNewline = false;
 
-        // Allman Style: Brace always on new line
+        // Allman Style
         if (token.text === '{') {
-            forceNewline = true;
+            if (!isAutoPropContext) {
+                if (prev && (prev.text === '=' || prev.text === 'new' || prev.text === 'return' || prev.text === '=>')) {
+                    // Inline allowed
+                } else {
+                    forceNewline = true;
+                }
+            }
         }
         else if (token.text === '}') {
-            if (!inAutoProp) forceNewline = true;
+            if (!inAutoProp) {
+                if (prev && prev.text !== '{') forceNewline = true;
+                else if (prev && prev.text === '{') {
+                    forceNewline = true;
+                }
+            }
         }
-        // Attributes: Always on new line
-        else if (token.text === '[' && currentLine.trim() === '') {
-            // If detected as attribute start in loop logic below
-        }
-        // Else/Catch/Finally on new line (Allman)
         else if (['else', 'catch', 'finally'].includes(token.text)) {
             forceNewline = true;
         }
-        // LINQ keywords often start new line
         else if (['from', 'where', 'select', 'group', 'orderby', 'join', 'let'].includes(token.text)) {
-            // Only if they seem to be LINQ (context is hard, but usually safe to respect user newline or force it if complex)
-            // We rely on user newline for LINQ to allow inline simple queries
             if (prev && token.line > prev.line) preserveNewline = true;
         }
-        // Fluent API (.)
         else if (token.text === '.' || token.text === '?.') {
              if (prev && token.line > prev.line) preserveNewline = true;
         }
-        // Generic preservation of user intent
         else if (prev && token.line > prev.line) {
-            preserveNewline = true;
+            if (token.text !== ';') {
+                preserveNewline = true;
+            }
         }
 
         // --- Application of Newline ---
 
-        // Handle '}' dedent before pushing line
         if (token.text === '}') {
-            indentLevel = Math.max(0, indentLevel - 1);
+            if (!inAutoProp) {
+                indentLevel = Math.max(0, indentLevel - 1);
+            } else {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
             if (inAutoProp) inAutoProp = false;
         }
 
@@ -126,7 +175,6 @@ export function formatCSharpDeep(text: string): string {
             if (currentLine.trim() !== '') pushLine();
         }
 
-        // Check for empty lines in source
         if (prev && token.line > prev.line + 1) {
             if (currentLine.trim() !== '') pushLine();
             if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
@@ -134,13 +182,7 @@ export function formatCSharpDeep(text: string): string {
             }
         }
 
-        // Attribute Detection logic (refined)
-        // If we are at start of line (just pushed or empty), check if [
         if (token.text === '[' && currentLine.trim() === '') {
-            // Heuristic: is it an attribute?
-            // If it's a statement start.
-            // Attributes usually precede keywords (public, class, void) or types.
-            // We assume yes for formatting purposes to track ]
             inAttribute = true;
         }
 
@@ -159,23 +201,37 @@ export function formatCSharpDeep(text: string): string {
                     spaceBefore = false;
                 }
                 else if (text === '<') {
-                    if (prev && (isTypeLike(prev) || prev.type === TokenType.Identifier)) {
-                        if (next && isTypeLike(next)) spaceBefore = false;
-                        else spaceBefore = true;
-                    } else {
-                        spaceBefore = true;
+                    let looksLikeGeneric = false;
+                    if (prev && isTypeLike(prev)) {
+                        if (next && (isTypeLike(next) || next.text === '>' || next.text === ',' || next.text === '[' || next.text === '(' || next.text === '?')) {
+                             looksLikeGeneric = true;
+                        }
                     }
-                    angleDepth++;
+
+                    let looksLikeComparison = false;
+                    if (next && (next.type === TokenType.Number || (!isTypeLike(next) && next.text !== '>' && next.text !== ',' && next.text !== '[' && next.text !== '(' && next.text !== '?'))) {
+                         looksLikeComparison = true;
+                    }
+
+                    if (looksLikeGeneric && !looksLikeComparison) {
+                        spaceBefore = false;
+                        angleDepth++;
+                    } else if (looksLikeComparison) {
+                        spaceBefore = true;
+                    } else {
+                        // Ambiguous: trust user space
+                        if (token.hasPrecedingSpace) spaceBefore = true;
+                        else {
+                            spaceBefore = false;
+                            angleDepth++;
+                        }
+                    }
                 }
                 else if (text === '>') {
-                    angleDepth = Math.max(0, angleDepth - 1);
-                    if (next && (next.type === TokenType.Number || next.type === TokenType.String || ['new', 'true', 'false', 'null'].includes(next.text))) {
-                        spaceBefore = true;
-                    }
-                    else if (prev && (isTypeLike(prev) || prev.text === '>')) {
+                    if (angleDepth > 0) {
                         spaceBefore = false;
-                    }
-                    else {
+                        angleDepth = Math.max(0, angleDepth - 1);
+                    } else {
                         spaceBefore = true;
                     }
                 }
@@ -185,7 +241,6 @@ export function formatCSharpDeep(text: string): string {
                     }
                     else if (prev && (prev.type === TokenType.Operator || ['(', '[', '{', '=', 'return', 'throw', ',', ':'].includes(prev.text))) {
                         spaceBefore = false;
-                        if (prev.text === ')' || prev.text === ']') spaceBefore = true;
                     }
                     else {
                         spaceBefore = true;
@@ -197,9 +252,21 @@ export function formatCSharpDeep(text: string): string {
                 else if (text === ':') {
                     if (prev && (prev.text === 'case' || prev.text === 'default')) {
                         spaceBefore = false;
-                    } else if (prev && prev.type === TokenType.Identifier) {
+                    } else if (prev && prev.type === TokenType.Identifier && indentLevel === 0) {
                         if (parenDepth > 0) spaceBefore = false;
-                        else spaceBefore = true;
+                        else spaceBefore = false;
+                    } else if (prev && prev.type === TokenType.Identifier) {
+                         if (parenDepth > 0) spaceBefore = false;
+                         else spaceBefore = true;
+                    } else {
+                        spaceBefore = true;
+                    }
+                }
+                else if (text === '?') {
+                    if (prev && (isTypeLike(prev) || (prev.type === TokenType.Identifier && next && (next.text === '.' || next.text === '[' || next.text === ';' || next.text === ')' || next.text === ',' || next.text === '=' || next.text === '>' || next.text === '??')))) {
+                        spaceBefore = false;
+                    } else if (prev && (prev.type === TokenType.Identifier && next && next.text === '?')) {
+                        spaceBefore = false;
                     } else {
                         spaceBefore = true;
                     }
@@ -212,12 +279,17 @@ export function formatCSharpDeep(text: string): string {
                     if (['.', '?.', '::', '!', '++', '--'].includes(txt)) {
                         spaceBefore = false;
                     } else if (txt === '<') {
-                        if (isTypeLike(token)) spaceBefore = false;
+                        // Check if we are inside a generic based on angleDepth logic decided at '<'
+                        // If angleDepth > 0, we assumed generic start.
+                        // BUT, if angleDepth was 0 before '<', and '<' set it to 1, then we are inside.
+                        // If '<' decided it was comparison, it didn't increment.
+                        // So checking angleDepth here IS correct.
+                        if (angleDepth > 0) spaceBefore = false;
                         else spaceBefore = true;
                     } else if (['(', '['].includes(txt)) {
                         spaceBefore = false;
                     } else if (txt === '>') {
-                        if (['>', '(', '[', '.', ',', ';'].includes(token.text)) spaceBefore = false;
+                        if (['(', '[', '.', ',', ';', ')', ']'].includes(token.text)) spaceBefore = false;
                         else spaceBefore = true;
                     } else {
                         spaceBefore = true;
@@ -242,12 +314,17 @@ export function formatCSharpDeep(text: string): string {
                 }
             }
 
-            if (token.text === ';') spaceBefore = false;
+            if (token.text === ';') {
+                spaceBefore = false;
+            }
             if (token.text === ',') spaceBefore = false;
             if (token.text === ')') spaceBefore = false;
             if (token.text === ']') spaceBefore = false;
+            if (token.text === '.') spaceBefore = false;
+            if (token.text === '?.') spaceBefore = false;
+
             if (token.text === '(') {
-                if (prev && (prev.type === TokenType.Identifier || prev.text === '>')) spaceBefore = false;
+                if (prev && (prev.type === TokenType.Identifier || prev.text === '>' || prev.text === ')' || prev.text === ']')) spaceBefore = false;
             }
             if (token.text === '[') {
                 if (prev && (prev.type === TokenType.Identifier || prev.text === ']' || prev.text === ')')) {
@@ -257,39 +334,43 @@ export function formatCSharpDeep(text: string): string {
             if (token.text === '{') spaceBefore = true;
         }
 
+        // DEBUG:
+        // if (token.text === 'b') console.log(`DEBUG: b prev=< angleDepth=${angleDepth} spaceBefore=${spaceBefore}`);
+
+        // Semicolon Attachment Logic
+        if (token.text === ';') {
+            if (currentLine === '' && outputLines.length > 0) {
+                const lastLine = outputLines[outputLines.length - 1];
+                if (lastLine.trim().endsWith('}') || lastLine.trim().endsWith(']')) {
+                    outputLines[outputLines.length - 1] += ';';
+                    continue;
+                }
+            }
+        }
+
         if (spaceBefore && currentLine !== '') append(' ');
         append(token.text);
 
         // --- State Updates (Post-Append) ---
 
         if (token.text === '{') {
-            // AutoProp detection
-            let possibleAutoProp = false;
-            if (next && ['get', 'set', 'init'].includes(next.text)) {
-                let k = i + 1;
-                while (k < meaningfulTokens.length) {
-                    const t = meaningfulTokens[k];
-                    if (t.text === '}') {
-                        possibleAutoProp = true;
-                        break;
-                    }
-                    if (t.text === '{' || t.text === '(' || t.text === '=' || t.text === '=>') {
-                        possibleAutoProp = false;
-                        break;
-                    }
-                    k++;
-                }
-            }
-
             indentLevel++;
-            if (possibleAutoProp) {
+            if (isAutoPropContext) {
                 inAutoProp = true;
             } else {
-                pushLine(); // Allman: Newline after {
+                if (!forceNewline && !preserveNewline) {
+                    // Inline
+                } else {
+                    pushLine();
+                }
             }
         } else if (token.text === '}') {
             if (!inAutoProp) {
-                pushLine(); // Allman: Newline after }
+                if (!forceNewline && !preserveNewline && prev && prev.text !== '{') {
+                    // e.g. { 1, 2 }
+                } else {
+                    pushLine();
+                }
             }
         } else if (token.text === ';') {
             if (parenDepth === 0 && !inAutoProp) pushLine();
