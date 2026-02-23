@@ -6,6 +6,7 @@ import { formatHTMLDeep } from './html_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
 import { formatSvelteDeep } from './svelte_deep_formatter';
 import { formatSassDeep } from './sass_deep_formatter';
+import { formatSCSSDeep } from './scss_deep_formatter';
 import { formatSVGDeep } from './svg_deep_formatter';
 
 /**
@@ -427,29 +428,40 @@ export async function handleSCSS(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        // Fallback to js-beautify
-        /* eslint-disable */
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            // Format SCSS (js-beautify's CSS formatter handles SCSS nesting)
-            formatted = jsbeautify.css(text, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                selector_separator_newline: true,
-                newline_between_rules: true,
-                end_with_newline: true,
-                preserve_newlines: true,
-                max_preserve_newlines: 1,
-                space_around_combinator: true,
-                space_around_selector_separator: true
+            formatted = formatSCSSDeep(text, {
+                tabSize: tabSize || 2,
+                insertSpaces: insertSpaces
             });
             if (!validationMessage) {
-                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                 validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format SCSS: ${error.message}`);
-            return;
+        } catch (deepError: any) {
+            // Fallback to js-beautify
+            /* eslint-disable */
+            try {
+                // Format SCSS (js-beautify's CSS formatter handles SCSS nesting)
+                formatted = jsbeautify.css(text, {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    selector_separator_newline: true,
+                    newline_between_rules: true,
+                    end_with_newline: true,
+                    preserve_newlines: true,
+                    max_preserve_newlines: 1,
+                    space_around_combinator: true,
+                    space_around_selector_separator: true
+                });
+                if (!validationMessage) {
+                     validationMessage = `Deep formatting failed, using fallback. ${deepError.message.split('\n')[0]}`;
+                }
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Failed to format SCSS: ${error.message}`);
+                return;
+            }
+            /* eslint-enable */
         }
-        /* eslint-enable */
     }
 
     await applyEdit(editor, formatted);
