@@ -48,6 +48,9 @@ export function formatCppDeep(text: string): string {
     let inCase = false;
     let ternaryDepth = 0;
 
+    // Stack to track brace types (NAMESPACE or BLOCK)
+    let braceStack: ('NAMESPACE' | 'BLOCK')[] = [];
+
     const getIndent = (level: number) => {
         return INDENT_STRING.repeat(Math.max(0, level));
     };
@@ -71,10 +74,10 @@ export function formatCppDeep(text: string): string {
 
     const isType = (t: Token) => {
         if (t.type === TokenType.Keyword) {
-            return ['int', 'char', 'bool', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed', 'auto', 'const', 'typename', 'class', 'struct', 'enum', 'union', 'virtual', 'explicit', 'friend'].includes(t.text);
+            return ['int', 'char', 'bool', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed', 'auto', 'const', 'typename', 'class', 'struct', 'enum', 'union', 'virtual', 'explicit', 'friend', 'constexpr', 'volatile'].includes(t.text);
         }
         if (t.type === TokenType.Identifier) {
-            return /^[A-Z]/.test(t.text) || t.text.endsWith('_t') || ['string', 'vector', 'map', 'set', 'list', 'deque', 'queue', 'stack', 'pair', 'tuple', 'unique_ptr', 'shared_ptr', 'weak_ptr', 'size_t', 'uint8_t', 'int32_t'].includes(t.text);
+            return /^[A-Z]/.test(t.text) || t.text.endsWith('_t') || ['string', 'vector', 'map', 'set', 'list', 'deque', 'queue', 'stack', 'pair', 'tuple', 'unique_ptr', 'shared_ptr', 'weak_ptr', 'size_t', 'uint8_t', 'int32_t', 'int64_t', 'uint32_t', 'uint64_t'].includes(t.text);
         }
         return false;
     };
@@ -87,8 +90,13 @@ export function formatCppDeep(text: string): string {
 
         // Indent Adjustments
         if (token.text === '}') {
-            indentLevel = Math.max(0, indentLevel - 1);
+            const type = braceStack.length > 0 ? braceStack[braceStack.length - 1] : 'BLOCK'; // Peek
+            // We pop later, but we need to know type for indent calc
+            if (type === 'BLOCK') {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
             braceDepth = Math.max(0, braceDepth - 1);
+
             if (currentLine.trim() !== '') pushLine();
         }
 
@@ -166,7 +174,7 @@ export function formatCppDeep(text: string): string {
                          wasCaseColon = true;
                      }
                      else if (prev && (['public', 'private', 'protected'].includes(prev.text))) spaceBefore = false;
-                     else if (prev && prev.text === ')') spaceBefore = true;
+                     else if (prev && prev.text === ')') spaceBefore = true; // Constructor init list
                      else spaceBefore = true;
                 }
                 else if (token.text === '?') {
@@ -260,7 +268,7 @@ export function formatCppDeep(text: string): string {
 
         let indentOffset = 0;
         if (token.text === 'public' || token.text === 'private' || token.text === 'protected') indentOffset = -1;
-        if (token.text === 'case' || token.text === 'default') indentOffset = -1;
+        // case/default indent offset removed (so it indents)
 
         if (token.type === TokenType.Preprocessor) {
             currentLine = token.text;
@@ -276,19 +284,65 @@ export function formatCppDeep(text: string): string {
 
         append(token.text, indentOffset);
 
-        // Line Breaks
+        // Line Breaks and Brace Logic
         if (token.type === TokenType.Comment) {
             pushLine();
         }
         else if (token.text === '{') {
-            indentLevel++;
+            // Check for namespace
+            let isNamespace = false;
+            let k = i - 1;
+            // Scan backwards to find context
+            while (k >= 0) {
+                const t = meaningfulTokens[k];
+                // Skip comments
+                if (t.type === TokenType.Comment || t.type === TokenType.Preprocessor) {
+                    k--;
+                    continue;
+                }
+
+                if (t.text === 'namespace') {
+                    // check if 'using' precedes it
+                    let m = k - 1;
+                    while (m >= 0) {
+                        if (meaningfulTokens[m].type === TokenType.Comment || meaningfulTokens[m].type === TokenType.Whitespace || meaningfulTokens[m].type === TokenType.Newline) {
+                            m--;
+                            continue;
+                        }
+                        break;
+                    }
+                    if (m >= 0 && meaningfulTokens[m].text === 'using') {
+                         isNamespace = false;
+                    } else {
+                         isNamespace = true;
+                    }
+                    break;
+                }
+                if (t.type === TokenType.Identifier || t.text === '::' || t.text === 'inline') {
+                    k--;
+                    continue;
+                }
+                // Stop at other tokens
+                break;
+            }
+
+            if (isNamespace) {
+                braceStack.push('NAMESPACE');
+            } else {
+                braceStack.push('BLOCK');
+                indentLevel++;
+            }
             braceDepth++;
+
             if (next && next.text === '}') {
             } else {
                 pushLine();
             }
         }
         else if (token.text === '}') {
+             const type = braceStack.pop();
+             // Indent level was already decremented at start of loop if BLOCK
+             // Just push line
              if (next && next.text === ';') {
              } else {
                  pushLine();
