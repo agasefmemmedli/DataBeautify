@@ -1,0 +1,163 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+
+// Minimal VS Code Mock
+const mockVscode = {
+    window: {
+        activeTextEditor: undefined,
+        showInformationMessage: (msg) => console.log('INFO:', msg),
+        showErrorMessage: (msg) => console.log('ERROR:', msg),
+        showWarningMessage: (msg) => console.log('WARN:', msg),
+    },
+    Range: class {
+        constructor(start, end) {
+            this.start = start;
+            this.end = end;
+        }
+    },
+    Position: class {
+        constructor(line, character) {
+            this.line = line;
+            this.character = character;
+        }
+    },
+    commands: {
+        registerCommand: () => ({ dispose: () => { } }),
+    },
+    workspace: {
+        applyEdit: async () => true
+    },
+    WorkspaceEdit: class {
+        replace(uri, range, newText) {
+             // Basic mock
+        }
+    }
+};
+
+// Injection to handle 'import * as vscode from "vscode"'
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+Module.prototype.require = function (id) {
+    if (id === 'vscode') {
+        return mockVscode;
+    }
+    return originalRequire.apply(this, arguments);
+};
+
+async function runTest() {
+    const { beautify } = require('./out/extension');
+    const testFile = 'test.switch.java';
+    console.log(`Testing ${testFile} (Expecting fallback)...`);
+    const filePath = path.join(__dirname, testFile);
+
+    const content = fs.readFileSync(filePath, 'utf8');
+
+    let formattedText = '';
+    const mockEditor = {
+        options: {
+            tabSize: 4,
+            insertSpaces: true
+        },
+        document: {
+            getText: () => content,
+            lineCount: content.split('\n').length,
+            languageId: 'java',
+            uri: { fsPath: filePath },
+            lineAt: (line) => {
+                const lines = content.split('\n');
+                const text = lines[line] || '';
+                return {
+                    text: text,
+                    range: {
+                        start: new mockVscode.Position(line, 0),
+                        end: new mockVscode.Position(line, text.length)
+                    },
+                    rangeIncludingLineBreak: {
+                         start: new mockVscode.Position(line, 0),
+                         end: new mockVscode.Position(line + 1, 0)
+                    },
+                    lineNumber: line,
+                    isEmptyOrWhitespace: text.trim().length === 0
+                };
+            },
+            positionAt: (offset) => new mockVscode.Position(0, offset)
+        },
+        edit: async (callback) => {
+            const eb = {
+                replace: (range, text) => {
+                    formattedText = text;
+                }
+            };
+            callback(eb);
+            return true;
+        }
+    };
+
+    mockVscode.window.activeTextEditor = mockEditor;
+
+    try {
+        await beautify('java');
+
+        console.log('--- Original ---');
+        console.log(content);
+        console.log('--- Formatted ---');
+        console.log(formattedText);
+        console.log('-----------------');
+
+        if (formattedText.includes('    case 1:')) {
+             console.log('✅ Case indentation looks correct (1 level)');
+        } else {
+             console.error('❌ Case indentation failed');
+        }
+
+        if (formattedText.includes('        System.out.println("One");')) {
+             console.log('✅ Statement indentation looks correct (2 levels)');
+        } else {
+             console.error('❌ Statement indentation failed');
+        }
+
+    } catch (err) {
+        console.error(`❌ Error testing ${testFile}:`, err);
+        process.exit(1);
+    }
+}
+
+runTest().catch(err => {
+    console.error(err);
+    process.exit(1);
+});
