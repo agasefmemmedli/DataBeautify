@@ -36,7 +36,10 @@ export class CTokenizer {
         '_Alignas', '_Alignof', '_Atomic', '_Bool', '_Complex', '_Generic', '_Imaginary', '_Noreturn', '_Static_assert', '_Thread_local',
         // C23 / Common Extensions
         'alignas', 'alignof', 'bool', 'constexpr', 'false', 'nullptr', 'static_assert', 'thread_local', 'true', 'typeof', 'typeof_unqual',
-        'asm', '__asm__', '__attribute__', '__extension__', '__restrict', '__restrict__', '__volatile__', '__inline__', '__thread'
+        'asm', '__asm__', '__attribute__', '__extension__', '__restrict', '__restrict__', '__volatile__', '__inline__', '__thread',
+        // Common Libraries/Frameworks/Conventions
+        'NULL', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int32_t', 'uint32_t', 'int64_t', 'uint64_t', 'size_t', 'ssize_t', 'ptrdiff_t', 'intptr_t', 'uintptr_t',
+        'wchar_t', 'char16_t', 'char32_t'
     ]);
 
     // C Operators
