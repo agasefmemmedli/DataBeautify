@@ -6,6 +6,7 @@ import { formatHTMLDeep } from './html_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
 import { formatSvelteDeep } from './svelte_deep_formatter';
 import { formatSassDeep } from './sass_deep_formatter';
+import { formatSVGDeep } from './svg_deep_formatter';
 
 /**
  * Handle XML formatting and validation
@@ -120,20 +121,33 @@ export async function handleSVG(editor: vscode.TextEditor, text: string) {
         });
 
     } catch (prettierError: any) {
-        // Fallback to xml-formatter
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            formatted = xmlFormatter(text, {
-                indentation: insertSpaces ? ' '.repeat(tabSize) : '\t',
-                collapseContent: true,
-                lineSeparator: '\n',
-                whiteSpaceAtEndOfSelfclosingTag: true
+            formatted = formatSVGDeep(text, {
+                tabSize: tabSize || 2,
+                insertSpaces: insertSpaces,
+                sortAttributes: true,
+                printWidth: 120
             });
             if (!validationMessage) {
-                validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (xmlError: any) {
-            vscode.window.showErrorMessage(`Failed to format SVG: ${xmlError.message}`);
-            return;
+        } catch (deepError: any) {
+            // Last resort fallback to xml-formatter
+            try {
+                formatted = xmlFormatter(text, {
+                    indentation: insertSpaces ? ' '.repeat(tabSize) : '\t',
+                    collapseContent: true,
+                    lineSeparator: '\n',
+                    whiteSpaceAtEndOfSelfclosingTag: true
+                });
+                if (!validationMessage) {
+                    validationMessage = `Deep formatting failed, using basic XML fallback. ${deepError.message}`;
+                }
+            } catch (xmlError: any) {
+                vscode.window.showErrorMessage(`Failed to format SVG: ${xmlError.message}`);
+                return;
+            }
         }
     }
 
