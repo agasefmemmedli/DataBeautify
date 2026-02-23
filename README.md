@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Dockerfile (Deep Formatting Implemented)
 - [x] Ruby (Deep Formatting Implemented)
 - [x] Vue (Deep Formatting Implemented)
 - [x] SQL (Deep Formatting Implemented)
