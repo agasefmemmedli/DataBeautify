@@ -4,6 +4,7 @@ export enum TokenType {
     String,
     Keyword,
     Operator,
+    Assignment, // For = in VAR=VAL
     Punctuation,
     Identifier,
     Number,
@@ -11,6 +12,7 @@ export enum TokenType {
     HeredocStart,
     HeredocBody,
     HeredocEnd,
+    Variable, // $VAR, ${VAR}
     Unknown
 }
 
@@ -35,11 +37,13 @@ export class ShellTokenizer {
     ]);
 
     // Operators that might affect formatting or parsing
-    // Added ${, $((, $(, (( to prevent splitting
+    // Added =, ^, !
     private static readonly OPERATORS = new Set([
         '&&', '||', ';;', '|', '&', ';', '>>', '<<', '<<-', '<', '>',
-        '=', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<=', '>=',
-        '${', '$((', '$(', '(('
+        '+=', '-=', '*=', '/=', '%=', '==', '!=', '<=', '>=', '=~',
+        '${', '$((', '$(', '((', '))', '>&', '&>', '2>&1', '1>&2',
+        '+', '-', '*', '/', '%', '~', '--', '++',
+        '=', '^', '!'
     ]);
 
     constructor(code: string) {
@@ -90,7 +94,6 @@ export class ShellTokenizer {
             }
 
             // Comment
-            // Strictly check for start of line or preceding whitespace
             if (char === '#') {
                 const isStart = this.pos === 0 || /\s/.test(this.code[this.pos - 1]);
                 if (isStart) {
@@ -104,7 +107,7 @@ export class ShellTokenizer {
                     tokens.push({ type: TokenType.Comment, text, line: startLine, col: startCol });
                     continue;
                 }
-                // If not a comment, fall through to Identifier or Unknown
+                // If not a comment, fall through to Identifier
             }
 
             // String
@@ -121,7 +124,6 @@ export class ShellTokenizer {
 
             // Heredoc Start (<< or <<-)
             if (char === '<' && this.pos + 1 < this.code.length && this.code[this.pos + 1] === '<') {
-                // Check for <<-
                 let op = '<<';
                 if (this.pos + 2 < this.code.length && this.code[this.pos + 2] === '-') {
                     op = '<<-';
@@ -135,112 +137,119 @@ export class ShellTokenizer {
                 continue;
             }
 
-            // Number (basic shell numbers)
-            if (/\d/.test(char)) {
-                let text = '';
-                const startCol = this.col;
-                const startLine = this.line;
-                while (this.pos < this.code.length && /\d/.test(this.code[this.pos])) {
-                    text += this.code[this.pos];
+            // Assignment check: VAR=VAL
+            if (char === '=') {
+                const prevToken = tokens.length > 0 ? tokens[tokens.length - 1] : null;
+                const isImmediate = prevToken &&
+                    (prevToken.type === TokenType.Identifier || prevToken.type === TokenType.String || prevToken.type === TokenType.Variable) &&
+                    (prevToken.col + prevToken.text.length === this.col);
+
+                const nextChar = this.pos + 1 < this.code.length ? this.code[this.pos + 1] : '';
+
+                if (isImmediate && nextChar !== '=' && nextChar !== '~') {
+                    tokens.push({ type: TokenType.Assignment, text: '=', line: this.line, col: this.col });
                     this.advance();
+                    continue;
                 }
-                tokens.push({ type: TokenType.Number, text, line: startLine, col: startCol });
-                continue;
             }
 
             // Operators (multi-char first)
-            // Check operators BEFORE identifiers to catch ${ before $VAR
             let opMatch = '';
-            // Try 3 chars
-            const threeChars = this.code.substr(this.pos, 3);
-            if (ShellTokenizer.OPERATORS.has(threeChars)) {
-                opMatch = threeChars;
+            // Try 4 chars
+            const fourChars = this.code.substr(this.pos, 4);
+            if (ShellTokenizer.OPERATORS.has(fourChars)) {
+                opMatch = fourChars;
             } else {
-                // Try 2 chars
-                const twoChars = this.code.substr(this.pos, 2);
-                if (ShellTokenizer.OPERATORS.has(twoChars)) {
-                    opMatch = twoChars;
+                // Try 3 chars
+                const threeChars = this.code.substr(this.pos, 3);
+                if (ShellTokenizer.OPERATORS.has(threeChars)) {
+                    opMatch = threeChars;
                 } else {
-                    // Try 1 char
-                    if (ShellTokenizer.OPERATORS.has(char)) {
-                        opMatch = char;
+                    // Try 2 chars
+                    const twoChars = this.code.substr(this.pos, 2);
+                    if (ShellTokenizer.OPERATORS.has(twoChars)) {
+                        opMatch = twoChars;
+                    } else {
+                        // Try 1 char
+                        if (ShellTokenizer.OPERATORS.has(char)) {
+                            opMatch = char;
+                        }
                     }
                 }
             }
 
             if (opMatch) {
-                // If the operator is $ and next char is part of identifier, we might want to parse as identifier $VAR
-                // But $ is not in OPERATORS set above?
-                // Wait, OPERATORS does NOT contain '$'.
-                // So $ will fall through to Identifier.
-                // But ${ is in OPERATORS. So ${VAR} -> ${ is operator.
-                // $(( is in OPERATORS.
-                // So this logic works.
                 const startLine = this.line;
                 const startCol = this.col;
-                tokens.push({ type: TokenType.Operator, text: opMatch, line: startLine, col: startCol });
+                if (opMatch === '[[' || opMatch === ']]') {
+                     tokens.push({ type: TokenType.Keyword, text: opMatch, line: startLine, col: startCol });
+                } else {
+                     tokens.push({ type: TokenType.Operator, text: opMatch, line: startLine, col: startCol });
+                }
                 this.advance(opMatch.length);
                 continue;
             }
 
+            // Variable $VAR
+            if (char === '$') {
+                const startLine = this.line;
+                const startCol = this.col;
+
+                if (this.pos + 1 >= this.code.length || /[\s]/.test(this.code[this.pos+1])) {
+                    // Just $
+                } else {
+                    let varName = '$';
+                    let currentPos = this.pos + 1;
+
+                    if (/[?#$!*@0-9-]/.test(this.code[currentPos])) {
+                        varName += this.code[currentPos];
+                        tokens.push({ type: TokenType.Variable, text: varName, line: startLine, col: startCol });
+                        this.advance(2);
+                        continue;
+                    }
+
+                    if (/[a-zA-Z_]/.test(this.code[currentPos])) {
+                        while (currentPos < this.code.length && /[a-zA-Z0-9_]/.test(this.code[currentPos])) {
+                            varName += this.code[currentPos];
+                            currentPos++;
+                        }
+                        tokens.push({ type: TokenType.Variable, text: varName, line: startLine, col: startCol });
+                        this.advance(varName.length);
+                        continue;
+                    }
+                }
+            }
+
             // Identifier or Keyword
-            // Shell identifiers can contain many things, but usually alphanumeric + _
-            // Also variables $VAR
-            if (/[a-zA-Z_$]/.test(char) || (char === '.' && this.pos + 1 < this.code.length && /[a-zA-Z_]/.test(this.code[this.pos + 1]))) {
+            if (/[^\s\n\r]/.test(char)) {
                 let text = '';
                 const startCol = this.col;
                 const startLine = this.line;
 
                 while (this.pos < this.code.length) {
                     const c = this.code[this.pos];
-                    // Allow # inside identifier (e.g. word#suffix)
-                    if (/[a-zA-Z0-9_$#]/.test(c)) {
-                        text += c;
-                        this.advance();
-                    } else if (c === '{' && text.endsWith('$')) {
-                        // Variable expansion ${VAR}
-                        // But wait, we handle ${ as operator now.
-                        // So if we see $, we consumed it as Identifier start.
-                        // Then next char is {.
-                        // `text` so far is `$`. `c` is `{`.
-                        // If we break here, we emit `$`. Next loop sees `{` -> Operator?
-                        // No, `{` is not in OPERATORS (only `{` keyword logic handled later? No, `{` is in keywords).
-                        // If `{` is keyword, `echo ${` -> `echo`, `$`, `{`.
-                        // This splits ${.
-                        // We want ${ to be single token if possible, OR handled by operator logic.
-                        // Operator logic runs BEFORE Identifier logic.
-                        // So ${ should be caught by Operator logic.
-                        // But Operator logic needs to match `${`.
-                        // Does `threeChars` or `twoChars` see `${`?
-                        // Yes.
-                        // But does `char` match `Identifier` logic?
-                        // `char` is `$`.
-                        // `Operator` logic runs first. `$` is NOT in `OPERATORS` (single char).
-                        // So `opMatch` is empty.
-                        // Falls to Identifier logic. `$` matches identifier start.
-                        // So it starts consuming `$`.
-                        // Next char `{`.
-                        // `/[a-zA-Z0-9_$#]/.test('{')` is false.
-                        // So it breaks.
-                        // Emits `$`.
-                        // Next loop: `{`. Matches Keyword `{`? Or Punctuation?
-                        // This splits `${`.
-                        // FIX: Add `$` to OPERATORS? No, `$VAR` is identifier.
-                        // FIX: In Identifier loop, if we have just `$`, and see `{`, maybe backtrack?
-                        // BETTER FIX: Check for `${` in Operator logic logic explicitly even if `$` is not operator.
-                        // But `twoChars` check handles `${` if `${` is in OPERATORS.
-                        // So if `${` is in OPERATORS, `opMatch` will be `${`.
-                        // So we consume `${` as Operator.
-                        // Identifier logic won't even run.
-                        // THIS IS CORRECT.
-                        break;
-                    } else {
-                        break;
+
+                    if (/[\s\n\r]/.test(c)) break;
+                    if ('"\'`'.includes(c)) break;
+                    if (';&|<>()/{}'.includes(c)) break;
+                    if (c === '$') break;
+                    if (c === '\\') {
+                         if (this.pos + 1 < this.code.length) {
+                             text += c + this.code[this.pos + 1];
+                             this.advance(2);
+                             continue;
+                         }
                     }
+
+                    // Check if char is start of an operator we care about splitting
+                    if (ShellTokenizer.OPERATORS.has(c)) break;
+
+                    text += c;
+                    this.advance();
                 }
 
-                // If text is empty (e.g. starting with . but failed lookahead?), consume char
                 if (text === '') {
+                    // Fallback (e.g. backslash alone at end?)
                     text = char;
                     this.advance();
                 }
@@ -250,14 +259,6 @@ export class ShellTokenizer {
                 continue;
             }
 
-            // Punctuation and other symbols not covered by operators
-            if ('()[]{},:;.'.includes(char)) {
-                tokens.push({ type: TokenType.Punctuation, text: char, line: this.line, col: this.col });
-                this.advance();
-                continue;
-            }
-
-            // Unknown / Catch-all (e.g. @, %, ^ if not operators)
             tokens.push({ type: TokenType.Unknown, text: char, line: this.line, col: this.col });
             this.advance();
         }
@@ -289,8 +290,6 @@ export class ShellTokenizer {
         let searchPos = this.pos + 1;
 
         if (quoteChar === "'") {
-            // Single quotes: no escapes inside, except usually ' cannot appear inside '...'
-            // But we just search for next '
             while (searchPos < this.code.length) {
                 const c = this.code[searchPos];
                 currentString += c;
@@ -300,7 +299,6 @@ export class ShellTokenizer {
                 }
             }
         } else {
-            // Double quotes and backticks: support escapes
             while (searchPos < this.code.length) {
                 const c = this.code[searchPos];
                 if (c === '\\') {
@@ -318,6 +316,6 @@ export class ShellTokenizer {
             }
         }
 
-        return currentString; // Return unclosed string to be resilient
+        return currentString;
     }
 }
