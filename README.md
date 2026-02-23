@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Vue (Deep Formatting Implemented)
 - [x] SQL (Deep Formatting Implemented)
 - [x] PHP (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
