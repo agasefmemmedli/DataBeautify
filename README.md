@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] SQL (Deep Formatting Implemented)
 - [x] PHP (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
 - [x] JSON (Deep Formatting Implemented)
