@@ -33,21 +33,15 @@ export function formatDockerfileDeep(text: string): string {
 
         if (token.type === 'INSTRUCTION') {
             let formattedInstruction = '';
-            // Determine keyword from raw text to be safe, or use token.keyword
-            // token.keyword might be inferred incorrectly if tokenizer had issues, but we trust it mostly.
-            // Let's re-extract to handle casing properly.
+
+            // Determine keyword
             const firstWordMatch = token.raw.trim().match(/^([a-zA-Z]+)/);
             let keyword = firstWordMatch ? firstWordMatch[1].toUpperCase() : '';
 
             if (!standardInstructions.has(keyword)) {
-                // If not standard, maybe keep original casing?
-                // But token.keyword is usually uppercased by tokenizer.
-                // Let's use token.keyword if valid.
                 if (standardInstructions.has(token.keyword || '')) {
                     keyword = token.keyword!;
                 } else {
-                    // Unknown instruction, use as is (uppercased by tokenizer default) or original?
-                    // Tokenizer uppercases. Let's trust standard list more.
                     keyword = (token.keyword || '').toUpperCase();
                 }
             }
@@ -66,7 +60,6 @@ export function formatDockerfileDeep(text: string): string {
                     const parsed = JSON.parse(repaired);
 
                     if (Array.isArray(parsed)) {
-                        // Add spaces after commas for readability
                         const spaced = JSON.stringify(parsed).replace(/,(?=[^ ])/g, ', ');
                         formattedInstruction = `${keyword} ${spaced}`;
                     }
@@ -94,17 +87,16 @@ export function formatDockerfileDeep(text: string): string {
                  // Sorting Logic
                  let processed = false;
                  if (keyword === 'RUN' && rawLines.length > 1) {
-                      // Safety check: Don't sort if shell operators are present (ignoring comments)
-                      const hasOperators = rawLines.some(l => !l.trim().startsWith('#') && /(&&|\|\||;|\||>)/.test(l));
+                      // Check for shell operators in SUBSEQUENT lines (the list)
+                      // We allow operators in the first line (e.g. apt-get update && apt-get install)
+                      // But if subsequent lines have && or |, it might be complex logic we shouldn't reorder.
+                      const listLines = rawLines.slice(1);
+                      const hasOperatorsInList = listLines.some(l => !l.trim().startsWith('#') && /(&&|\|\||;|\||>)/.test(l.replace(/\\$/, ''))); // Strip trailing backslash before check
 
-                      if (!hasOperators && /apt-get\s+install|apk\s+add|pip\s+install|yum\s+install|dnf\s+install/i.test(firstLine)) {
+                      if (!hasOperatorsInList && /apt-get\s+install|apk\s+add|pip\s+install|yum\s+install|dnf\s+install/i.test(firstLine)) {
                            const items: { text: string, comment?: string, sortKey: string }[] = [];
                            const header = newInstructionLines[0]; // First line (RUN ...)
                            let pendingComment: string | null = null;
-
-                           // Extract items from lines 1..N
-                           // We need to be careful about matching lines.
-                           // alignedLines logic from previous version is useful for calculation but here we need structure.
 
                            for (let k = 1; k < newInstructionLines.length; k++) {
                                const line = newInstructionLines[k];
@@ -122,12 +114,7 @@ export function formatDockerfileDeep(text: string): string {
                                    items.push({
                                        text: pkg,
                                        comment: pendingComment || undefined,
-                                       sortKey: pkg.startsWith('-') ? 'zzz' + pkg : pkg // Options at end or beginning? usually beginning.
-                                       // Actually options like -y usually go in header or top.
-                                       // If they are in list, sort them?
-                                       // Let's stick to simple alphabetical, flags first?
-                                       // -flag should come before package? 'a' < 'z'. '-' char code is 45. 'a' is 97.
-                                       // So '-' comes first. Good.
+                                       sortKey: pkg.startsWith('-') ? '   ' + pkg : pkg // Sort flags first (space < any char)
                                    });
                                    pendingComment = null;
                                }
@@ -137,7 +124,6 @@ export function formatDockerfileDeep(text: string): string {
                            items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
                            // Reconstruct
-                           // First line needs \
                            const headerClean = header.replace(/\\$/, '').trim();
                            const finalBlock: string[] = [];
 
