@@ -33,3 +33,4 @@
 - [x] Swift (Deep Formatting Implemented)
 - [x] Kotlin (Deep Formatting Implemented)
 - [x] Python (Deep Formatting Implemented)
+- [x] Ruby (Deep Formatting Implemented)
