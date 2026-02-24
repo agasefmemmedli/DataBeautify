@@ -21,11 +21,44 @@ export interface Token {
     col: number;
 }
 
+enum State {
+    DATA,
+    TAG_OPEN,
+    TAG_NAME,
+    SELF_CLOSING_START_TAG,
+    BEFORE_ATTRIBUTE_NAME,
+    ATTRIBUTE_NAME,
+    AFTER_ATTRIBUTE_NAME,
+    BEFORE_ATTRIBUTE_VALUE,
+    ATTRIBUTE_VALUE_DOUBLE_QUOTED,
+    ATTRIBUTE_VALUE_SINGLE_QUOTED,
+    ATTRIBUTE_VALUE_UNQUOTED,
+    AFTER_ATTRIBUTE_VALUE_QUOTED,
+    MARKUP_DECLARATION_OPEN,
+    COMMENT_START,
+    COMMENT_START_DASH,
+    COMMENT,
+    COMMENT_END_DASH,
+    COMMENT_END,
+    CDATA_START,
+    CDATA,
+    CDATA_END_1,
+    CDATA_END_2,
+    DOCTYPE,
+    PI,
+    PI_END,
+    RAW_TEXT_TAG
+}
+
 export class HTMLTokenizer {
     private input: string;
     private pos: number = 0;
     private line: number = 1;
     private col: number = 1;
+    private state: State = State.DATA;
+    private buffer: string = '';
+    private tokens: Token[] = [];
+    private currentTag: string = '';
 
     // Void elements in HTML (no closing tag)
     private voidTags = new Set([
@@ -40,295 +73,370 @@ export class HTMLTokenizer {
         this.input = input;
     }
 
+    private emit(type: TokenType, text: string = this.buffer) {
+        if (text.length > 0) {
+            this.tokens.push({ type, text, line: this.line, col: this.col - text.length }); // Approx col
+        }
+        this.buffer = '';
+    }
+
+    private advance() {
+        if (this.pos >= this.input.length) return false;
+        const char = this.input[this.pos];
+        if (char === '\n') {
+            this.line++;
+            this.col = 1;
+        } else {
+            this.col++;
+        }
+        this.pos++;
+        return true;
+    }
+
+    private peek(offset: number = 0): string | null {
+        if (this.pos + offset >= this.input.length) return null;
+        return this.input[this.pos + offset];
+    }
+
     public tokenize(): Token[] {
-        const tokens: Token[] = [];
-        let currentTagName: string | null = null;
+        this.tokens = [];
+        this.state = State.DATA;
+        this.buffer = '';
+        this.currentTag = '';
 
         while (this.pos < this.input.length) {
             const char = this.input[this.pos];
 
-            // Handle Raw Text Elements content
-            if (currentTagName && this.rawTextTags.has(currentTagName.toLowerCase())) {
-                const closeTag = `</${currentTagName}`;
-                const closeIndex = this.input.toLowerCase().indexOf(closeTag, this.pos);
-
-                if (closeIndex !== -1) {
-                    // Extract content up to closing tag
-                    const content = this.input.substring(this.pos, closeIndex);
-                    if (content.length > 0) {
-                        tokens.push({ type: TokenType.Text, text: content, line: this.line, col: this.col });
-                        this.advance(content.length);
-                    }
-                    // Reset currentTagName so we can parse the closing tag normally
-                    currentTagName = null;
-                    continue;
-                } else {
-                    // No closing tag found, treat rest as text
-                    const content = this.input.substring(this.pos);
-                    tokens.push({ type: TokenType.Text, text: content, line: this.line, col: this.col });
-                    this.advance(content.length);
-                    break;
-                }
-            }
-
-            if (char === '<') {
-                if (this.input.startsWith('<!--', this.pos)) {
-                    tokens.push(this.readComment());
-                } else if (this.input.startsWith('<![CDATA[', this.pos)) {
-                    tokens.push(this.readCDATA());
-                } else if (/^<!DOCTYPE/i.test(this.input.substring(this.pos, this.pos + 9))) {
-                    tokens.push(this.readDoctype());
-                } else if (this.input.startsWith('<?', this.pos)) {
-                    tokens.push(this.readPI());
-                } else if (this.input.startsWith('</', this.pos)) {
-                    tokens.push(this.readTagClose());
-                    currentTagName = null; // Closing tag ends the scope (though scope is handled by parser mostly)
-                } else {
-                    const openTokens = this.readTagOpen();
-                    tokens.push(...openTokens);
-
-                    // Check if we entered a raw text tag
-                    const tagToken = openTokens.find(t => t.type === TokenType.TagOpen);
-                    if (tagToken) {
-                        const tagName = tagToken.text.substring(1).trim(); // Remove <
-                        if (this.rawTextTags.has(tagName.toLowerCase())) {
-                            // Check if it was self-closing
-                            const lastToken = openTokens[openTokens.length - 1];
-                            if (lastToken.type !== TokenType.TagSelfClose) {
-                                currentTagName = tagName;
-                            }
+            switch (this.state) {
+                case State.DATA:
+                    if (char === '<') {
+                        if (this.buffer.length > 0) {
+                            this.emit(TokenType.Text);
                         }
-                    }
-                }
-            } else {
-                tokens.push(this.readText());
-            }
-        }
-        return tokens;
-    }
-
-    private readComment(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-        while (this.pos < this.input.length) {
-            if (this.input.startsWith('-->', this.pos)) {
-                text += '-->';
-                this.advance(3);
-                break;
-            }
-            text += this.input[this.pos];
-            this.advance(1);
-        }
-        return { type: TokenType.Comment, text, line: startLine, col: startCol };
-    }
-
-    private readCDATA(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-        while (this.pos < this.input.length) {
-            if (this.input.startsWith(']]>', this.pos)) {
-                text += ']]>';
-                this.advance(3);
-                break;
-            }
-            text += this.input[this.pos];
-            this.advance(1);
-        }
-        return { type: TokenType.CDATA, text, line: startLine, col: startCol };
-    }
-
-    private readDoctype(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-        let depth = 0;
-
-        while (this.pos < this.input.length) {
-            const char = this.input[this.pos];
-            if (char === '<') depth++;
-
-            text += char;
-            this.advance(1);
-
-            if (char === '>') {
-                depth--;
-                if (depth <= 0) {
-                     break;
-                }
-            }
-        }
-        return { type: TokenType.Doctype, text, line: startLine, col: startCol };
-    }
-
-    private readPI(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-        while (this.pos < this.input.length) {
-            if (this.input.startsWith('?>', this.pos)) {
-                text += '?>';
-                this.advance(2);
-                break;
-            }
-            text += this.input[this.pos];
-            this.advance(1);
-        }
-        return { type: TokenType.PI, text, line: startLine, col: startCol };
-    }
-
-    private readTagClose(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-
-        // Consume </
-        text += '</';
-        this.advance(2);
-
-        // Read Name
-        while (this.pos < this.input.length && /[^<>\s/="'=]/.test(this.input[this.pos])) {
-            text += this.input[this.pos];
-            this.advance(1);
-        }
-
-        // Consume whitespace and >
-        while (this.pos < this.input.length) {
-            const char = this.input[this.pos];
-            text += char;
-            this.advance(1);
-            if (char === '>') break;
-        }
-
-        return { type: TokenType.TagClose, text, line: startLine, col: startCol };
-    }
-
-    private readTagOpen(): Token[] {
-        const tokens: Token[] = [];
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-
-        // Consume <
-        text += '<';
-        this.advance(1);
-
-        // Read Name
-        while (this.pos < this.input.length && /[^<>\s/="'=]/.test(this.input[this.pos])) {
-            text += this.input[this.pos];
-            this.advance(1);
-        }
-
-        tokens.push({ type: TokenType.TagOpen, text, line: startLine, col: startCol });
-
-        // Read Attributes
-        while (this.pos < this.input.length) {
-            this.skipWhitespace();
-            if (this.pos >= this.input.length) break;
-
-            const char = this.input[this.pos];
-
-            if (char === '>') {
-                tokens.push({ type: TokenType.TagEnd, text: '>', line: this.line, col: this.col });
-                this.advance(1);
-                break;
-            } else if (this.input.startsWith('/>', this.pos)) {
-                 tokens.push({ type: TokenType.TagSelfClose, text: '/>', line: this.line, col: this.col });
-                 this.advance(2);
-                 break;
-            } else {
-                // Attribute Name
-                const attrLine = this.line;
-                const attrCol = this.col;
-                let attrName = '';
-                // Allow anything except space, quote, =, >, /
-                while (this.pos < this.input.length && /[^<>\s/="'=]/.test(this.input[this.pos])) {
-                    attrName += this.input[this.pos];
-                    this.advance(1);
-                }
-
-                if (attrName) {
-                    tokens.push({ type: TokenType.AttributeName, text: attrName, line: attrLine, col: attrCol });
-
-                    this.skipWhitespace();
-                    if (this.pos < this.input.length && this.input[this.pos] === '=') {
-                        this.advance(1); // Consume =
-                        this.skipWhitespace();
-
-                        // Value
-                        if (this.pos < this.input.length) {
-                            const valLine = this.line;
-                            const valCol = this.col;
-                            const quote = this.input[this.pos];
-                            let val = '';
-
-                            if (quote === '"' || quote === "'") {
-                                val += quote; // Include quote in text for now? Or just content?
-                                // XMLTokenizer included quote. Let's include quote to preserve style if needed,
-                                // OR better: strip quotes and re-add them in formatter.
-                                // Wait, XMLTokenizer: `val = quote; ... val += c`. So it includes quotes.
-                                this.advance(1);
-                                while (this.pos < this.input.length) {
-                                    const c = this.input[this.pos];
-                                    if (c === quote) {
-                                        val += c;
-                                        this.advance(1);
-                                        break;
-                                    }
-                                    val += c;
-                                    this.advance(1);
-                                }
-                            } else {
-                                 // Unquoted value
-                                 while (this.pos < this.input.length && !/\s|>|\//.test(this.input[this.pos])) {
-                                     val += this.input[this.pos];
-                                     this.advance(1);
-                                 }
-                            }
-                            tokens.push({ type: TokenType.AttributeValue, text: val, line: valLine, col: valCol });
-                        }
-                    }
-                } else {
-                    // unexpected char? just consume to avoid loop
-                    if (this.pos < this.input.length) {
-                        this.advance(1);
+                        this.state = State.TAG_OPEN;
+                        this.advance();
                     } else {
-                        break;
+                        this.buffer += char;
+                        this.advance();
                     }
-                }
+                    break;
+
+                case State.TAG_OPEN:
+                    if (char === '!') {
+                        this.state = State.MARKUP_DECLARATION_OPEN;
+                        this.advance();
+                    } else if (char === '?') {
+                         this.state = State.PI;
+                         this.buffer = '<?';
+                         this.advance();
+                    } else if (char === '/') {
+                        this.state = State.TAG_NAME; // Closing tag name
+                        this.buffer = '</'; // Start buffer with </
+                        this.advance();
+                    } else if (/[a-zA-Z]/.test(char)) {
+                        this.state = State.TAG_NAME;
+                        this.buffer = '<'; // Start buffer with <
+                        // Don't advance, re-process in TAG_NAME
+                    } else {
+                        // Invalid tag start, treat as text
+                        this.tokens.push({ type: TokenType.Text, text: '<', line: this.line, col: this.col - 1 });
+                        this.state = State.DATA;
+                        // Don't advance, re-process current char
+                    }
+                    break;
+
+                case State.TAG_NAME:
+                    if (/[a-zA-Z0-9:-]/.test(char)) {
+                        this.buffer += char;
+                        this.advance();
+                    } else {
+                        // End of tag name
+                        // Check if it's a closing tag
+                        if (this.buffer.startsWith('</')) {
+                            this.emit(TokenType.TagClose);
+                        } else {
+                            this.emit(TokenType.TagOpen);
+                            this.currentTag = this.tokens[this.tokens.length - 1].text.substring(1).toLowerCase();
+                        }
+                        this.state = State.BEFORE_ATTRIBUTE_NAME;
+                    }
+                    break;
+
+                case State.BEFORE_ATTRIBUTE_NAME:
+                    if (/\s/.test(char)) {
+                        this.advance(); // Skip whitespace
+                    } else if (char === '/') {
+                        this.state = State.SELF_CLOSING_START_TAG;
+                        this.advance();
+                    } else if (char === '>') {
+                        this.tokens.push({ type: TokenType.TagEnd, text: '>', line: this.line, col: this.col });
+                        this.advance();
+                        // Check for raw text tag
+                        if (this.currentTag && this.rawTextTags.has(this.currentTag) && !this.tokens.some(t => t.type === TokenType.TagClose && t.text === `</${this.currentTag}`)) {
+                             this.state = State.RAW_TEXT_TAG;
+                        } else {
+                             this.state = State.DATA;
+                        }
+                        this.currentTag = ''; // Reset unless raw text
+                    } else {
+                        this.state = State.ATTRIBUTE_NAME;
+                        this.buffer = ''; // Start attribute name
+                    }
+                    break;
+
+                case State.ATTRIBUTE_NAME:
+                    if (/\s|\/|'|"|=|>/.test(char)) {
+                         // End of attribute name
+                         if (char === '=') {
+                             this.emit(TokenType.AttributeName);
+                             this.state = State.BEFORE_ATTRIBUTE_VALUE;
+                             this.advance();
+                         } else {
+                             this.emit(TokenType.AttributeName);
+                             this.state = State.BEFORE_ATTRIBUTE_NAME;
+                             // Re-process char (might be > or / or space)
+                         }
+                    } else {
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.BEFORE_ATTRIBUTE_VALUE:
+                    if (/\s/.test(char)) {
+                        this.advance();
+                    } else if (char === '"') {
+                        this.state = State.ATTRIBUTE_VALUE_DOUBLE_QUOTED;
+                        this.buffer = ''; // Start value
+                        this.advance();
+                    } else if (char === "'") {
+                        this.state = State.ATTRIBUTE_VALUE_SINGLE_QUOTED;
+                        this.buffer = ''; // Start value
+                        this.advance();
+                    } else if (char === '>') {
+                        // Missing value, unexpected >
+                         this.state = State.DATA; // Or handle as error?
+                         // Re-process in BEFORE_ATTRIBUTE_NAME will hit >
+                         this.state = State.BEFORE_ATTRIBUTE_NAME;
+                    } else {
+                        this.state = State.ATTRIBUTE_VALUE_UNQUOTED;
+                        this.buffer = '';
+                    }
+                    break;
+
+                case State.ATTRIBUTE_VALUE_DOUBLE_QUOTED:
+                    if (char === '"') {
+                        this.emit(TokenType.AttributeValue);
+                        this.state = State.AFTER_ATTRIBUTE_VALUE_QUOTED;
+                        this.advance();
+                    } else {
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.ATTRIBUTE_VALUE_SINGLE_QUOTED:
+                    if (char === "'") {
+                        this.emit(TokenType.AttributeValue);
+                        this.state = State.AFTER_ATTRIBUTE_VALUE_QUOTED;
+                        this.advance();
+                    } else {
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.ATTRIBUTE_VALUE_UNQUOTED:
+                    if (/\s|>/.test(char)) {
+                        this.emit(TokenType.AttributeValue);
+                        this.state = State.BEFORE_ATTRIBUTE_NAME;
+                    } else {
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.AFTER_ATTRIBUTE_VALUE_QUOTED:
+                     if (/\s/.test(char)) {
+                         this.state = State.BEFORE_ATTRIBUTE_NAME;
+                         this.advance();
+                     } else if (char === '/' || char === '>') {
+                         this.state = State.BEFORE_ATTRIBUTE_NAME;
+                     } else {
+                         // Missing space between attributes?
+                         this.state = State.BEFORE_ATTRIBUTE_NAME;
+                     }
+                     break;
+
+                case State.SELF_CLOSING_START_TAG:
+                    if (char === '>') {
+                        this.tokens.push({ type: TokenType.TagSelfClose, text: '/>', line: this.line, col: this.col - 1 });
+                        this.advance();
+                        this.state = State.DATA;
+                        this.currentTag = '';
+                    } else {
+                        // Unexpected char after /, maybe it wasn't self closing but just a slash in attribute name (handled elsewhere)
+                        // Or invalid. Treat as Before Attribute Name
+                        this.state = State.BEFORE_ATTRIBUTE_NAME;
+                    }
+                    break;
+
+                case State.MARKUP_DECLARATION_OPEN:
+                    if (this.input.startsWith('--', this.pos)) {
+                        this.state = State.COMMENT_START;
+                        this.buffer = '<!--';
+                        this.pos += 2;
+                        this.col += 2; // Approximate
+                    } else if (this.input.startsWith('[CDATA[', this.pos)) {
+                        this.state = State.CDATA_START;
+                        this.buffer = '<![CDATA[';
+                        this.pos += 7;
+                        this.col += 7;
+                    } else if (/^DOCTYPE/i.test(this.input.substring(this.pos, this.pos + 7))) {
+                        this.state = State.DOCTYPE;
+                        this.buffer = '<!DOCTYPE';
+                        this.pos += 7;
+                        this.col += 7;
+                    } else {
+                        // Bogus comment or declaration
+                        this.state = State.COMMENT; // Treat as comment until >
+                        this.buffer = '<!';
+                    }
+                    break;
+
+                case State.COMMENT_START:
+                    this.state = State.COMMENT;
+                    break;
+
+                case State.COMMENT:
+                    if (char === '-') {
+                         this.state = State.COMMENT_END_DASH;
+                    }
+                    this.buffer += char;
+                    this.advance();
+                    break;
+
+                case State.COMMENT_END_DASH:
+                     if (char === '-') {
+                         this.state = State.COMMENT_END;
+                     } else {
+                         this.state = State.COMMENT;
+                     }
+                     this.buffer += char;
+                     this.advance();
+                     break;
+
+                case State.COMMENT_END:
+                    if (char === '>') {
+                        this.buffer += char;
+                        this.emit(TokenType.Comment);
+                        this.advance();
+                        this.state = State.DATA;
+                    } else {
+                        // Not really end
+                         if (char !== '-') {
+                             this.state = State.COMMENT;
+                         }
+                         this.buffer += char;
+                         this.advance();
+                    }
+                    break;
+
+                case State.CDATA_START:
+                    this.state = State.CDATA;
+                    break;
+
+                case State.CDATA:
+                    if (char === ']') {
+                        this.state = State.CDATA_END_1;
+                    }
+                    this.buffer += char;
+                    this.advance();
+                    break;
+
+                case State.CDATA_END_1:
+                    if (char === ']') {
+                        this.state = State.CDATA_END_2;
+                    } else {
+                        this.state = State.CDATA;
+                    }
+                    this.buffer += char;
+                    this.advance();
+                    break;
+
+                case State.CDATA_END_2:
+                    if (char === '>') {
+                        this.buffer += char;
+                        this.emit(TokenType.CDATA);
+                        this.advance();
+                        this.state = State.DATA;
+                    } else {
+                        if (char !== ']') {
+                             this.state = State.CDATA;
+                        }
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.DOCTYPE:
+                    if (char === '>') {
+                        this.buffer += char;
+                        this.emit(TokenType.Doctype);
+                        this.advance();
+                        this.state = State.DATA;
+                    } else {
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.PI:
+                    if (char === '?') {
+                         this.state = State.PI_END;
+                    }
+                    this.buffer += char;
+                    this.advance();
+                    break;
+
+                case State.PI_END:
+                    if (char === '>') {
+                        this.buffer += char;
+                        this.emit(TokenType.PI);
+                        this.advance();
+                        this.state = State.DATA;
+                    } else {
+                        this.state = State.PI;
+                        this.buffer += char;
+                        this.advance();
+                    }
+                    break;
+
+                case State.RAW_TEXT_TAG:
+                     // Consume until </currentTag>
+                     const closeTag = `</${this.currentTag}`;
+                     // Case insensitive check? Standard says depends on doctype/browser, usually strict for <script>.
+                     // Let's assume case insensitive for robustness.
+                     if (this.input.substring(this.pos).toLowerCase().startsWith(closeTag)) {
+                         // Emit text buffer
+                         if (this.buffer.length > 0) {
+                             this.emit(TokenType.Text);
+                         }
+                         this.state = State.TAG_OPEN; // Will handle </tag>
+                         this.advance(); // Consume the '<'
+                         this.currentTag = '';
+                     } else {
+                         this.buffer += char;
+                         this.advance();
+                     }
+                     break;
             }
         }
-        return tokens;
-    }
 
-    private readText(): Token {
-        const startLine = this.line;
-        const startCol = this.col;
-        let text = '';
-        while (this.pos < this.input.length && this.input[this.pos] !== '<') {
-            text += this.input[this.pos];
-            this.advance(1);
+        if (this.buffer.length > 0) {
+            this.emit(TokenType.Text);
         }
-        return { type: TokenType.Text, text, line: startLine, col: startCol };
-    }
 
-    private advance(n: number) {
-        for (let i = 0; i < n; i++) {
-            if (this.pos >= this.input.length) break;
-            if (this.input[this.pos] === '\n') {
-                this.line++;
-                this.col = 1;
-            } else {
-                this.col++;
-            }
-            this.pos++;
-        }
-    }
-
-    private skipWhitespace() {
-        while (this.pos < this.input.length && /\s/.test(this.input[this.pos])) {
-            this.advance(1);
-        }
+        return this.tokens;
     }
 }
