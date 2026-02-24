@@ -1,7 +1,5 @@
-// ... (imports)
 
 // Re-implementing with improvements...
-// I will rewrite the whole file to ensure correctness as I cannot edit partial content easily.
 
 export async function formatSQLDeep(text: string): Promise<string> {
     try {
@@ -47,6 +45,7 @@ function processSQLDeep(text: string): string {
         buffer.forEach(item => {
             const preAs = item.line.substring(0, item.asIndex).trimEnd();
             const postAs = item.line.substring(item.asIndex).trim();
+            // Ensure single space before AS if needed, or align
             const padding = ' '.repeat(maxPreAsLen - preAs.length + 1);
             processedLines.push(`${preAs}${padding}${postAs}`);
         });
@@ -55,12 +54,17 @@ function processSQLDeep(text: string): string {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        // Check for AS alias
-        // And matches pattern: ... AS ...
-        // Ignore lines with subqueries or complex structures for now.
-        const asMatch = line.match(/^(\s+.*)\bAS\b\s+(.*)$/);
-        if (asMatch && !line.trim().startsWith('WITH') && !line.includes('(') && !line.includes(')')) {
-            const matchIndex = line.search(/\bAS\b/);
+        const trimmed = line.trim();
+        if (trimmed.startsWith('--') || trimmed.startsWith('/*')) {
+            flushBuffer();
+            processedLines.push(line);
+            continue;
+        }
+
+        // Regex to find standalone AS
+        const asMatch = line.match(/^(\s+.*)\bAS\b\s+(.*)$/i);
+        if (asMatch && !line.includes('(') && !line.includes(')')) {
+            const matchIndex = line.search(/\bAS\b/i);
             if (matchIndex !== -1) {
                  buffer.push({ line, asIndex: matchIndex });
                  continue;
@@ -78,7 +82,7 @@ function processSQLDeep(text: string): string {
 type TokenType = 'KEYWORD' | 'IDENTIFIER' | 'STRING' | 'COMMENT' | 'SYMBOL' | 'WHITESPACE' | 'NEWLINE';
 interface Token { type: TokenType; value: string; }
 
-function tokenizeSQL(text: string): Token[] {
+export function tokenizeSQL(text: string): Token[] {
     const tokens: Token[] = [];
     let i = 0;
     const len = text.length;
@@ -91,7 +95,9 @@ function tokenizeSQL(text: string): Token[] {
         'IS', 'NULL', 'NOT', 'DISTINCT', 'AS', 'ON', 'USING', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
         'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'DEFAULT', 'UNIQUE', 'CHECK', 'INDEX', 'VIEW',
         'DATABASE', 'SCHEMA', 'TRIGGER', 'PROCEDURE', 'FUNCTION', 'DECLARE', 'BEGIN', 'COMMIT', 'ROLLBACK',
-        'CROSS', 'NATURAL', 'WITH'
+        'CROSS', 'NATURAL', 'WITH', 'TOP', 'OFFSET', 'FETCH', 'CONSTRAINT', 'ASC', 'DESC', 'NULLS',
+        'FIRST', 'LAST', 'PARTITION', 'OVER', 'WINDOW', 'CAST', 'TRY_CAST', 'COALESCE', 'RANK', 'DENSE_RANK',
+        'ROW_NUMBER', 'FULL'
     ]);
 
     while (i < len) {
@@ -162,8 +168,17 @@ function tokenizeSQL(text: string): Token[] {
         }
 
         if (/[(),;.*=<>!+\-%]/.test(char)) {
-            tokens.push({ type: 'SYMBOL', value: char });
+            let value = char;
             i++;
+            if (i < len) {
+                const next = text[i];
+                const combined = value + next;
+                if (['<=', '>=', '!=', '<>', '+=', '-=', '*=', '/=', '%='].includes(combined)) {
+                    value = combined;
+                    i++;
+                }
+            }
+            tokens.push({ type: 'SYMBOL', value });
             continue;
         }
 
@@ -189,15 +204,24 @@ function tokenizeSQL(text: string): Token[] {
 
 export function formatSQLFallback(text: string): string {
     const tokens = tokenizeSQL(text);
-    let formatted = '';
+    const formattedLines: string[] = [];
+    let currentLine = '';
     let indentLevel = 0;
-    let newlineRequested = false;
-    let spaceRequested = false;
-    const indentStr = '    ';
+    const INDENT_SIZE = 4;
+    const INDENT_STR = ' '.repeat(INDENT_SIZE);
 
-    // Helper to find previous meaningful token
-    const getPrevToken = (index: number) => {
-        for (let j = index - 1; j >= 0; j--) {
+    const parenStack: string[] = [];
+
+    function pushLine() {
+        if (currentLine.trim() !== '') {
+            formattedLines.push(currentLine);
+        }
+        currentLine = '';
+    }
+
+    // Helper to get previous non-whitespace/comment token
+    const getEffectivePrev = (idx: number) => {
+        for (let j = idx - 1; j >= 0; j--) {
             if (tokens[j].type !== 'WHITESPACE' && tokens[j].type !== 'NEWLINE' && tokens[j].type !== 'COMMENT') {
                 return tokens[j];
             }
@@ -207,124 +231,125 @@ export function formatSQLFallback(text: string): string {
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
+        const prevToken = getEffectivePrev(i);
 
-        if (token.type === 'WHITESPACE') {
-            spaceRequested = true;
-            continue;
-        }
-        if (token.type === 'NEWLINE') {
-            newlineRequested = true;
-            continue;
-        }
+        if (token.type === 'WHITESPACE') continue;
+        if (token.type === 'NEWLINE') continue;
+
         if (token.type === 'COMMENT') {
-            if (formatted.length > 0 && !formatted.endsWith('\n')) {
-                 formatted += ' ';
-            }
-            formatted += token.value;
-            formatted += '\n';
-            newlineRequested = true;
+            pushLine();
+            formattedLines.push(INDENT_STR.repeat(Math.max(0, indentLevel)) + token.value);
             continue;
         }
 
-        // Dedent Logic
+        // --- Logic ---
+
+        // Dedent Check
         if (token.type === 'SYMBOL' && token.value === ')') {
             indentLevel = Math.max(0, indentLevel - 1);
-            // Only newline if the block was long?
-            // For resilience, let's assume yes.
-            newlineRequested = true;
-        }
-        if (token.type === 'KEYWORD') {
-            if (['FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'UNION', 'EXCEPT', 'INTERSECT'].includes(token.value)) {
-                newlineRequested = true;
-            }
-            if (token.value === 'END') {
-                indentLevel = Math.max(0, indentLevel - 1);
-                newlineRequested = true;
-            }
-            if (token.value === 'ELSE') {
-                 newlineRequested = true;
-            }
-            if (token.value === 'WHEN') {
-                 // WHEN usually starts new line in CASE
-                 newlineRequested = true;
-            }
+            parenStack.pop();
+        } else if (token.type === 'KEYWORD' && ['END', 'ELSE', 'ELSIF'].includes(token.value)) {
+             indentLevel = Math.max(0, indentLevel - 1);
+             pushLine();
         }
 
-        // Apply Newline/Indent
-        if (newlineRequested) {
-            if (formatted.length > 0 && !formatted.endsWith('\n')) {
-                formatted += '\n';
-            }
-            formatted += indentStr.repeat(indentLevel);
-            newlineRequested = false;
-            spaceRequested = false;
-        } else if (spaceRequested) {
-            // Avoid adding space if last char is ( or first char is ) or ,
-            const lastChar = formatted.slice(-1);
-            if (lastChar !== '(' && token.value !== ',' && token.value !== ';') {
-                 if (formatted.length > 0 && !formatted.endsWith('\n') && !formatted.endsWith(' ')) {
-                    formatted += ' ';
+        // Newline Check (Pre-Token)
+        if (token.type === 'KEYWORD') {
+            const val = token.value;
+            // Clauses that always start a new line
+            if (['FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'UNION', 'EXCEPT', 'INTERSECT', 'WITH'].includes(val)) {
+                if (parenStack.length === 0 || parenStack[parenStack.length-1] === 'subquery') {
+                    pushLine();
                 }
             }
-            spaceRequested = false;
+            // Join Logic: LEFT, RIGHT, INNER, OUTER, FULL, JOIN
+            else if (['JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL'].includes(val)) {
+                // If it's a join type, start new line
+                // But if it's JOIN following a join type, DON'T start new line
+                let isContinuation = false;
+                if (prevToken && ['LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL'].includes(prevToken.value)) {
+                    isContinuation = true;
+                }
+
+                // console.log(`DEBUG: Token: ${val}, Prev: ${prevToken ? prevToken.value : 'null'}, isContinuation: ${isContinuation}`);
+
+                if (!isContinuation) {
+                    pushLine();
+                }
+            }
+            // ON
+            else if (val === 'ON') {
+                pushLine();
+            }
+            // Logical Ops
+            else if (['AND', 'OR'].includes(val)) {
+                pushLine();
+            }
         }
 
-        // Append Token
-        formatted += token.value;
+        // Comma
+        if (token.type === 'SYMBOL' && token.value === ',') {
+            currentLine += ',';
+            pushLine();
+            continue;
+        }
 
-        // Indent Logic (Post-Token)
+        // Semicolon
+        if (token.type === 'SYMBOL' && token.value === ';') {
+            currentLine += ';';
+            pushLine();
+            formattedLines.push('');
+            continue;
+        }
+
+        // Append to Current Line
+        if (currentLine === '') {
+            let extraIndent = 0;
+            if (token.type === 'KEYWORD' && token.value === 'ON') {
+                extraIndent = 1;
+            }
+
+            currentLine = INDENT_STR.repeat(Math.max(0, indentLevel + extraIndent)) + token.value;
+        } else {
+            // Spacing
+            const lastChar = currentLine[currentLine.length - 1];
+            let space = true;
+
+            if (token.type === 'SYMBOL' && ['.', '::'].includes(token.value)) space = false;
+            else if (prevToken && prevToken.type === 'SYMBOL' && ['.', '::'].includes(prevToken.value)) space = false;
+            else if (token.value === '(' && prevToken && prevToken.type === 'IDENTIFIER') space = false; // Func
+            else if (lastChar === '(') space = false;
+            else if (lastChar === ' ') space = false; // Already has space (e.g. from previous token logic? No, only currentLine update)
+
+            if (space) currentLine += ' ' + token.value;
+            else currentLine += token.value;
+        }
+
+        // Indent Check (Post-Token)
         if (token.type === 'SYMBOL' && token.value === '(') {
-            const prev = getPrevToken(i);
-            // If function call, don't indent/newline immediately?
-            // e.g. COUNT(
-            let isFunc = false;
-            if (prev && (prev.type === 'IDENTIFIER' || ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE'].includes(prev.value))) {
-                isFunc = true;
-            }
-
-            // However, IN (...) should indent.
-            // VALUES (...) should indent.
-            if (prev && ['IN', 'VALUES'].includes(prev.value)) {
-                isFunc = false;
-            }
-
-            if (!isFunc) {
-                indentLevel++;
-                newlineRequested = true;
+            if (prevToken && (prevToken.type === 'KEYWORD' || prevToken.type === 'IDENTIFIER')) {
+                if (['IN', 'VALUES'].includes(prevToken.value)) {
+                    parenStack.push('values');
+                    indentLevel++;
+                    pushLine();
+                } else {
+                    parenStack.push('func');
+                }
             } else {
-                // If it IS a function call, we might not want to indent, but we should track parens for nested stuff.
-                // But my indentLevel logic uses simple counting.
-                // If I don't increment indentLevel, nested parens won't indent.
-                // Compromise: Increment indent but DO NOT newline immediately.
+                parenStack.push('subquery');
                 indentLevel++;
+                pushLine();
             }
-        }
-        if (token.type === 'KEYWORD') {
-            if (['CASE', 'BEGIN'].includes(token.value)) {
+        } else if (token.type === 'KEYWORD') {
+            if (['CASE'].includes(token.value)) {
                 indentLevel++;
+                parenStack.push('case');
             }
-            if (['SELECT', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'UNION', 'SET', 'VALUES'].includes(token.value)) {
-                 // Clause starters.
-                 // We don't necessarily increase indent, but subsequent items might be indented?
-                 // sql-formatter style:
-                 // SELECT
-                 //     col1
-                 // Identifies SELECT as start of block?
-                 // For fallback, keep it simple.
-            }
-            if (['JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS', 'NATURAL'].includes(token.value)) {
-                 newlineRequested = true;
-            }
-            if (token.value === 'ON') {
-                 // ON usually on new line? or same line?
-                 // JOIN x ON y
-            }
-        }
-        if (token.type === 'SYMBOL' && (token.value === ';' || token.value === ',')) {
-            newlineRequested = true;
         }
     }
 
-    // Apply post-processing (AS alignment)
-    return processSQLDeep(formatted);
+    pushLine();
+
+    // Call processSQLDeep for alignment
+    return processSQLDeep(formattedLines.join('\n'));
 }
