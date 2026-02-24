@@ -47,7 +47,7 @@ Module.prototype.require = function (id) {
     return originalRequire.apply(this, arguments);
 };
 
-async function runTest() {
+async function runTest(testFile) {
     // Determine extension path (compiled)
     const extensionPath = path.join(__dirname, 'out', 'extension.js');
     if (!fs.existsSync(extensionPath)) {
@@ -57,7 +57,6 @@ async function runTest() {
 
     const { beautify } = require(extensionPath);
 
-    const testFile = 'test.deep.csv';
     const filePath = path.join(__dirname, testFile);
 
     console.log(`Testing ${testFile}...`);
@@ -133,11 +132,23 @@ async function runTest() {
         }
     } catch (err) {
         console.error(`❌ Error testing ${testFile}:`, err);
+        throw err;
+    }
+}
+
+async function runAll() {
+    try {
+        await runTest('test.deep.csv');
+        console.log('\n');
+        await runTest('test-broken.csv');
+        console.log('\n✅ All CSV tests passed!');
+    } catch (e) {
+        console.error('❌ Tests failed!');
         process.exit(1);
     }
 }
 
-runTest().catch(err => {
+runAll().catch(err => {
     console.error(err);
     process.exit(1);
 });
