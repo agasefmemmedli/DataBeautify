@@ -1,0 +1,8 @@
+{
+  'single': 'quoted',
+  'nested': "double",
+  'mixed': 'contains "double" quotes',
+  'escaped': 'It\'s nice',
+  "trailing": "comma",
+  real_unquoted: true,
+}
