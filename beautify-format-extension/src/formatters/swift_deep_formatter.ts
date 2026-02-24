@@ -432,6 +432,20 @@ export function formatSwiftDeep(text: string): string {
         // --- Default Token Handling ---
 
         if (token.text === '.') {
+             if (spacePending) {
+                 // Suppress space if previous token was identifier or closing paren/bracket/brace/string/init
+                 let suppressSpace = false;
+                 if (lastToken) {
+                     if (lastToken.type === TokenType.Identifier) suppressSpace = true;
+                     if ([')', ']', '}', '"', "'", '?'].includes(lastToken.text)) suppressSpace = true;
+                     if (['super', 'self', 'Self', 'init'].includes(lastToken.text)) suppressSpace = true;
+                 }
+
+                 if (!suppressSpace && currentLine.length > 0 && !currentLine.endsWith(' ')) {
+                     currentLine += ' ';
+                 }
+             }
+
              currentLine += '.';
              spacePending = false;
              stream.advance();

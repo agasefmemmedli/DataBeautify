@@ -1875,7 +1875,7 @@ Prettier Handlebars formatting failed, falling back to custom formatter SyntaxEr
     at async formatWithCursor (file:///app/beautify-format-extension/node_modules/prettier/index.mjs:17172:14)
     at async Module.format2 (file:///app/beautify-format-extension/node_modules/prettier/index.mjs:18730:25)
     at async Object.handleHandlebars (/app/beautify-format-extension/out/formatters/markup.js:461:21)
-    at async beautify (/app/beautify-format-extension/out/extension.js:242:9)
+    at async beautify (/app/beautify-format-extension/out/extension.js:245:9)
     at async runTest (/app/beautify-format-extension/verify-handlebars-deep.cjs:119:9) {
   loc: e {
     data: Mt { source: [e], hbsPositions: [Object], kind: 'HbsPosition' },
@@ -2091,12 +2091,12 @@ INFO: HTML formatted successfully!
 --- Testing Deep Formatting (Custom Engine Resilience) ---
 Deep Output:
 <div id="main" class="test" data-attr="unquoted">
-  <p>
-    Unclosed Paragraph
-    <img src="image.jpg" />
-    <span>
-      text
-    </span>
+<p>
+  Unclosed Paragraph
+  <img src="image.jpg" />
+  <span>
+    text
+  </span>
   </div>
   <script>
     console.log('raw');
@@ -3138,6 +3138,156 @@ _Italic_
 
 -----------------
 ✅ test.deep.md beautified successfully.
+Running verify-markdown-fallback-deep.cjs...
+Testing Fallback for test.deep.md...
+--- Original ---
+# Deep Formatting Test
+
+This is a test file for deep Markdown formatting.
+
+## Nested Lists
+
+- Item 1
+    - Subitem 1.1
+        - Subitem 1.1.1
+    - Subitem 1.2
+- Item 2
+  - Subitem 2.1
+
+1. Ordered Item 1
+   1. Ordered Subitem 1.1
+   2. Ordered Subitem 1.2
+2. Ordered Item 2
+
+## Code Blocks
+
+```javascript
+function hello() {
+  console.log("Hello World");
+}
+```
+
+```
+No language specified
+  Indented content
+```
+
+## Tables
+
+| Header 1 | Header 2 | Header 3 |
+| :--- | :---: | ---: |
+| Left aligned | Center aligned | Right aligned |
+| Cell 1 | Cell 2 | Cell 3 |
+
+## Blockquotes
+
+> Level 1
+> > Level 2
+> > Content
+>
+> Back to Level 1
+
+## HTML
+
+<div>
+  <p>Some HTML content</p>
+</div>
+
+## Horizontal Rules
+
+---
+
+***
+
+___
+
+## Links and Images
+
+[Link Text](https://example.com)
+![Image Alt](https://example.com/image.png)
+
+## Emphasis
+
+*Italic*
+**Bold**
+***Bold Italic***
+`Inline Code`
+
+--- Fallback Formatted ---
+# Deep Formatting Test
+
+This is a test file for deep Markdown formatting.
+
+## Nested Lists
+
+- Item 1
+    - Subitem 1.1
+        - Subitem 1.1.1
+    - Subitem 1.2
+- Item 2
+  - Subitem 2.1
+
+1. Ordered Item 1
+  1. Ordered Subitem 1.1
+  2. Ordered Subitem 1.2
+2. Ordered Item 2
+
+## Code Blocks
+
+```javascript
+function hello() {
+  console.log("Hello World");
+}
+```
+
+```
+No language specified
+  Indented content
+```
+
+## Tables
+
+| Header 1     |    Header 2    |      Header 3 |
+| :----------- | :------------: | ------------: |
+| Left aligned | Center aligned | Right aligned |
+| Cell 1       |     Cell 2     |        Cell 3 |
+
+## Blockquotes
+
+> Level 1
+> > Level 2
+> > Content
+>
+> Back to Level 1
+
+## HTML
+
+<div>
+  <p>Some HTML content</p>
+</div>
+
+## Horizontal Rules
+
+---
+
+---
+
+---
+
+## Links and Images
+
+[Link Text](https://example.com)
+![Image Alt](https://example.com/image.png)
+
+## Emphasis
+
+_Italic_
+**Bold**
+**_Bold Italic_**
+`Inline Code`
+
+--------------------------
+✅ test.deep.md fallback beautified successfully.
 Running verify-mdx-deep.cjs...
 Testing test.deep.mdx...
 INFO: MDX formatted successfully!
@@ -3690,7 +3840,7 @@ multiline.key = line1 \
     line2 \
     line3
 escaped.key   = value with \= equals
-no.value.key  =
+no.value.key
 indented.key  = indented value
 
 ✅ Properties Deep Formatting Verification Passed!
@@ -4685,27 +4835,22 @@ perform {
 import Foundation
 import SwiftUI
 import UIKit
-
 @discardableResult
 func perform(action: () -> Void) -> Bool {
     action()
     return true
 }
-
 struct User {
     let name: String
     let age: Int
 }
-
 class Manager {
-    var users: [User] =[]
-
+    var users: [User] = []
     func addUser(name: String, age: Int) {
         let user = User(name: name, age: age)
         users.append(user)
     }
 }
-
 // Extension
 extension Manager {
     func findUser(byName name: String) -> User? {
@@ -4713,7 +4858,6 @@ extension Manager {
         guard !users.isEmpty else {
             return nil
         }
-
         // Loop
         for user in users {
             if user.name == name {
@@ -4723,14 +4867,12 @@ extension Manager {
         return nil
     }
 }
-
 // Switch
 enum Status {
     case active
     case inactive
     case unknown
 }
-
 func checkStatus(_ status: Status) {
     switch status {
         case .active:
@@ -4741,11 +4883,10 @@ func checkStatus(_ status: Status) {
             print("Unknown")
     }
 }
-
 // Complex Case
 func complexSwitch(val: Any) {
     switch val {
-        case let x where x is[String: Int]:
+        case let x where x is [String: Int]:
             print("Dictionary")
         case let str as String where str == "test":
             print("String test")
@@ -4753,7 +4894,6 @@ func complexSwitch(val: Any) {
             break
     }
 }
-
 // Generics vs Operators
 func testGenerics() {
     let arr: Array<Int> =[]
@@ -4764,30 +4904,25 @@ func testGenerics() {
     if count > 0 {
         print("Greater")
     }
-
     let dict: Dictionary<String, Array<Int>> =[
     "key": [1, 2, 3],
     "other": []
     ]
 }
-
 // Complex Closures and Alignment
 func complexClosures() {
-    UIView.animate(withDuration: 0.3, animations:  {
+    UIView.animate(withDuration: 0.3, animations: {
         print("Animating")
-    }, completion:  {finished in
+    }, completion: {finished in
         if finished {
             print("Done")
         }
     })
-
-    let items =[1, 2, 3].map {number -> Int in
+    let items = [1, 2, 3].map {number -> Int in
         let result = number * 2
         return result
-    }.filter {$0 > 2
-    }
+    }.filter {$0 > 2 }
 }
-
 // Multiline function definition
 func multilineFunction(
 param1: String,
@@ -4796,36 +4931,30 @@ param3: Bool
 ) -> String {
     return "\(param1) \(param2)"
 }
-
 // Guard with multiline conditions
 func check(a: Int, b: Int) {
     guard a > 0,
-    b > 0,
-    a + b < 100 else {
+        b > 0,
+        a + b < 100 else {
         return
     }
     print("OK")
 }
-
 // Enum with associated values
 enum Result<T, E: Error> {
     case success(T)
     case failure(E)
 }
-
 // Strings
 let multiline = """
     This is a
     multiline string
     """
-
 let interpolated = "Hello \(1 + 1)"
-
 // Trailing closure
 perform {
     print("Done")
 }
-
 -----------------
 ✅ test.deep.swift beautified successfully.
 Running verify-toml-deep.cjs...
@@ -4857,6 +4986,18 @@ enabled = true
 
 [clients]
 data = [ ["gamma", "delta"], [1, 2] ]
+
+# Nested Multiline Array Test
+nested_data = [
+  [
+    "item1",
+    "item2"
+  ],
+  [
+    "item3",
+    "item4"
+  ]
+]
 
 # Line breaks are OK when inside arrays
 hosts = [
@@ -4918,8 +5059,23 @@ dc = "eqdc10"
 [clients]
 data = [ [ "gamma", "delta" ], [ 1, 2 ] ]
 
+# Nested Multiline Array Test
+nested_data = [
+  [
+    "item1",
+    "item2",
+  ],
+  [
+    "item3",
+    "item4",
+  ],
+]
+
 # Line breaks are OK when inside arrays
-hosts = [ "alpha", "omega" ]
+hosts = [
+  "alpha",
+  "omega",
+]
 
 # Inline tables
 name  = { first = "Tom", last = "Preston-Werner" }

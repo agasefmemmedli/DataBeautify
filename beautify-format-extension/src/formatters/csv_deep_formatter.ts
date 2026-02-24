@@ -1,5 +1,5 @@
 
-import { detectDelimiter } from '../utils';
+import { detectDelimiter, parseCSV } from '../utils';
 
 /**
  * Format CSV Deep (Aligned Columns)
@@ -73,61 +73,3 @@ function formatCell(cell: string, delimiter: string): string {
     return cell;
 }
 
-/**
- * Robust CSV Parser (RFC 4180 compliant)
- */
-function parseCSV(text: string, delimiter: string): string[][] {
-    const rows: string[][] = [];
-    let currentRow: string[] = [];
-    let currentField = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const nextChar = text[i + 1];
-
-        if (inQuotes) {
-            if (char === '"') {
-                if (nextChar === '"') {
-                    // Escaped quote: "" -> "
-                    currentField += '"';
-                    i++; // Skip next quote
-                } else {
-                    // End of quote
-                    inQuotes = false;
-                }
-            } else {
-                currentField += char;
-            }
-        } else {
-            if (char === '"') {
-                inQuotes = true;
-            } else if (char === delimiter) {
-                currentRow.push(currentField);
-                currentField = '';
-            } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
-                currentRow.push(currentField);
-                rows.push(currentRow);
-                currentRow = [];
-                currentField = '';
-                if (char === '\r') i++; // Skip \n
-            } else if (char === '\r') {
-                // Carriage return only (Mac Classic style)
-                currentRow.push(currentField);
-                rows.push(currentRow);
-                currentRow = [];
-                currentField = '';
-            } else {
-                currentField += char;
-            }
-        }
-    }
-
-    // Push last field/row if any content exists
-    if (currentRow.length > 0 || currentField.length > 0) {
-        currentRow.push(currentField);
-        rows.push(currentRow);
-    }
-
-    return rows;
-}

@@ -41,7 +41,7 @@ export class SwiftTokenizer {
 
     // Regexes (Sticky)
     private readonly reWhitespace = /[ \t]+/y;
-    private readonly reIdentifier = /([a-zA-Z_][a-zA-Z0-9_]*|`[a-zA-Z_][a-zA-Z0-9_]*`)/y;
+    private readonly reIdentifier = /([a-zA-Z_$][a-zA-Z0-9_$]*|`[a-zA-Z_][a-zA-Z0-9_]*`)/y;
     private readonly reHex = /0x[0-9a-fA-F_]+/y;
     private readonly reBin = /0b[01_]+/y;
     private readonly reOct = /0o[0-7_]+/y;
@@ -177,7 +177,7 @@ export class SwiftTokenizer {
             }
 
             // Identifier or Keyword
-            if (/[a-zA-Z_`]/.test(char)) {
+            if (/[a-zA-Z_`$]/.test(char)) {
                 this.reIdentifier.lastIndex = this.pos;
                 const match = this.reIdentifier.exec(this.code);
                 if (match) {
