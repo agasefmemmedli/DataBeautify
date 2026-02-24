@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] HTML (Deep Formatting Implemented)
 - [x] Markdown (Deep Formatting Implemented)
 - [x] CSV (Deep Formatting Implemented)
 - [x] Astro (Deep Formatting Implemented)

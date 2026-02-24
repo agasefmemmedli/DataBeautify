@@ -120,11 +120,9 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
             for (const attr of attributes) {
                 singleLineAttrs += ` ${attr.name}`;
                 if (attr.value !== undefined) {
-                    // Ensure quotes if needed
-                    if (!/^["']/.test(attr.value)) {
-                         attr.value = `"${attr.value}"`;
-                    }
-                    singleLineAttrs += `=${attr.value}`;
+                    // Normalize to double quotes and escape
+                    const escaped = attr.value.replace(/"/g, '&quot;');
+                    singleLineAttrs += `="${escaped}"`;
                 }
             }
 
@@ -137,7 +135,8 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                 for (const attr of attributes) {
                     let attrStr = ` ${attr.name}`;
                     if (attr.value !== undefined) {
-                        attrStr += `=${attr.value}`;
+                        const escaped = attr.value.replace(/"/g, '&quot;');
+                        attrStr += `="${escaped}"`;
                     }
                     formattedLines.push(getIndent(indentLevel + 1) + attrStr.trim());
                 }
@@ -158,14 +157,19 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                 // Empty element <tag></tag>
                 if (nextIdx < tokens.length && tokens[nextIdx].type === TokenType.TagClose) {
                     const closeToken = tokens[nextIdx];
-                    const closeTagName = closeToken.text.substring(2, closeToken.text.length - 1).toLowerCase();
+                    const closeTagName = closeToken.text.substring(2).toLowerCase();
                     if (closeTagName === tagNameLower) {
                         const lastLineIdx = formattedLines.length - 1;
                         if (lastLineIdx >= 0) {
-                            formattedLines[lastLineIdx] += closeToken.text;
+                            formattedLines[lastLineIdx] += `</${closeTagName}>`;
                         }
                         indentLevel--; // Revert indent
-                        i = nextIdx; // Advance loop
+                        // Consume optional TagEnd >
+                        let k = nextIdx + 1;
+                        if (k < tokens.length && tokens[k].type === TokenType.TagEnd) {
+                            k++;
+                        }
+                        i = k - 1; // Advance loop
                         continue;
                     }
                 }
@@ -174,16 +178,21 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                     const textToken = tokens[nextIdx];
                     if (nextIdx + 1 < tokens.length && tokens[nextIdx + 1].type === TokenType.TagClose) {
                         const closeToken = tokens[nextIdx + 1];
-                        const closeTagName = closeToken.text.substring(2, closeToken.text.length - 1).toLowerCase();
+                        const closeTagName = closeToken.text.substring(2).toLowerCase();
                         if (closeTagName === tagNameLower) {
                             const textContent = textToken.text.trim();
                             const lastLine = formattedLines[formattedLines.length - 1] || '';
-                            const projectedLen = lastLine.length + textContent.length + closeToken.text.length;
+                            const projectedLen = lastLine.length + textContent.length + closeToken.text.length + 1; // +1 for >
 
                             if (projectedLen <= printWidth && !textContent.includes('\n')) {
-                                formattedLines[formattedLines.length - 1] += textContent + closeToken.text;
+                                formattedLines[formattedLines.length - 1] += textContent + `</${closeTagName}>`;
                                 indentLevel--; // Revert indent
-                                i = nextIdx + 1; // Advance loop
+                                // Consume optional TagEnd >
+                                let k = nextIdx + 2;
+                                if (k < tokens.length && tokens[k].type === TokenType.TagEnd) {
+                                    k++;
+                                }
+                                i = k - 1; // Advance loop
                                 continue;
                             }
                         }
@@ -235,12 +244,26 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
             }
 
         } else if (token.type === TokenType.TagClose) {
-            const tagNameLower = token.text.substring(2, token.text.length - 1).toLowerCase(); // </tag>
+            const tagNameLower = token.text.substring(2).toLowerCase(); // </tag
             if (tagNameLower === 'pre') inPre = false;
+
+            // Consume optional TagEnd >
+            let j = i + 1;
+            while (j < tokens.length) {
+                if (tokens[j].type === TokenType.TagEnd) {
+                    i = j;
+                    break;
+                }
+                // Skip whitespace/comments/attributes inside closing tag if any
+                if (tokens[j].type !== TokenType.Whitespace && tokens[j].type !== TokenType.Comment && tokens[j].type !== TokenType.AttributeName) {
+                     break;
+                }
+                j++;
+            }
 
             // Dedent
             indentLevel = Math.max(0, indentLevel - 1);
-            formattedLines.push(getIndent(indentLevel) + token.text);
+            formattedLines.push(getIndent(indentLevel) + `</${tagNameLower}>`);
 
         } else if (token.type === TokenType.Text) {
             if (inPre) {
