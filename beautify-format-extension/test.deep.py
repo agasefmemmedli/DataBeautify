@@ -1,34 +1,19 @@
-
+import os,sys,math
+def foo(  x,y ):
+ if x>y:return x+y
+ else:return x-y
+class Bar:
+ def __init__(self):self.val=0
+ def baz(self,z):
+  return self.val+z*2
 import sys,os
-from datetime import datetime
-import json
-
-# top level comment
-def func_with_args( a,b,c=1, *args, **kwargs ):
-  if a>b: return a+b
-  else: return b-a
-
-@decorator
-class MyClass:
-  def __init__(self):
-    self.x={'key':1,'list':[1,2,3]}
-
-  async def async_method( self ):
-    await some_coro()
-
-x = 1+2*3
-y = [ 1, 2, 3 ]
-z = { 'a': 1, 'b': 2 }
-slice = my_list[ 1 : 2 : 3 ]
-formatted = f"Value: { x }"
-multiline = """
-    Line 1
-    Line 2
-"""
-
-try:
-  raise ValueError("Error")
-except ValueError as e:
-  print(e)
-finally:
-  pass
+def example_func(a,b,c):
+ if a:b=2;c=3
+ else:
+  b=1
+  c=2
+ return b+c
+class MultiLine:
+ def method1(self): return 1
+ def method2(self): return 2
+print(foo(10, 5))
