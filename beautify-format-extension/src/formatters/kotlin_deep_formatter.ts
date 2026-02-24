@@ -17,8 +17,10 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
     let indentLevel = 0;
     let newline = true; // Start on a new line
     let lastToken: Token | null = null;
+    let beforeLastToken: Token | null = null;
 
-    const indent = () => ' '.repeat(Math.max(0, indentLevel * indentSize));
+    // Helper to print indentation
+    const indent = (offset: number = 0) => ' '.repeat(Math.max(0, (indentLevel + offset) * indentSize));
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
@@ -26,31 +28,25 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
         // Peek next non-whitespace token
         let nextToken: Token | null = null;
         for (let j = i + 1; j < tokens.length; j++) {
-            if (tokens[j].type !== 'WHITESPACE') {
+            if (tokens[j].type !== 'WHITESPACE' && tokens[j].type !== 'COMMENT' && tokens[j].type !== 'BLOCK_COMMENT') {
                 nextToken = tokens[j];
                 break;
             }
         }
 
-        // Handle Whitespace (preserve blank lines and synthetic newlines from imports)
+        // Handle Whitespace
         if (token.type === 'WHITESPACE') {
             const newlines = (token.value.match(/\n/g) || []).length;
-
-            // If it's a synthetic token (line 0) OR explicit newline
             if (token.line === 0 || newlines > 0) {
-                // Determine how many newlines to apply
-                // If it's synthetic or we want to preserve blank lines
                 const effectiveNewlines = (token.line === 0) ? 1 : Math.min(newlines, 2);
-
-                // If we need a newline and not already there
                 if (effectiveNewlines > 0) {
-                    // Check if formatted already ends with newline
-                    let existingNewlines = 0;
-                    if (formatted.endsWith('\n\n')) existingNewlines = 2;
-                    else if (formatted.endsWith('\n')) existingNewlines = 1;
-
-                    if (existingNewlines < effectiveNewlines) {
-                        formatted += '\n'.repeat(effectiveNewlines - existingNewlines);
+                    // Prevent multiple empty lines at start or duplicate newlines
+                    if (formatted.endsWith('\n\n')) {
+                        // Already has blank line
+                    } else if (formatted.endsWith('\n')) {
+                        if (effectiveNewlines > 1) formatted += '\n';
+                    } else {
+                        formatted += '\n'.repeat(effectiveNewlines);
                     }
                     newline = true;
                 }
@@ -67,41 +63,42 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
                 newline = false;
             }
             formatted += token.value.trim();
-            // Force newline after comment
             formatted += '\n';
             newline = true;
             lastToken = token;
             continue;
         }
 
-        // Adjust Indentation BEFORE printing the token (Closing braces)
+        // --- Indentation Adjustments (Pre-print) ---
         if (token.value === '}' || token.value === ')' || token.value === ']') {
             indentLevel = Math.max(0, indentLevel - 1);
         }
 
-        // Check if we should force a newline before this token
-        // e.g. } before else is fine on same line, but } before class is not.
-        // e.g. closing brace of enum or class body should be on new line usually.
-        if (token.value === '}' && !newline) {
-             // Force newline before } if it closes a block (heuristic)
-             // Unless it's empty block `{ }` or lambda `{ it }`
-             if (lastToken && lastToken.value !== '{') {
-                 // Check distance or type?
-                 // For deep formatting, let's force newline before } if it's not a short lambda.
-                 // Hard to judge short lambda.
-                 // Let's rely on original whitespace? If original had newline, we respected it above.
-                 // If original did NOT have newline, we are here with newline=false.
-                 // We should add space at least.
-             }
+        // Force newline before '}' if not empty block
+        if (token.value === '}') {
+            if (!newline) {
+                // If previous token was '{', it's an empty block: {}
+                if (lastToken && lastToken.value === '{') {
+                    // Keep on same line (empty block)
+                } else {
+                    formatted += '\n';
+                    newline = true;
+                }
+            }
         }
 
-        // Start new line with indentation if needed
+        // Print Indentation
         if (newline) {
-            formatted += indent();
+            // Check for chained call at start of line
+            let offset = 0;
+            if ((token.value === '.' || token.value === '?.') && lastToken && lastToken.value !== '}') {
+                 offset = 1; // Indent chained calls unless following a block close
+            }
+            formatted += indent(offset);
             newline = false;
         } else {
             // Add space if needed
-            if (lastToken && shouldAddSpace(lastToken, token, nextToken)) {
+            if (lastToken && shouldAddSpace(beforeLastToken, lastToken, token, nextToken)) {
                 formatted += ' ';
             }
         }
@@ -109,143 +106,158 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
         // Append Token
         formatted += token.value;
 
-        // Adjust Indentation AFTER printing the token (Opening braces)
+        // --- Indentation Adjustments (Post-print) ---
         if (token.value === '{' || token.value === '(' || token.value === '[') {
             indentLevel++;
         }
 
-        // Handle Post-Token Newlines
+        // Force Newline After certain tokens
         if (token.value === '{') {
-            formatted += '\n';
-            newline = true;
+            // Always newline after { unless it's an empty block check?
+            // We can look ahead.
+            if (nextToken && nextToken.value === '}') {
+                // Empty block {}, stay on line
+            } else {
+                formatted += '\n';
+                newline = true;
+            }
         } else if (token.value === ';') {
             formatted += '\n';
             newline = true;
         } else if (token.value === '}') {
-            // Check if next token requires staying on same line
-            if (nextToken && (
-                nextToken.value === 'else' ||
-                nextToken.value === 'catch' ||
-                nextToken.value === 'finally' ||
-                (lastToken && lastToken.value === 'do' && nextToken.value === 'while')
-            )) {
-                // Stay on same line (space added by shouldAddSpace)
+            // If next is else, catch, finally, stay on line
+            if (nextToken && ['else', 'catch', 'finally', 'while'].includes(nextToken.value)) {
+                // Special case: do { } while() -> while stays on line.
+                // } else -> else stays on line
                 newline = false;
-            } else if (nextToken && (nextToken.value === ',' || nextToken.value === ')' || nextToken.value === ']' || nextToken.value === ';' || nextToken.value === '.')) {
+            } else if (nextToken && ['.', '?.', '!!', ',', ')', ']', ';'].includes(nextToken.value)) {
+                 // Chained call after block, or comma, or closing paren -> stay on line
                  newline = false;
             } else {
                 formatted += '\n';
                 newline = true;
             }
         } else if (token.type === 'ANNOTATION') {
-             // Force newline if next is a declaration keyword
-             if (nextToken && ['class', 'data', 'fun', 'val', 'var', 'constructor', 'interface', 'object', 'enum'].includes(nextToken.value)) {
-                 formatted += '\n';
-                 newline = true;
-             }
-        } else if (token.value === ')' && nextToken && ['class', 'data', 'fun', 'val', 'var', 'constructor'].includes(nextToken.value)) {
-             // Closing paren of annotation args or primary constructor?
-             // Primary constructor: class Foo(args) { ... } -> { is next.
-             // Annotation: @Foo(args) class ... -> class is next.
-             formatted += '\n';
-             newline = true;
+            // Newline after annotation unless it's parameterized (followed by parens)
+            // or if it is a site target like @field:Annotation (handled by tokenizer?)
+            if (nextToken && nextToken.value === '(') {
+                newline = false;
+            } else {
+                formatted += '\n';
+                newline = true;
+            }
+        } else if (token.value === ',') {
+            // Maybe force newline in Enums?
+            // We need context. For now, rely on source or soft handling.
         }
 
+        beforeLastToken = lastToken;
         lastToken = token;
     }
 
     return formatted.trim() + '\n';
 }
 
-function shouldAddSpace(last: Token, current: Token, next: Token | null): boolean {
-    // No space before comma, semicolon, dot, safe call, double bang, range, scope, question mark
-    if (['.', '?.', '!!', '..', '::', ',', ';', '?'].includes(current.value)) return false;
+function shouldAddSpace(beforeLast: Token | null, last: Token, current: Token, next: Token | null): boolean {
+    // No space before punctuations
+    if (['.', '?.', '!!', '..', '::', ',', ';', ')', ']'].includes(current.value)) return false;
 
-    // No space after dot, safe call, double bang, range, scope, open paren/bracket/brace
+    // No space after punctuations
     if (['.', '?.', '!!', '..', '::', '(', '[', '{'].includes(last.value)) return false;
 
-    // No space before closing paren/bracket
-    if (current.value === ')' || current.value === ']') return false;
-
-    // Space after keywords (control flow)
-    if (last.type === 'KEYWORD' && ['if', 'while', 'for', 'catch', 'when'].includes(last.value)) {
-        return current.value === '(';
+    // Special case: `> (` -> No space if `>` was Generic Close.
+    if (last.value === '>' && current.value === '(') {
+        // Check what came before `>`
+        if (beforeLast) {
+             if (beforeLast.type === 'IDENTIFIER' && /^[A-Z]/.test(beforeLast.value)) return false;
+             if (beforeLast.value === '?') return false;
+        }
+        return true;
     }
 
-    // Space before open brace
-    if (current.value === '{') return true;
+    // Generics: < >
+    // No space before < if it looks like generic
+    if (current.value === '<') {
+        // Common collection factory methods that take generics
+        if (['listOf', 'mapOf', 'setOf', 'arrayOf', 'mutableListOf', 'mutableMapOf', 'mutableSetOf', 'arrayListOf'].includes(last.value)) return false;
 
-    // Space before closing brace (if not newline)
-    if (current.value === '}') return true;
+        // Uppercase identifier likely means Type -> Generic
+        if (last.type === 'IDENTIFIER' && /^[A-Z]/.test(last.value)) return false;
 
-    // Space around binary operators
-    if (last.type === 'OPERATOR' || current.type === 'OPERATOR') {
-        // Exceptions for Unary
-        if (['!', '++', '--'].includes(last.value)) return false;
-        if (['!', '++', '--', '+', '-'].includes(current.value)) {
-            if (last.type === 'OPERATOR' || ['(', '{', '[', ',', 'return', 'if', 'while'].includes(last.value)) {
-                return false;
-            }
-        }
-
-        if (['.', '?.', '!!', '..', '::'].includes(last.value) || ['.', '?.', '!!', '..', '::'].includes(current.value)) return false;
-
-        // Generics < >
-        if (current.value === '<') {
-            // Heuristic: Uppercase Identifier (Type) likely starts Generic -> No space
-            if (last.type === 'IDENTIFIER' && /^[A-Z]/.test(last.value)) return false;
-            // Also if lowercase but next is Uppercase Identifier? `mutableListOf<String>`
-            if (next && next.type === 'IDENTIFIER' && /^[A-Z]/.test(next.value)) return false;
-
-            return true;
-        }
-        if (current.value === '>') {
-             if (last.type === 'IDENTIFIER' || last.value === '?') return false;
-             return true;
-        }
-        if (last.value === '<') {
-             // Heuristic: if current is Uppercase Identifier, assume Generic -> No space
-             if (current.type === 'IDENTIFIER' && /^[A-Z]/.test(current.value)) return false;
-             return true;
-        }
-
-        // Arrow ->
-        if (current.value === '->' || last.value === '->') return true;
+        // Nullable type argument List<String?>
+        if (last.value === '?') return false;
 
         return true;
     }
+    // No space after <
+    if (last.value === '<') return false;
+
+    // Logic for >
+    if (current.value === '>') {
+         // Heuristic: if last token is IDENTIFIER and starts with Uppercase, assume Generic -> No space.
+         // e.g. List<String>
+         if (last.type === 'IDENTIFIER' && /^[A-Z]/.test(last.value)) return false;
+         if (last.value === '?') return false;
+         if (last.value === '>') return false; // Nested generics >>
+
+         return true;
+    }
+
+    // Logic for ? (Nullable type)
+    if (current.value === '?') return false;
+
+    // Type params: Map<K, V> -> space after comma is handled by "Space after comma" rule below.
 
     // Space after comma
     if (last.value === ',') return true;
 
-    // Space after colon (type declaration)
+    // Space after colon (declarations)
     if (last.value === ':') return true;
+    // No space before colon (Kotlin style: `val x: Int`)
     if (current.value === ':') return false;
 
-    // Space between Keyword and Identifier/Keyword
-    if (last.type === 'KEYWORD' && (current.type === 'IDENTIFIER' || current.type === 'KEYWORD' || current.type === 'NUMBER' || current.type === 'STRING')) {
+    // Space around Operators
+    if (last.type === 'OPERATOR' || current.type === 'OPERATOR') {
+        // Unary exceptions
+        if (['!', '++', '--'].includes(last.value)) return false; // !x
+        if (['!', '++', '--'].includes(current.value)) return false; // x++
+
+        // + and - can be unary.
+        if ((current.value === '+' || current.value === '-') &&
+            (last.type === 'OPERATOR' || ['(', '[', '{', ',', 'return', '=', ':'].includes(last.value))) {
+            return false;
+        }
+
+        // Range ..
+        if (last.value === '..' || current.value === '..') return false;
+
+        // Arrow ->
+        if (last.value === '->' || current.value === '->') return true;
+
         return true;
     }
 
-    // Space between Identifier and Keyword (e.g. `x in list`, `infix fun`)
-    if (last.type === 'IDENTIFIER' && current.type === 'KEYWORD') {
-        return true;
+    // Space around assignments =
+    if (last.value === '=' || current.value === '=') return true;
+
+    // Space between Identifier/Keyword/Number and Identifier/Keyword/Number/String
+    const isWordOrNum = (t: Token) => t.type === 'IDENTIFIER' || t.type === 'KEYWORD' || t.type === 'NUMBER';
+    if (isWordOrNum(last) && (isWordOrNum(current) || current.type === 'STRING')) {
+         return true;
     }
 
-    // Space between Number/Identifier and Identifier/Keyword/Number (e.g. `10 step 2`, `x step y`, `val x = 1`)
-    if ((last.type === 'NUMBER' || last.type === 'IDENTIFIER') && (current.type === 'IDENTIFIER' || current.type === 'KEYWORD' || current.type === 'NUMBER')) {
-        return true;
+    // Keywords (Special cases override above?)
+    if (last.type === 'KEYWORD') {
+        if (['if', 'while', 'for', 'catch', 'when'].includes(last.value) && current.value === '(') return true;
+        if (current.value === '{') return true;
+    }
+    if (current.type === 'KEYWORD') {
+         if (last.value === '}') return true; // } else
+         if (last.value === ')') return true; // ) {
     }
 
-    // Space between identifier and quote? `x "foo"`. Yes.
-    if (last.type === 'IDENTIFIER' && (current.type === 'STRING' || current.type === 'MULTILINE_STRING')) {
-        return true;
-    }
-
-    // Space after closing brace if on same line (e.g. `} else`)
-    if (last.value === '}' && current.value !== ',' && current.value !== ';' && current.value !== '.' && current.value !== ')' && current.value !== ']') {
-        return true;
-    }
+    // { }
+    if (current.value === '{') return true; // foo {
 
     return false;
 }
@@ -260,12 +272,13 @@ function sortImports(tokens: Token[]): Token[] {
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
 
-        if (token.type === 'KEYWORD' && token.value === 'import') {
+        // Check for import start
+        if (!inImport && token.type === 'KEYWORD' && token.value === 'import') {
             inImport = true;
             currentImport = [token];
         } else if (inImport) {
             currentImport.push(token);
-            // Stop at explicit newline or semicolon
+            // End import on newline or semicolon
             if (token.value === ';' || (token.type === 'WHITESPACE' && token.value.includes('\n'))) {
                 inImport = false;
                 imports.push(currentImport);
@@ -275,50 +288,62 @@ function sortImports(tokens: Token[]): Token[] {
             nonImports.push(token);
         }
     }
+    // Capture trailing import if file ends without newline
+    if (inImport && currentImport.length > 0) {
+        imports.push(currentImport);
+    }
 
     if (imports.length === 0) return tokens;
 
-    // Sort imports
+    // Sort imports based on text content
     imports.sort((a, b) => {
-        const pathA = a.map(t => t.value).join('').replace(/^import\s+/, '').trim();
-        const pathB = b.map(t => t.value).join('').replace(/^import\s+/, '').trim();
-        return pathA.localeCompare(pathB);
+        const textA = a.map(t => t.value).join('').trim();
+        const textB = b.map(t => t.value).join('').trim();
+        return textA.localeCompare(textB);
     });
 
-    // We need to insert imports back.
+    // Find insertion point: after package declaration
     let insertIndex = 0;
-    let seenPackage = false;
-
+    let packageFound = false;
     for (let i = 0; i < nonImports.length; i++) {
         if (nonImports[i].value === 'package') {
-            seenPackage = true;
+            packageFound = true;
         }
-        if (seenPackage && (nonImports[i].value === ';' || (nonImports[i].type === 'WHITESPACE' && nonImports[i].value.includes('\n')))) {
-            insertIndex = i + 1;
-            break;
+        if (packageFound) {
+             // Look for end of package line
+             if (nonImports[i].value === ';' || (nonImports[i].type === 'WHITESPACE' && nonImports[i].value.includes('\n'))) {
+                 insertIndex = i + 1;
+                 break;
+             }
         }
     }
 
-    // Flatten imports
-    const sortedImportTokens: Token[] = [];
-    if (insertIndex > 0) {
-        sortedImportTokens.push({ type: 'WHITESPACE', value: '\n\n', line: 0, col: 0 });
-    }
+    // Construct new token list
+    const result: Token[] = [];
 
+    // Add pre-import tokens (package)
+    result.push(...nonImports.slice(0, insertIndex));
+
+    // Add separator
+    if (insertIndex > 0) result.push({ type: 'WHITESPACE', value: '\n\n', line: 0, col: 0 });
+
+    // Add imports
     imports.forEach(imp => {
-        // Filter out existing newlines from the import tokens to clean them up
+        // Strip existing whitespace/newlines from import tokens to normalize
         const cleanImp = imp.filter(t => t.type !== 'WHITESPACE');
-        sortedImportTokens.push(...cleanImp);
-        sortedImportTokens.push({ type: 'WHITESPACE', value: '\n', line: 0, col: 0 });
+        result.push(...cleanImp);
+        result.push({ type: 'WHITESPACE', value: '\n', line: 0, col: 0 });
     });
 
-    sortedImportTokens.push({ type: 'WHITESPACE', value: '\n', line: 0, col: 0 });
+    result.push({ type: 'WHITESPACE', value: '\n', line: 0, col: 0 });
 
-    const finalTokens = [
-        ...nonImports.slice(0, insertIndex),
-        ...sortedImportTokens,
-        ...nonImports.slice(insertIndex)
-    ];
+    // Add rest
+    // Strip leading whitespace from rest if any, to avoid huge gaps
+    let rest = nonImports.slice(insertIndex);
+    while(rest.length > 0 && rest[0].type === 'WHITESPACE') {
+        rest.shift();
+    }
+    result.push(...rest);
 
-    return finalTokens;
+    return result;
 }
