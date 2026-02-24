@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] GraphQL (Deep Formatting Implemented)
 - [x] TOML (Deep Formatting Implemented)
 - [x] HTML (Deep Formatting Implemented)
 - [x] Markdown (Deep Formatting Implemented)
