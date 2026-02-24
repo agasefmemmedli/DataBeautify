@@ -56,6 +56,9 @@ export function formatDartDeep(text: string): string {
     // Stack stores the indent level of the 'switch' keyword
     const switchStack: { indent: number, inCase: boolean }[] = [];
 
+    // Block State Tracking (True = Structural/Expanded, False = Inline)
+    const blockStack: boolean[] = [];
+
     let inGenerics = 0;
     let justClosedGeneric = false;
 
@@ -102,6 +105,31 @@ export function formatDartDeep(text: string): string {
             }
         }
 
+        // Block Stack Logic (Push/Pop)
+        if (token.text === '{') {
+            // Determine if this block is structural
+            const isStructuralBlock = (p: EnhancedToken | null) => {
+                if (!p) return false;
+                // Structural: ) { (e.g. if, for, while, switch, function)
+                if (p.text === ')') return true;
+                // Structural keywords
+                if (['else', 'try', 'do', 'finally'].includes(p.text)) return true;
+                // Structural identifiers (class A, mixin M, extension E, enum E, get foo, set foo)
+                if (p.type === TokenType.Identifier || p.text === 'get' || p.text === 'set') {
+                    return true;
+                }
+                return false;
+            };
+            blockStack.push(isStructuralBlock(prev));
+        }
+
+        let blockJustPoppedStructural = false;
+        if (token.text === '}') {
+            if (blockStack.length > 0) {
+                blockJustPoppedStructural = blockStack.pop()!;
+            }
+        }
+
         // --- Newline Logic ---
         let forceNewline = false;
         let blankLine = false;
@@ -116,10 +144,28 @@ export function formatDartDeep(text: string): string {
 
         // Deep Formatting Rules for Newlines
         if (token.text === '}') {
-            forceNewline = true;
+            if (prev && prev.text === '{') {
+                forceNewline = false; // Collapse empty blocks
+            } else {
+                // If the block was structural, force newline.
+                // If it was inline, respect user newline (already set).
+                if (blockJustPoppedStructural) {
+                    forceNewline = true;
+                }
+            }
         }
         if (prev && prev.text === '{') {
-            forceNewline = true;
+            if (token.text !== '}') {
+                // Check current block type (top of stack)
+                // Note: We pushed to stack for current '{' (prev) in previous iteration?
+                // Wait, we process 'token'. 'prev' was processed in previous loop step.
+                // So blockStack.top corresponds to 'prev' (the '{' we just passed).
+                const isStructural = blockStack.length > 0 ? blockStack[blockStack.length - 1] : true;
+
+                if (isStructural) {
+                    forceNewline = true;
+                }
+            }
         }
         if (prev && prev.text === ';') {
             if (inParen === 0) forceNewline = true;
@@ -333,6 +379,7 @@ export function formatDartDeep(text: string): string {
             if (token.text === ',' || token.text === ';') spaceBefore = false;
             if (token.text === '.' || token.text === '?.') spaceBefore = false;
             if (token.text === ')' || token.text === ']') spaceBefore = false;
+            if (token.text === '}' && prev && prev.text === '{') spaceBefore = false; // {} -> no space
             if (token.text === '(') {
                  if (prev && (prev.type === TokenType.Identifier || prev.type === TokenType.Keyword)) {
                      if (['if', 'for', 'while', 'switch', 'catch', 'var'].includes(prev.text)) spaceBefore = true;
