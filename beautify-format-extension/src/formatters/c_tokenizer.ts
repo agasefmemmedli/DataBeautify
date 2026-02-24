@@ -314,7 +314,8 @@ export class CTokenizer {
         while (currentPos < this.code.length) {
             const char = this.code[currentPos];
             if (char === '\\') {
-                currentPos += 2;
+                currentPos++;
+                if (currentPos < this.code.length) currentPos++;
                 continue;
             } else if (char === '"') {
                 return this.code.substring(this.pos, currentPos + 1);
@@ -332,7 +333,8 @@ export class CTokenizer {
         while (currentPos < this.code.length) {
             const char = this.code[currentPos];
             if (char === '\\') {
-                currentPos += 2;
+                currentPos++;
+                if (currentPos < this.code.length) currentPos++;
                 continue;
             } else if (char === '\'') {
                 return this.code.substring(this.pos, currentPos + 1);

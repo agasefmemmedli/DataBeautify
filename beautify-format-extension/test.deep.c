@@ -39,6 +39,20 @@ void process_data(struct Data *d) {
     }
 }
 
+// Allman style switch
+void process_allman(int x)
+{
+    switch (x)
+    {
+        case 1:
+            printf("One\n");
+            break;
+        default:
+            printf("Other\n");
+            break;
+    }
+}
+
 int *get_array(int size) {
     int *arr = (int *)malloc(size * sizeof(int));
     if (!arr) return NULL;
