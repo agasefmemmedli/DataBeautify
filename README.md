@@ -37,3 +37,4 @@
 - [x] Shell Script (Deep Formatting Implemented)
 - [x] C++ (Deep Formatting Implemented)
 - [x] Terraform/HCL (Deep Formatting Implemented)
+- [x] SQL (Deep Formatting Implemented)
