@@ -1,345 +1,375 @@
 import { TOMLTokenizer, Token, TokenType } from './toml_tokenizer';
 
-interface TOMLLine {
-    type: 'KeyValuePair' | 'TableHeader' | 'ArrayTableHeader' | 'Comment' | 'Empty';
+interface TOMLNode {
+    type: 'Comment' | 'TableHeader' | 'ArrayTableHeader' | 'KeyValuePair' | 'Empty';
     key?: string;
     value?: string;
-    raw?: string;
-    comment?: string;
+    comment?: string; // Trailing comment
+    raw?: string; // For standalone comment
 }
 
 export function formatTOMLDeep(text: string): string {
     const tokenizer = new TOMLTokenizer(text);
     const tokens = tokenizer.tokenize();
+    const nodes = parse(tokens);
 
-    // 1. Group tokens into Logical Lines
-    // A logical line ends at Newline, UNLESS we are inside [ ] or { } or """/'''
-    const logicalLines: Token[][] = [];
-    let currentLine: Token[] = [];
-    let bracketLevel = 0;
-    let braceLevel = 0;
+    return printNodes(nodes);
+}
 
-    for (const t of tokens) {
+function parse(tokens: Token[]): TOMLNode[] {
+    const nodes: TOMLNode[] = [];
+    let i = 0;
+
+    while (i < tokens.length) {
+        const t = tokens[i];
+
+        // Handle Newlines / Empty lines
         if (t.type === TokenType.Newline) {
-            if (bracketLevel === 0 && braceLevel === 0) {
-                // End of logical line
-                if (currentLine.length > 0) {
-                    logicalLines.push(currentLine);
-                    currentLine = [];
-                } else {
-                    // Preserve empty lines if they are relevant?
-                    // But tokenizer emits Newline tokens. If we skip them here, we lose empty lines.
-                    // Let's push a special empty line token?
-                    // Or just push empty array?
-                    logicalLines.push([]);
+            // Check if we have multiple newlines which imply an empty line
+            // If the previous node was not Empty, and we see 2+ newlines?
+            // Actually, we can just push an Empty node if we see a blank line (2 newlines).
+            // But we might want to consolidate.
+            let nlCount = 0;
+            while (i < tokens.length && tokens[i].type === TokenType.Newline) {
+                nlCount++;
+                i++;
+            }
+            if (nlCount > 1) {
+                nodes.push({ type: 'Empty' });
+            }
+            continue;
+        }
+
+        if (t.type === TokenType.Whitespace) {
+            i++;
+            continue;
+        }
+
+        // Comment (Standalone)
+        if (t.type === TokenType.Comment) {
+            nodes.push({ type: 'Comment', raw: t.value });
+            i++;
+            continue;
+        }
+
+        // Table Header [ ... ]
+        if (t.value === '[') {
+            const startIdx = i;
+            let isArrayTable = false;
+            i++; // consume [
+            if (i < tokens.length && tokens[i].value === '[') {
+                isArrayTable = true;
+                i++;
+            }
+
+            const keyTokens: Token[] = [];
+            while (i < tokens.length) {
+                if (tokens[i].value === ']') {
+                    if (isArrayTable) {
+                        if (i + 1 < tokens.length && tokens[i+1].value === ']') {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
+                if (tokens[i].type === TokenType.Newline) break; // Error protection
+                keyTokens.push(tokens[i]);
+                i++;
+            }
+
+            // Consume closing brackets
+            if (isArrayTable) {
+                if (i < tokens.length && tokens[i].value === ']') i++;
+                if (i < tokens.length && tokens[i].value === ']') i++;
             } else {
-                // Inside structure, ignore newline (or treat as whitespace/formatting hint?)
-                // For Deep Formatting, we usually ignore original layout and reformat.
-                // So skipping Newline tokens inside structure is fine, as long as we separate items.
-                // But we need to ensure we don't merge `1` and `2` into `12`.
-                // Tokenizer separates them.
-            }
-        } else if (t.type === TokenType.Comment) {
-             // Comments usually end a line.
-             // If we are inside structure: `[ 1, # comment \n 2 ]`
-             // The comment should be attached to something.
-             // For simplicity, let's treat comments as separate tokens in the stream.
-             // But if we are inside structure, a comment ends the physical line but not logical structure.
-             // We can keep comment in the stream.
-             currentLine.push(t);
-        } else {
-            if (t.value === '[') bracketLevel++;
-            else if (t.value === ']') bracketLevel--;
-            else if (t.value === '{') braceLevel++;
-            else if (t.value === '}') braceLevel--;
-
-            currentLine.push(t);
-        }
-    }
-    if (currentLine.length > 0) logicalLines.push(currentLine);
-
-    // 2. Parse Logical Lines
-    const lines: TOMLLine[] = [];
-
-    for (const lineTokens of logicalLines) {
-        if (lineTokens.length === 0) {
-            lines.push({ type: 'Empty' });
-            continue;
-        }
-
-        const meaningful = lineTokens.filter(t => t.type !== TokenType.Whitespace);
-        // Find comment (it might be at the end or the whole line)
-        // If whole line is comment, handled separately?
-        // Actually, if we have `key = val # comment`, meaningful includes key, =, val, #, comment.
-        // We should separate comment.
-
-        let comment: string | undefined;
-        let mainTokens = meaningful;
-
-        // Check if last meaningful token is comment
-        if (meaningful.length > 0 && meaningful[meaningful.length - 1].type === TokenType.Comment) {
-            comment = meaningful[meaningful.length - 1].value;
-            mainTokens = meaningful.slice(0, meaningful.length - 1);
-        }
-
-        if (mainTokens.length === 0) {
-            if (comment) {
-                lines.push({ type: 'Comment', raw: comment });
-            } else {
-                lines.push({ type: 'Empty' });
-            }
-            continue;
-        }
-
-        // Table Header
-        if (mainTokens[0].value === '[' && mainTokens[mainTokens.length - 1].value === ']') {
-            if (mainTokens.length >= 4 && mainTokens[1].value === '[' && mainTokens[mainTokens.length - 2].value === ']') {
-                const keyTokens = mainTokens.slice(2, mainTokens.length - 2);
-                lines.push({ type: 'ArrayTableHeader', key: reconstructKey(keyTokens), comment });
-            } else {
-                const keyTokens = mainTokens.slice(1, mainTokens.length - 1);
-                lines.push({ type: 'TableHeader', key: reconstructKey(keyTokens), comment });
-            }
-            continue;
-        }
-
-        // Key = Value
-        // Find assignment in the FULL lineTokens to preserve whitespace in value
-        let assignIndex = -1;
-        let bLevel = 0;
-        let brLevel = 0;
-
-        for (let i = 0; i < lineTokens.length; i++) {
-            const t = lineTokens[i];
-            if (t.type === TokenType.Whitespace || t.type === TokenType.Comment) continue;
-
-            if (t.value === '[') bLevel++;
-            else if (t.value === ']') bLevel--;
-            else if (t.value === '{') brLevel++;
-            else if (t.value === '}') brLevel--;
-            else if (t.value === '=' && bLevel === 0 && brLevel === 0) {
-                assignIndex = i;
-                break;
-            }
-        }
-
-        if (assignIndex > 0) {
-            // Key is everything before =, minus leading/trailing whitespace
-            const keyTokens = lineTokens.slice(0, assignIndex).filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
-
-            // Value is everything after =, minus comment.
-            // We want to preserve internal whitespace in value (e.g. for dates "date time"),
-            // but trim leading/trailing whitespace around the value itself.
-            let valueTokens = lineTokens.slice(assignIndex + 1);
-
-            // Remove comment from value tokens if present at end
-            if (valueTokens.length > 0 && valueTokens[valueTokens.length - 1].type === TokenType.Comment) {
-                valueTokens.pop();
+                if (i < tokens.length && tokens[i].value === ']') i++;
             }
 
-            // Trim leading/trailing whitespace tokens from valueTokens
-            // (We handle this inside formatValue or here?)
-            // formatValue joins tokens. If we leave whitespace tokens, they are joined.
-            // " =  val " -> valueTokens = ["  ", "val", " "]
-            // We want "val".
-            // " = 2020-01-01 10:00 " -> valueTokens = [" ", "2020...", " ", "10:00", " "]
-            // We want "2020... 10:00".
+            // Check for trailing comment
+            let comment: string | undefined;
+            // Skip whitespace on same line
+            while (i < tokens.length && tokens[i].type === TokenType.Whitespace) i++;
+            if (i < tokens.length && tokens[i].type === TokenType.Comment) {
+                comment = tokens[i].value;
+                i++;
+            }
 
-            // Trim start
-            while(valueTokens.length > 0 && valueTokens[0].type === TokenType.Whitespace) valueTokens.shift();
-            // Trim end
-            while(valueTokens.length > 0 && valueTokens[valueTokens.length - 1].type === TokenType.Whitespace) valueTokens.pop();
-
-            lines.push({
-                type: 'KeyValuePair',
-                key: reconstructKey(keyTokens),
-                value: formatValue(valueTokens),
+            nodes.push({
+                type: isArrayTable ? 'ArrayTableHeader' : 'TableHeader',
+                key: formatKey(keyTokens),
                 comment
             });
             continue;
         }
 
-        // Fallback
-        const raw = lineTokens.map(t => t.value).join('');
-        lines.push({ type: 'Comment', raw: raw.trim() });
-    }
-
-    // 3. Format and Align
-    const formattedLines: string[] = [];
-    let sectionBuffer: TOMLLine[] = [];
-
-    const flushSection = () => {
-        if (sectionBuffer.length === 0) return;
-
-        let maxKeyLen = 0;
-        sectionBuffer.forEach(l => {
-            if (l.type === 'KeyValuePair' && l.key) {
-                maxKeyLen = Math.max(maxKeyLen, l.key.length);
-            }
-        });
-
-        sectionBuffer.forEach(l => {
-            if (l.type === 'TableHeader') {
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(`[${l.key}]` + (l.comment ? ` ${l.comment}` : ''));
-            } else if (l.type === 'ArrayTableHeader') {
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(`[[${l.key}]]` + (l.comment ? ` ${l.comment}` : ''));
-            } else if (l.type === 'KeyValuePair') {
-                const padding = ' '.repeat(maxKeyLen - l.key!.length);
-                formattedLines.push(`${l.key}${padding} = ${l.value}` + (l.comment ? ` ${l.comment}` : ''));
-            } else if (l.type === 'Comment') {
-                formattedLines.push(l.raw!);
-            } else if (l.type === 'Empty') {
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-            }
-        });
-        sectionBuffer = [];
-    };
-
-    for (const line of lines) {
-        if (line.type === 'TableHeader' || line.type === 'ArrayTableHeader') {
-            flushSection();
-            sectionBuffer.push(line);
-            flushSection();
-        } else if (line.type === 'Empty') {
-             flushSection();
-             sectionBuffer.push(line);
-             flushSection();
-        } else {
-            sectionBuffer.push(line);
-        }
-    }
-    flushSection();
-
-    return formattedLines.join('\n') + '\n';
-}
-
-function reconstructKey(tokens: Token[]): string {
-    return tokens.map(t => t.value).join('');
-}
-
-function formatValue(tokens: Token[]): string {
-    if (tokens.length === 0) return '';
-
-    // Check for Array or Inline Table
-    if (tokens[0].value === '[') {
-        return formatArray(tokens);
-    }
-    if (tokens[0].value === '{') {
-        return formatInlineTable(tokens);
-    }
-
-    return tokens.map(t => t.value).join('');
-}
-
-function formatArray(tokens: Token[]): string {
-    const items: Token[][] = [];
-    let currentItem: Token[] = [];
-    let bracketLevel = 0;
-    let braceLevel = 0;
-
-    const content = tokens.slice(1, tokens.length - 1);
-
-    for (const t of content) {
-        if (t.value === '[') bracketLevel++;
-        else if (t.value === ']') bracketLevel--;
-        else if (t.value === '{') braceLevel++;
-        else if (t.value === '}') braceLevel--;
-
-        if (t.value === ',' && bracketLevel === 0 && braceLevel === 0) {
-            items.push(currentItem);
-            currentItem = [];
-        } else {
-            currentItem.push(t);
-        }
-    }
-    if (currentItem.length > 0) items.push(currentItem);
-
-    // Check complexity
-    // If any item is complex or total length is high
-    const formattedItems = items.map(itemTokens => {
-        // Trim whitespace from item tokens
-        let tokens = [...itemTokens];
-        while(tokens.length > 0 && tokens[0].type === TokenType.Whitespace) tokens.shift();
-        while(tokens.length > 0 && tokens[tokens.length - 1].type === TokenType.Whitespace) tokens.pop();
-        return formatValue(tokens);
-    });
-    const totalLength = formattedItems.reduce((sum, s) => sum + s.length, 0);
-    const isMultiline = formattedItems.length > 4 || totalLength > 60 || formattedItems.some(s => s.includes('\n'));
-
-    if (isMultiline) {
-        // Indent items
-        // If item itself is multiline (nested array), we need to indent it further?
-        // formatValue returns string. We can just indent the string.
-        const indent = '  ';
-        const joined = formattedItems.map(s => {
-            // Indent all lines of s
-            return s.split('\n').map((l, i) => i === 0 ? l : indent + l).join('\n');
-        }).join(',\n' + indent);
-
-        return `[\n${indent}${joined}\n]`;
-    } else {
-        return `[ ${formattedItems.join(', ')} ]`;
-    }
-}
-
-function formatInlineTable(tokens: Token[]): string {
-    const items: Token[][] = [];
-    let currentItem: Token[] = [];
-    let bracketLevel = 0;
-    let braceLevel = 0;
-
-    const content = tokens.slice(1, tokens.length - 1);
-
-    for (const t of content) {
-        if (t.value === '[') bracketLevel++;
-        else if (t.value === ']') bracketLevel--;
-        else if (t.value === '{') braceLevel++;
-        else if (t.value === '}') braceLevel--;
-
-        if (t.value === ',' && bracketLevel === 0 && braceLevel === 0) {
-            items.push(currentItem);
-            currentItem = [];
-        } else {
-            currentItem.push(t);
-        }
-    }
-    if (currentItem.length > 0) items.push(currentItem);
-
-    const formattedItems = items.map(itemTokens => {
+        // Key-Value Pair
+        // We expect Key = Value
+        // Scan ahead for =
         let eqIdx = -1;
-        for(let i=0; i<itemTokens.length; i++) {
-             if(itemTokens[i].value === '=') {
-                 eqIdx = i;
-                 break;
+        let scanI = i;
+        while (scanI < tokens.length && tokens[scanI].type !== TokenType.Newline) {
+            if (tokens[scanI].value === '=') {
+                eqIdx = scanI;
+                break;
+            }
+            // If we hit [ or ], it might be start of array in value, or new section?
+            // But we are looking for =, which must be at top level of line.
+            // If we are scanning a key, we shouldn't see [ unless quoted key?
+            // Quoted key `"[foo]"` is valid.
+            // So we must be careful.
+            // But `key = ...`.
+            scanI++;
+        }
+
+        if (eqIdx > -1) {
+            const keyTokens = tokens.slice(i, eqIdx).filter(tok => tok.type !== TokenType.Whitespace);
+            i = eqIdx + 1; // skip =
+
+            // Parse Value
+            const valRes = parseValue(tokens, i);
+            i = valRes.endIndex;
+
+            // Check trailing comment
+            let comment: string | undefined;
+            while (i < tokens.length && tokens[i].type === TokenType.Whitespace) i++;
+            if (i < tokens.length && tokens[i].type === TokenType.Comment) {
+                comment = tokens[i].value;
+                i++;
+            }
+
+            nodes.push({
+                type: 'KeyValuePair',
+                key: formatKey(keyTokens),
+                value: valRes.value,
+                comment
+            });
+        } else {
+            // Unknown or garbage, consume until newline
+            let raw = '';
+            while (i < tokens.length && tokens[i].type !== TokenType.Newline) {
+                raw += tokens[i].value;
+                i++;
+            }
+            if (raw.trim()) {
+                nodes.push({ type: 'Comment', raw: '# ' + raw });
+            }
+        }
+    }
+
+    return nodes;
+}
+
+function parseValue(tokens: Token[], startIndex: number): { value: string, endIndex: number } {
+    let i = startIndex;
+    while (i < tokens.length && tokens[i].type === TokenType.Whitespace) i++;
+
+    if (i >= tokens.length) return { value: '', endIndex: i };
+
+    const t = tokens[i];
+
+    if (t.value === '[') {
+        return parseArray(tokens, i);
+    }
+    if (t.value === '{') {
+        return parseInlineTable(tokens, i);
+    }
+
+    // Simple Value
+    // We consume just one token usually (String, Number, Boolean, Date)
+    // But verify it's not a separator or something weird
+    if (t.type === TokenType.String || t.type === TokenType.Number || t.type === TokenType.Boolean || t.type === TokenType.Date || t.type === TokenType.Identifier) {
+        return { value: t.value, endIndex: i + 1 };
+    }
+
+    // Unknown or symbol?
+    return { value: t.value, endIndex: i + 1 };
+}
+
+function parseArray(tokens: Token[], startIndex: number): { value: string, endIndex: number } {
+    let i = startIndex;
+    const startLine = tokens[i].line;
+    i++; // consume [
+
+    const items: string[] = [];
+    let isMultiline = false;
+    let comments: string[] = []; // Store comments inside array
+
+    while (i < tokens.length) {
+        // Skip whitespace and newlines
+        while (i < tokens.length && (tokens[i].type === TokenType.Whitespace || tokens[i].type === TokenType.Newline)) {
+            if (tokens[i].type === TokenType.Newline) isMultiline = true;
+            i++;
+        }
+
+        if (i >= tokens.length) break;
+        if (tokens[i].value === ']') {
+            i++;
+            break;
+        }
+
+        // Comment inside array?
+        if (tokens[i].type === TokenType.Comment) {
+            comments.push(tokens[i].value);
+            isMultiline = true;
+            i++;
+            continue;
+        }
+
+        // Value
+        const valRes = parseValue(tokens, i);
+        items.push(valRes.value);
+        i = valRes.endIndex;
+
+        // Skip whitespace
+        while (i < tokens.length && tokens[i].type === TokenType.Whitespace) i++;
+
+        // Comment after value?
+        if (i < tokens.length && tokens[i].type === TokenType.Comment) {
+            // Append comment to last item?
+            items[items.length - 1] += ' ' + tokens[i].value;
+            isMultiline = true;
+            i++;
+        }
+
+        // Newline?
+        while (i < tokens.length && tokens[i].type === TokenType.Newline) {
+            isMultiline = true;
+            i++;
+        }
+
+        // Comma
+        if (i < tokens.length && tokens[i].value === ',') {
+            i++;
+            // Comment after comma?
+             while (i < tokens.length && tokens[i].type === TokenType.Whitespace) i++;
+             if (i < tokens.length && tokens[i].type === TokenType.Comment) {
+                 // Attach to this line/item
+                 if (items.length > 0) items[items.length - 1] += ' ' + tokens[i].value;
+                 else comments.push(tokens[i].value); // comment before first item but after comma? rare.
+                 isMultiline = true;
+                 i++;
              }
         }
-        if(eqIdx > 0) {
-            // Trim Key
-            let keyTokens = itemTokens.slice(0, eqIdx);
-            while(keyTokens.length > 0 && keyTokens[0].type === TokenType.Whitespace) keyTokens.shift();
-            while(keyTokens.length > 0 && keyTokens[keyTokens.length - 1].type === TokenType.Whitespace) keyTokens.pop();
-            const key = reconstructKey(keyTokens);
+    }
 
-            // Trim Value
-            let valTokens = itemTokens.slice(eqIdx+1);
-            while(valTokens.length > 0 && valTokens[0].type === TokenType.Whitespace) valTokens.shift();
-            while(valTokens.length > 0 && valTokens[valTokens.length - 1].type === TokenType.Whitespace) valTokens.pop();
-            const val = formatValue(valTokens);
+    // Force multiline if it was multiline or complex
+    // Or if total length is big
+    const totalLen = items.reduce((s, it) => s + it.length, 0);
+    if (totalLen > 60 || comments.length > 0) isMultiline = true;
 
-            return `${key} = ${val}`;
+    if (isMultiline) {
+        const indent = '  ';
+        let res = '[\n';
+        // If we have standalone comments (at start), print them
+        comments.forEach(c => res += indent + c + '\n');
+
+        items.forEach((item, idx) => {
+            const lines = item.split('\n');
+            const indentedItem = lines.map((l, i) => i === 0 ? l : indent + l).join('\n');
+            res += indent + indentedItem;
+            if (idx < items.length - 1) res += ',';
+            // If item already has comment at end, it's included in item string
+            res += '\n';
+        });
+        // Check if trailing comma is desired? Standard TOML allows it.
+        // If multiline, trailing comma is good practice.
+        if (items.length > 0 && !items[items.length-1].trim().endsWith(',')) {
+             // We added comma in loop except last.
+             // Add trailing comma for last item
+             // Remove newline, add comma, add newline
+             res = res.substring(0, res.length - 1) + ',\n';
         }
-        // Fallback for non-kv items in inline table (invalid but tolerant)
-        return itemTokens.map(t => t.value).join('').trim();
-    });
+        res += ']';
+        return { value: res, endIndex: i };
+    } else {
+        return { value: `[ ${items.join(', ')} ]`, endIndex: i };
+    }
+}
 
-    return `{ ${formattedItems.join(', ')} }`;
+function parseInlineTable(tokens: Token[], startIndex: number): { value: string, endIndex: number } {
+    let i = startIndex;
+    i++; // consume {
+
+    const items: string[] = [];
+
+    while (i < tokens.length) {
+        while (i < tokens.length && (tokens[i].type === TokenType.Whitespace || tokens[i].type === TokenType.Newline)) i++;
+
+        if (i >= tokens.length) break;
+        if (tokens[i].value === '}') {
+            i++;
+            break;
+        }
+
+        // Key
+        const keyStart = i;
+        while (i < tokens.length && tokens[i].value !== '=' && tokens[i].value !== '}') i++;
+
+        if (tokens[i].value === '=') {
+            const keyTokens = tokens.slice(keyStart, i).filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Newline);
+            const key = formatKey(keyTokens);
+            i++; // skip =
+
+            const valRes = parseValue(tokens, i);
+            items.push(`${key} = ${valRes.value}`);
+            i = valRes.endIndex;
+
+            while (i < tokens.length && (tokens[i].type === TokenType.Whitespace || tokens[i].type === TokenType.Newline)) i++;
+            if (i < tokens.length && tokens[i].value === ',') i++;
+        } else {
+            break; // error
+        }
+    }
+
+    return { value: `{ ${items.join(', ')} }`, endIndex: i };
+}
+
+function formatKey(tokens: Token[]): string {
+    return tokens.map(t => t.value).join('');
+}
+
+function printNodes(nodes: TOMLNode[]): string {
+    const lines: string[] = [];
+    let kvBuffer: TOMLNode[] = [];
+
+    const flushBuffer = () => {
+        if (kvBuffer.length === 0) return;
+
+        // Calculate alignment
+        let maxKeyLen = 0;
+        kvBuffer.forEach(n => {
+            if (n.key) maxKeyLen = Math.max(maxKeyLen, n.key.length);
+        });
+
+        kvBuffer.forEach(n => {
+            const padding = ' '.repeat(maxKeyLen - n.key!.length);
+            lines.push(`${n.key}${padding} = ${n.value}` + (n.comment ? ` ${n.comment}` : ''));
+        });
+        kvBuffer = [];
+    };
+
+    nodes.forEach(node => {
+        if (node.type === 'KeyValuePair') {
+            kvBuffer.push(node);
+        } else {
+            flushBuffer();
+            if (node.type === 'TableHeader') {
+                if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+                lines.push(`[${node.key}]` + (node.comment ? ` ${node.comment}` : ''));
+            } else if (node.type === 'ArrayTableHeader') {
+                if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+                lines.push(`[[${node.key}]]` + (node.comment ? ` ${node.comment}` : ''));
+            } else if (node.type === 'Comment') {
+                lines.push(node.raw!);
+            } else if (node.type === 'Empty') {
+                if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+            }
+        }
+    });
+    flushBuffer();
+
+    // Ensure single newline at end
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return lines.join('\n') + '\n';
 }
