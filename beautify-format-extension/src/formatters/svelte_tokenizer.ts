@@ -316,8 +316,6 @@ export class SvelteTokenizer {
                 const exprLine = this.line;
                 const exprCol = this.col;
                 const exprText = this.readExpression();
-                // Treat spread as an attribute without value? Or dedicated token?
-                // Let's treat it as AttributeName for formatting purposes (it's self contained)
                 tokens.push({ type: TokenType.AttributeName, text: exprText, line: exprLine, col: exprCol });
             } else {
                 // Attribute Name
@@ -349,11 +347,11 @@ export class SvelteTokenizer {
                                 tokens.push({ type: TokenType.AttributeValue, text: val, line: valLine, col: valCol });
                             } else if (quote === '"' || quote === "'") {
                                 this.advance(1);
-                                val += quote;
+                                // val += quote; // REMOVED: Don't include quotes
                                 while (this.pos < this.input.length) {
                                     const c = this.input[this.pos];
                                     if (c === quote) {
-                                        val += c;
+                                        // val += c; // REMOVED
                                         this.advance(1);
                                         break;
                                     }
