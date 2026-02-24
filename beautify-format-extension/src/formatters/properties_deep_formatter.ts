@@ -8,6 +8,7 @@ export function formatPropertiesDeep(text: string): string {
     interface Property {
         key: string;
         value: string;
+        noSeparator?: boolean;
     }
 
     // Buffer to hold properties for alignment
@@ -26,9 +27,13 @@ export function formatPropertiesDeep(text: string): string {
         // Output formatted lines
         blockBuffer.forEach(item => {
             const padding = ' '.repeat(maxKeyLen - item.key.length);
-            // Standard format: key = value
-            // Align =
-            formattedLines.push(`${item.key}${padding} = ${item.value}`);
+            if (item.noSeparator) {
+                formattedLines.push(item.key);
+            } else {
+                // Standard format: key = value
+                // Align =
+                formattedLines.push(`${item.key}${padding} = ${item.value}`);
+            }
         });
 
         blockBuffer = [];
@@ -73,6 +78,7 @@ export function formatPropertiesDeep(text: string): string {
 
         let key: string;
         let value: string;
+        let noSeparator = false;
 
         if (keyEndIdx !== -1) {
             key = trimmed.substring(0, keyEndIdx).trim();
@@ -91,6 +97,7 @@ export function formatPropertiesDeep(text: string): string {
         } else {
             key = trimmed;
             value = '';
+            noSeparator = true;
         }
 
         // Handle multiline values
@@ -109,9 +116,11 @@ export function formatPropertiesDeep(text: string): string {
              // Add to value with indent
              value += '\n    ' + nextLine;
              currentLineTrimmed = nextLine;
+             // If we have continuation, it definitely has value or continuation of syntax
+             noSeparator = false;
         }
 
-        blockBuffer.push({ key, value });
+        blockBuffer.push({ key, value, noSeparator });
     }
 
     flushBuffer();

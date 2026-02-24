@@ -84,7 +84,7 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
         return 'astro';
     }
 
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    if (trimmed.startsWith('{') || (trimmed.startsWith('[') && !/^\s*\[[a-zA-Z0-9._-]+\]/.test(trimmed))) {
         // IPYNB heuristic
         if (trimmed.includes('"cells"') && trimmed.includes('"nbformat"')) {
             return 'ipynb';
@@ -185,23 +185,51 @@ export function detectFormat(text: string, languageId: string): 'json' | 'jsonc'
     if (
         trimmed.startsWith('---') ||
         (/^\s*-\s+.+/m.test(trimmed) && !trimmed.includes('{')) ||
-        (trimmed.startsWith('#') && !trimmed.includes('{')) ||
+        (trimmed.startsWith('#') && !trimmed.includes('{') && (trimmed.includes(': ') || /^\s*-/m.test(trimmed))) ||
         (/^[a-z0-9_-]+:\s+.+/im.test(trimmed) && !trimmed.includes('{'))
     ) {
         return 'yaml';
     }
 
-    // Properties heuristic (Check before INI/ENV as it's more specific if comments are !)
-    if (/^[!#]/.test(trimmed) && !trimmed.startsWith('#!')) {
-         if (trimmed.includes('!') || (/^[a-z0-9._-]+\s*[=:]\s*.+/im.test(trimmed) && !trimmed.startsWith('['))) {
+    // Properties heuristic (Check after YAML/SASS, before INI/ENV)
+    // Check if it has ! comments or key separator : (INI uses : too, but properties keys often have dots)
+    // Check for "key = value" where key has dots, which is very typical for properties and rare for others.
+    if (
+        (/^[!#]/.test(trimmed) && !trimmed.startsWith('#!')) || // Starts with comment
+        (/^[a-z0-9._-]+\s*[:=]\s*.+/im.test(trimmed) && !/^\s*\[/.test(trimmed)) // Has assignment, no section
+    ) {
+        // Disambiguate from INI/ENV
+        // If it has !, it's definitely Properties (INI uses ; or #)
+        if (trimmed.includes('!') && /^\s*!/m.test(trimmed)) return 'properties';
+
+        // If keys have dots, prefer Properties over ENV/INI
+        if (/^[a-z0-9_-]+\.[a-z0-9._-]+\s*[:=]/im.test(trimmed)) return 'properties';
+
+        // If separator is :, prefer Properties over ENV (ENV is =)
+        // However, INI allows : too. If no [section] is present, INI vs Properties is ambiguous.
+        // But VS Code generally uses .properties for simple key-value files more often than .ini without sections.
+        // If simple key=value without quotes and keys are lowercase, could be anything.
+        // Let's rely on previous checks. If we are here, it matches generic key-value pattern.
+        // We return 'properties' if it matches the pattern and wasn't caught by others.
+        // But we must be careful not to consume simple ENV.
+        // ENV usually has UPPERCASE_KEYS.
+        if (/[a-z]/.test(trimmed) && !/^[A-Z_0-9]+\s*=/m.test(trimmed)) {
              return 'properties';
-         }
+        }
+        // If it matches specifically properties comment !
+        if (/^\s*!/m.test(trimmed)) return 'properties';
+
+        // If we have comments with # and key=value, and NOT YAML structure
+        // YAML requires space after colon? Properties doesn't.
+        // If it matches key=value, unlikely to be YAML (YAML is key: value).
+        // Check for key=value, but avoid capturing ENV (ALL_CAPS=...)
+        if (/^[a-zA-Z0-9._-]+\s*=\s*.+/m.test(trimmed) && !/^[A-Z_0-9]+\s*=/m.test(trimmed)) return 'properties';
     }
 
     // ENV heuristic
     if (
         (trimmed.startsWith('#') && !trimmed.includes('{') && !trimmed.includes('[') && /^[A-Z_]+=/m.test(trimmed)) ||
-        /^(export\s+)?[A-Z_][A-Z0-9_]*\s*=\s*/im.test(trimmed)
+        (/^(export\s+)?[A-Z_][A-Z0-9_]*\s*=\s*/im.test(trimmed) && !/^\s*\[/.test(trimmed))
     ) {
         return 'env';
     }

@@ -81,6 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
     register('beautify-format.formatGitConfig', 'gitconfig');
     register('beautify-format.formatEditorConfig', 'editorconfig');
     register('beautify-format.formatLog', 'log');
+    register('beautify-format.formatProperties', 'properties');
 
     // Markup
     register('beautify-format.formatMarkdown', 'markdown');
@@ -165,6 +166,7 @@ export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml' | 'svg' |
     else if (format === 'gitconfig') await Misc.handleGitConfig(editor, text);
     else if (format === 'editorconfig') await Misc.handleEditorConfig(editor, text);
     else if (format === 'log') await Misc.handleLog(editor, text);
+    else if (format === 'properties') await Misc.handleProperties(editor, text);
 
     // Markup
     else if (format === 'markdown') await Markup.handleMarkdown(editor, text);
