@@ -103,4 +103,26 @@ public class Regression
     public void Process<T>(List<T> items)
     {
     }
+
+    public void NewFeatures()
+    {
+        // Switch Statement Indentation
+        int x = 10;
+        switch (x)
+        {
+            case 10:
+                Console.WriteLine("Ten");
+                break;
+            default:
+                Console.WriteLine("Other");
+                break;
+        }
+
+        // List Initializer
+        var list = new List<int> { 1, 2, 3, 4, 5 };
+
+        // Attribute on method
+        [Obsolete]
+        void LocalFunction() { }
+    }
 }
