@@ -17,4 +17,6 @@
     <café id="unicode" type="beverage">
         <description>Unicode tag name test</description>
     </café>
+    <inlineTest>Short text</inlineTest>
+    <multiLineClosingTest attr1="val1" attr2="val2" attr3="val3" long="very long value to force wrap..........................................................." />
 </root>

@@ -6,6 +6,7 @@ interface XMLFormattingOptions {
     sortAttributes?: boolean;
     printWidth?: number;
     preserveWhitespace?: boolean;
+    spaceBeforeSelfClose?: boolean;
 }
 
 export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): string {
@@ -14,6 +15,7 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
     const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
     const printWidth = options.printWidth || 120;
     const sortAttributes = options.sortAttributes !== false; // Default true
+    const spaceBeforeSelfClose = options.spaceBeforeSelfClose !== false; // Default true
 
     const tokenizer = new XMLTokenizer(xml);
     const tokens = tokenizer.tokenize();
@@ -39,7 +41,6 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                 const t = tokens[j];
                 if (t.type === TokenType.TagEnd || t.type === TokenType.TagSelfClose) {
                     tagEndToken = t;
-                    i = j; // Advance main loop
                     break;
                 } else if (t.type === TokenType.AttributeName) {
                     const name = t.text;
@@ -74,13 +75,15 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                 });
             }
 
-            // Format Open Tag
             const selfClosing = tagEndToken?.type === TokenType.TagSelfClose;
-            const closingStr = selfClosing ? '/>' : '>';
+            // Add space before /> if requested (for single line)
+            const closingStrSingleLine = selfClosing ? (spaceBeforeSelfClose ? ' />' : '/>') : '>';
+            // For multi-line, closing tag is on new line, aligned. usually just /> or >
+            const closingStrMultiLine = selfClosing ? '/>' : '>';
 
             let tagLine = `<${tagName}`;
 
-            // Try single line first
+            // Try single line attributes first
             let singleLineAttrs = '';
             for (const attr of attributes) {
                 singleLineAttrs += ` ${attr.name}`;
@@ -89,10 +92,55 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                 }
             }
 
-            const totalLen = (getIndent(indentLevel) + tagLine + singleLineAttrs + closingStr).length;
+            const totalLen = (getIndent(indentLevel) + tagLine + singleLineAttrs + closingStrSingleLine).length;
+            const hasAttributes = attributes.length > 0;
+            const forceMultiLineAttrs = hasAttributes && totalLen > printWidth;
 
-            if (attributes.length > 0 && totalLen > printWidth) {
-                // Multi-line mode
+            // Check for inline content (Text only)
+            let isInline = false;
+            let inlineContent = '';
+            let consumedTextToken = false;
+            let nextTokenIndex = j + 1;
+
+            if (!selfClosing && !forceMultiLineAttrs) {
+                if (nextTokenIndex < tokens.length) {
+                    const nextToken = tokens[nextTokenIndex];
+                    if (nextToken.type === TokenType.Text) {
+                         // Check if followed by closing tag
+                         if (nextTokenIndex + 1 < tokens.length) {
+                             const closingToken = tokens[nextTokenIndex + 1];
+                             if (closingToken.type === TokenType.TagClose) {
+                                 const closingName = closingToken.text.replace(/^<\//, '').replace(/>$/, '').trim();
+                                 if (closingName === tagName) {
+                                     const textContent = nextToken.text.trim();
+                                     if (!textContent.includes('\n')) {
+                                         const inlineLen = (getIndent(indentLevel) + tagLine + singleLineAttrs + closingStrSingleLine + textContent + closingToken.text).length;
+                                         if (inlineLen <= printWidth) {
+                                             isInline = true;
+                                             inlineContent = textContent;
+                                             consumedTextToken = true;
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                    } else if (nextToken.type === TokenType.TagClose) {
+                        // Empty content <tag></tag>
+                        const closingName = nextToken.text.replace(/^<\//, '').replace(/>$/, '').trim();
+                        if (closingName === tagName) {
+                             const inlineLen = (getIndent(indentLevel) + tagLine + singleLineAttrs + closingStrSingleLine + nextToken.text).length;
+                             if (inlineLen <= printWidth) {
+                                 isInline = true;
+                                 inlineContent = '';
+                                 consumedTextToken = false;
+                             }
+                        }
+                    }
+                }
+            }
+
+            if (forceMultiLineAttrs) {
+                // Multi-line attributes mode
                 formattedLines.push(getIndent(indentLevel) + tagLine);
                 for (const attr of attributes) {
                     let attrStr = ` ${attr.name}`;
@@ -101,13 +149,25 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                     }
                     formattedLines.push(getIndent(indentLevel + 1) + attrStr.trim());
                 }
-                formattedLines.push(getIndent(indentLevel) + closingStr);
+                formattedLines.push(getIndent(indentLevel) + closingStrMultiLine);
             } else {
-                // Single line mode
-                formattedLines.push(getIndent(indentLevel) + tagLine + singleLineAttrs + closingStr);
+                // Single line attributes mode
+                if (isInline) {
+                    const closingTagIndex = nextTokenIndex + (consumedTextToken ? 1 : 0);
+                    const closingTag = tokens[closingTagIndex].text;
+                    formattedLines.push(getIndent(indentLevel) + tagLine + singleLineAttrs + closingStrSingleLine + inlineContent + closingTag);
+
+                    i = closingTagIndex;
+                    continue;
+                } else {
+                     formattedLines.push(getIndent(indentLevel) + tagLine + singleLineAttrs + closingStrSingleLine);
+                }
             }
 
-            if (!selfClosing) {
+            // Advance i to end of attributes loop
+            i = j;
+
+            if (!selfClosing && !isInline) {
                 indentLevel++;
             }
 
@@ -118,10 +178,6 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
         } else if (token.type === TokenType.Text) {
             const trimmed = token.text.trim();
             if (trimmed.length > 0) {
-                // Indent text content
-                // If it contains newlines, maybe split and indent each line?
-                // Or just print as block?
-                // For Deep Formatting, usually we want text indented.
                 formattedLines.push(getIndent(indentLevel) + trimmed);
             }
         } else if (token.type === TokenType.Comment || token.type === TokenType.CDATA || token.type === TokenType.Doctype || token.type === TokenType.PI) {
