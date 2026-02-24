@@ -39,6 +39,11 @@ export function formatCSharpDeep(text: string): string {
     let inAutoProp = false;
     let inAttribute = false;
 
+    // Track if a block has active case indentation
+    // true = we indented for a case label, so we must dedent before next case or block end
+    let blockCaseStack: boolean[] = [];
+    let potentialCaseLabel = false;
+
     // Helper to get current indent string
     const getIndent = (offset: number = 0) => {
         return INDENT_STRING.repeat(Math.max(0, indentLevel + offset));
@@ -60,10 +65,6 @@ export function formatCSharpDeep(text: string): string {
             let offset = 0;
             const trimmedStr = str.trim();
 
-            if (trimmedStr.startsWith('case') || trimmedStr.startsWith('default') || (trimmedStr.endsWith(':') && !trimmedStr.startsWith('?') && !trimmedStr.startsWith('//') && !trimmedStr.startsWith('/*'))) {
-                // switch case labels de-indent
-                offset = -1;
-            }
             if (trimmedStr.startsWith('.') || trimmedStr.startsWith('?.')) {
                 // Method chaining indent
                 offset = 1;
@@ -86,7 +87,7 @@ export function formatCSharpDeep(text: string): string {
 
     const isTypeLike = (t: Token) => {
          if (t.type === TokenType.Keyword) {
-             return ['bool', 'byte', 'char', 'decimal', 'double', 'float', 'int', 'long', 'object', 'sbyte', 'short', 'string', 'uint', 'ulong', 'ushort', 'void', 'dynamic', 'var'].includes(t.text);
+             return ['bool', 'byte', 'char', 'decimal', 'double', 'float', 'int', 'long', 'object', 'sbyte', 'short', 'string', 'uint', 'ulong', 'ushort', 'void', 'dynamic', 'var', 'record', 'struct', 'enum', 'class', 'interface', 'delegate', 'task', 'span', 'memory'].includes(t.text);
          }
          if (t.type === TokenType.Identifier) {
              // Heuristic: PascalCase usually Types.
@@ -158,11 +159,28 @@ export function formatCSharpDeep(text: string): string {
             }
         }
 
+        // --- Switch Case Indentation Adjustments (Pre-Append) ---
+        if (token.text === 'case' || token.text === 'default') {
+            if (blockCaseStack.length > 0 && blockCaseStack[blockCaseStack.length - 1]) {
+                indentLevel = Math.max(0, indentLevel - 1);
+                blockCaseStack[blockCaseStack.length - 1] = false;
+            }
+            potentialCaseLabel = true;
+        }
+
         // --- Application of Newline ---
 
         if (token.text === '}') {
             if (!inAutoProp) {
+                // Dedent for case content if active
+                if (blockCaseStack.length > 0 && blockCaseStack[blockCaseStack.length - 1]) {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    blockCaseStack[blockCaseStack.length - 1] = false; // Popped later
+                }
+
                 indentLevel = Math.max(0, indentLevel - 1);
+
+                if (blockCaseStack.length > 0) blockCaseStack.pop();
             } else {
                 indentLevel = Math.max(0, indentLevel - 1);
             }
@@ -334,9 +352,6 @@ export function formatCSharpDeep(text: string): string {
             if (token.text === '{') spaceBefore = true;
         }
 
-        // DEBUG:
-        // if (token.text === 'b') console.log(`DEBUG: b prev=< angleDepth=${angleDepth} spaceBefore=${spaceBefore}`);
-
         // Semicolon Attachment Logic
         if (token.text === ';') {
             if (currentLine === '' && outputLines.length > 0) {
@@ -358,6 +373,7 @@ export function formatCSharpDeep(text: string): string {
             if (isAutoPropContext) {
                 inAutoProp = true;
             } else {
+                blockCaseStack.push(false); // Push block context
                 if (!forceNewline && !preserveNewline) {
                     // Inline
                 } else {
@@ -375,8 +391,35 @@ export function formatCSharpDeep(text: string): string {
         } else if (token.text === ';') {
             if (parenDepth === 0 && !inAutoProp) pushLine();
         } else if (token.text === ':') {
-            if (prev && (prev.text === 'case' || prev.text === 'default')) {
+            if (potentialCaseLabel) {
+                // Determine if it's really a case label or part of ternary
+                let isTernary = false;
+                let k = i - 1;
+                while (k >= 0) {
+                    const t = meaningfulTokens[k];
+                    if (t.text === 'case' || t.text === 'default') break;
+                    if (t.text === ';' || t.text === '{' || t.text === '}') { isTernary = true; break; } // Shouldn't happen if potentialCaseLabel is managed right
+                    if (t.text === '?') { isTernary = true; break; }
+                    k--;
+                }
+
+                if (!isTernary) {
+                    pushLine();
+                    if (blockCaseStack.length > 0) {
+                        indentLevel++;
+                        blockCaseStack[blockCaseStack.length - 1] = true;
+                    }
+                    potentialCaseLabel = false;
+                } else {
+                    // Ternary colon
+                }
+            } else if (prev && (prev.text === 'case' || prev.text === 'default')) {
+                // Fallback for empty case "case:"
                 pushLine();
+                if (blockCaseStack.length > 0) {
+                    indentLevel++;
+                    blockCaseStack[blockCaseStack.length - 1] = true;
+                }
             }
         } else if (token.type === TokenType.Preprocessor) {
             pushLine();

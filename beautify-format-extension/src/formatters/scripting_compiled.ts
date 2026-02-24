@@ -1535,8 +1535,8 @@ export async function handleCSharp(editor: vscode.TextEditor, text: string) {
     // Validate C# using custom resilient validator
     validationMessage = validateCSharp(text);
 
-    // Deep Formatting logic
     try {
+        // Deep Formatting
         formatted = formatCSharpDeep(text);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format C#: ${error.message}`);
