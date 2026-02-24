@@ -62,9 +62,10 @@ export class GraphQLTokenizer {
                 continue;
             }
 
-            // Whitespace (Space, Tab)
+            // Whitespace (Space, Tab, Comma treated as whitespace in GraphQL effectively, but kept as Punctuator usually.
+            // Wait, GraphQL spec says comma is insignificant. But often kept as token for formatting.)
+            // The previous tokenizer treated comma as Punctuator. Let's keep it that way for formatter control.
             if (/[ \t]/.test(char)) {
-                let start = this.pos;
                 let text = '';
                 while (this.pos < this.code.length && /[ \t]/.test(this.code[this.pos])) {
                     text += this.code[this.pos];
@@ -78,9 +79,12 @@ export class GraphQLTokenizer {
             // Comment (#...)
             if (char === '#') {
                 let start = this.pos;
-                let end = this.code.indexOf('\n', this.pos + 1);
-                if (end === -1) end = this.code.length;
-                else if (this.code[end - 1] === '\r') end--;
+                let end = this.pos;
+                while (end < this.code.length) {
+                    const c = this.code[end];
+                    if (c === '\n' || c === '\r') break;
+                    end++;
+                }
 
                 const text = this.code.substring(start, end);
                 tokens.push({ type: TokenType.Comment, text, line: this.line, col: this.col });
@@ -142,8 +146,7 @@ export class GraphQLTokenizer {
                     this.col++;
                 }
                 const text = this.code.substring(start, this.pos);
-                // Adjust col/pos back because loop overshoots by 1 logically (wait, no, loop stops at first non-matching char)
-                // But we already incremented pos/col inside loop.
+                // Note: pos/col already updated in loop
                 tokens.push({ type: TokenType.Name, text, line: this.line, col: this.col - text.length });
                 continue;
             }
@@ -171,19 +174,35 @@ export class GraphQLTokenizer {
             }
         }
         this.pos += str.length;
+        // Correction: The loop above iterates characters but doesn't advance this.pos
+        // because we want to calculate line/col changes.
+        // But `this.pos += str.length` is done at the end.
+        // Wait! If I do `this.pos += str.length` AFTER the loop, and the loop iterates `str`,
+        // that's correct for `pos`. But `col` updates inside loop are correct.
+
+        // Wait, the logic `this.pos += str.length` adds length to `pos`.
+        // But the loop just calculates `line` and `col`.
+        // However, if `str` was consumed by `substring` from `this.code`, `this.pos` was pointing to start of `str`.
+        // So `this.pos` needs to move by `str.length`. Correct.
+
+        // Wait, in the loop:
+        // `this.pos` is NOT updated. `this.col` IS updated.
+        // At end, `this.pos` is updated.
+        // This is correct.
     }
 
     private matchString(): string | null {
         let currentPos = this.pos;
         if (this.code[currentPos] !== '"') return null;
-        currentPos++;
+        currentPos++; // Skip first quote
 
         while (currentPos < this.code.length) {
             const char = this.code[currentPos];
             if (char === '\\') {
-                currentPos += 2;
+                currentPos += 2; // Skip escape sequence
                 continue;
             } else if (char === '"') {
+                // Found closing quote
                 return this.code.substring(this.pos, currentPos + 1);
             } else if (char === '\n' || char === '\r') {
                 // GraphQL strings cannot contain unescaped newline
@@ -228,7 +247,14 @@ export class GraphQLTokenizer {
         // Integer part
         if (this.code[currentPos] === '0') {
             currentPos++;
-            if (currentPos < this.code.length && /\d/.test(this.code[currentPos])) return null; // Leading zero not allowed unless single 0
+            if (currentPos < this.code.length && /\d/.test(this.code[currentPos])) {
+                // Leading zero not allowed unless single 0.
+                // But let's be lenient for tokenizer, just consume it.
+                // Or follow spec strictly? Spec says no leading zeros.
+                // If we return null, it might be parsed as something else or Unknown.
+                // Let's consume it as number anyway for fault tolerance.
+                while (currentPos < this.code.length && /\d/.test(this.code[currentPos])) currentPos++;
+            }
         } else {
             while (currentPos < this.code.length && /\d/.test(this.code[currentPos])) currentPos++;
         }
@@ -236,20 +262,28 @@ export class GraphQLTokenizer {
         // Fraction part
         if (currentPos < this.code.length && this.code[currentPos] === '.') {
             currentPos++;
-            if (currentPos >= this.code.length || !/\d/.test(this.code[currentPos])) return null; // Must have digit after dot
+            if (currentPos >= this.code.length || !/\d/.test(this.code[currentPos])) {
+                 // Trailing dot is invalid, but maybe we can return what we have so far?
+                 // If we return null, it might be re-parsed.
+                 // Let's assume valid number stops before dot if dot is not followed by digit?
+                 // No, standard says it must have digit.
+                 return null;
+            }
             while (currentPos < this.code.length && /\d/.test(this.code[currentPos])) currentPos++;
         }
 
         // Exponent part
         if (currentPos < this.code.length && (this.code[currentPos] === 'e' || this.code[currentPos] === 'E')) {
+            let ePos = currentPos;
             currentPos++;
             if (currentPos < this.code.length && (this.code[currentPos] === '+' || this.code[currentPos] === '-')) currentPos++;
-            if (currentPos >= this.code.length || !/\d/.test(this.code[currentPos])) return null; // Must have digit after exponent
+            if (currentPos >= this.code.length || !/\d/.test(this.code[currentPos])) {
+                // Invalid exponent
+                return null;
+            }
             while (currentPos < this.code.length && /\d/.test(this.code[currentPos])) currentPos++;
         }
 
-        // Ensure strictly valid number format, but tokenizer can be loose if needed.
-        // Returning substring
         return this.code.substring(this.pos, currentPos);
     }
 }
