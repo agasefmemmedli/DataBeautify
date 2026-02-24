@@ -46,7 +46,7 @@ export class PHPTokenizer {
         '+', '-', '*', '/', '%', '**', '=', '&', '|', '^', '~', '!',
         '<', '>', '<=', '>=', '==', '!=', '===', '!==', '<=>',
         '<<', '>>', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '<<=', '>>=',
-        '.', '.=', '->', '=>', '::', '??', '??=', '?:', '...'
+        '.', '.=', '->', '?->', '=>', '::', '??', '??=', '?:', '...', '?', ':'
     ]);
 
     constructor(code: string) {
@@ -223,21 +223,24 @@ export class PHPTokenizer {
                     continue;
                 }
 
-                // Identifier / Keyword
-                const idMatch = remaining.match(/^[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*/);
+                // Identifier / Keyword (including qualified names e.g. App\Models\User)
+                // Match identifier start, then optionally (backslash + identifier part)*
+                // Also match root namespace identifier (e.g. \Exception)
+                const idMatch = remaining.match(/^(\\?[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)+/);
+
                 if (idMatch) {
                     const text = idMatch[0];
-                    const type = PHPTokenizer.KEYWORDS.has(text.toLowerCase()) ? TokenType.Keyword : TokenType.Identifier;
+                    // Check if it is a keyword (only if no backslashes)
+                    const isKeyword = !text.includes('\\') && PHPTokenizer.KEYWORDS.has(text.toLowerCase());
+                    const type = isKeyword ? TokenType.Keyword : TokenType.Identifier;
+
                     tokens.push(this.createToken(type, text));
                     this.advance(text.length);
                     continue;
                 }
 
-                // Backslash for namespaces (e.g. \App\Models)
+                // Standalone backslash (e.g. end of line or invalid syntax)
                 if (char === '\\') {
-                     // Usually part of identifier in PHP but tokenized separately or as part of qualified name
-                     // Let's treat as Punctuation/Operator or extend Identifier regex
-                     // Simplest: Operator or Unknown, let Formatter handle spacing
                      tokens.push(this.createToken(TokenType.Operator, '\\'));
                      this.advance(1);
                      continue;

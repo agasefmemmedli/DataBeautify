@@ -17,10 +17,15 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
     const formattedLines: string[] = [];
     let currentLineTokens: Token[] = [];
     let indentLevel = 0;
+    let parenDepth = 0;
+    let lineStartParenDepth = 0;
+
+    // Track brace context to enforce PSR-12
+    let pendingBraceContext: 'class' | 'function' | 'control' | null = null;
 
     const peekNextCode = (index: number): Token | null => {
         for (let j = index + 1; j < tokens.length; j++) {
-            if (tokens[j].type !== TokenType.Comment) {
+            if (tokens[j].type !== TokenType.Comment && tokens[j].type !== TokenType.Whitespace) {
                 return tokens[j];
             }
         }
@@ -32,6 +37,17 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const prev = i > 0 ? tokens[i - 1] : null;
+
+        // Determine context for upcoming brace
+        if (token.type === TokenType.Keyword) {
+            if (['class', 'interface', 'trait'].includes(token.text)) {
+                pendingBraceContext = 'class';
+            } else if (token.text === 'function') {
+                pendingBraceContext = 'function';
+            } else if (['if', 'else', 'elseif', 'while', 'do', 'for', 'foreach', 'switch', 'try', 'catch', 'finally'].includes(token.text)) {
+                pendingBraceContext = 'control';
+            }
+        }
 
         // Handle Imports
         if (token.type === TokenType.Keyword && token.text === 'use' && (!prev || prev.text !== ')')) {
@@ -50,12 +66,12 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
 
             if (hasSemicolon) {
                 if (currentLineTokens.length > 0) {
-                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                     currentLineTokens = [];
                 }
 
                 const stmtStr = stmtTokens.map(t => t.text).join(' ')
-                    .replace(/\s*\\\s*/g, '\\')
+                    .replace(/\s*\\\s*/g, '\\') // Remove spaces around backslash in imports
                     .replace(/\s*;\s*$/, ';')
                     .replace(/^use\s+/, 'use ');
 
@@ -77,7 +93,7 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
         // Handle Inline HTML
         if (token.type === TokenType.InlineHTML) {
             if (currentLineTokens.length > 0) {
-                flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+                flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                 currentLineTokens = [];
             }
             formattedLines.push(token.text);
@@ -88,14 +104,14 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
         if (token.text === '}') {
             indentLevel = Math.max(0, indentLevel - 1);
             if (currentLineTokens.length > 0) {
-                flushLine(formattedLines, currentLineTokens, indentLevel + 1, indentString);
+                flushLine(formattedLines, currentLineTokens, indentLevel + 1, indentString, lineStartParenDepth);
                 currentLineTokens = [];
             }
         }
         if (['endif', 'endforeach', 'endwhile', 'endswitch', 'endfor'].includes(token.text)) {
             indentLevel = Math.max(0, indentLevel - 1);
              if (currentLineTokens.length > 0) {
-                flushLine(formattedLines, currentLineTokens, indentLevel + 1, indentString);
+                flushLine(formattedLines, currentLineTokens, indentLevel + 1, indentString, lineStartParenDepth);
                 currentLineTokens = [];
             }
         }
@@ -112,23 +128,54 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
                 if (token.text === 'while' && last.text === '}') safeToFlush = false; // do { } while
 
                 if (safeToFlush) {
-                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                     currentLineTokens = [];
                 }
             } else if (token.text === 'function') {
                 const last = currentLineTokens[currentLineTokens.length - 1];
                 const modifiers = ['public', 'private', 'protected', 'static', 'abstract', 'final', 'function'];
                 if (!modifiers.includes(last.text) && last.text !== '=') {
-                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                     currentLineTokens = [];
                 }
             } else if (['public', 'private', 'protected'].includes(token.text)) {
-                 flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+                 flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                  currentLineTokens = [];
             }
         }
 
+        // Special handling for Opening Brace
+        if (token.text === '{') {
+            if (pendingBraceContext === 'class' || pendingBraceContext === 'function') {
+                // PSR-12: Brace on next line for class/function
+                if (currentLineTokens.length > 0) {
+                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
+                    currentLineTokens = [];
+                }
+                formattedLines.push(getIndent(indentLevel, indentString) + '{');
+                indentLevel++;
+                pendingBraceContext = null;
+                continue;
+            } else {
+                // Control structures or others: Same line
+                currentLineTokens.push(token);
+                indentLevel++;
+
+                // Flush line immediately
+                let flushLevel = indentLevel - 1; // Flush at parent level (the line containing {)
+                flushLine(formattedLines, currentLineTokens, flushLevel, indentString, lineStartParenDepth);
+                currentLineTokens = [];
+                pendingBraceContext = null;
+                continue;
+            }
+        }
+
+        if (currentLineTokens.length === 0) {
+            lineStartParenDepth = parenDepth;
+        }
         currentLineTokens.push(token);
+        if (token.text === '(') parenDepth++;
+        if (token.text === ')') parenDepth--;
 
         // Check if we should flush line
         let shouldFlush = false;
@@ -137,13 +184,8 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
             if (token.text.startsWith('//') || token.text.startsWith('#')) {
                 shouldFlush = true;
             } else if (token.text.includes('\n')) {
-                 // Multiline block comment ends the line?
-                 // Usually yes for clean formatting
                  shouldFlush = true;
             }
-        } else if (token.text === '{') {
-            shouldFlush = true;
-            indentLevel++;
         } else if (token.text === '}') {
             const next = peekNextCode(i);
             if (next && ['else', 'elseif', 'catch', 'finally'].includes(next.text)) {
@@ -179,22 +221,21 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
 
         if (shouldFlush) {
             let flushLevel = indentLevel;
-            if (token.text === '{') flushLevel--;
             if (token.text === ':' && prev && ['case', 'default'].includes(prev.text)) flushLevel--;
 
-            flushLine(formattedLines, currentLineTokens, flushLevel, indentString);
+            flushLine(formattedLines, currentLineTokens, flushLevel, indentString, lineStartParenDepth);
             currentLineTokens = [];
         }
     }
 
     if (currentLineTokens.length > 0) {
-        flushLine(formattedLines, currentLineTokens, indentLevel, indentString);
+        flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
     }
 
     return formattedLines.join('\n');
 }
 
-function flushLine(lines: string[], tokens: Token[], level: number, indentString: string) {
+function flushLine(lines: string[], tokens: Token[], level: number, indentString: string, initialParenDepth: number) {
     if (tokens.length === 0) return;
 
     // Dedent case/default labels
@@ -203,6 +244,8 @@ function flushLine(lines: string[], tokens: Token[], level: number, indentString
     }
 
     let line = '';
+    let currentParenDepth = initialParenDepth;
+
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
         const prev = i > 0 ? tokens[i - 1] : null;
@@ -211,11 +254,14 @@ function flushLine(lines: string[], tokens: Token[], level: number, indentString
             // Ensure space before comment if it's on the same line
             if (t.type === TokenType.Comment) {
                 line += ' ';
-            } else if (needsSpace(prev, t)) {
+            } else if (needsSpace(prev, t, currentParenDepth, tokens)) {
                 line += ' ';
             }
         }
         line += t.text;
+
+        if (t.text === '(') currentParenDepth++;
+        if (t.text === ')') currentParenDepth--;
     }
 
     lines.push(getIndent(level, indentString) + line);
@@ -225,18 +271,39 @@ function getIndent(level: number, indentString: string): string {
     return indentString.repeat(Math.max(0, level));
 }
 
-function needsSpace(prev: Token, curr: Token): boolean {
+function needsSpace(prev: Token, curr: Token, parenDepth: number, lineTokens: Token[]): boolean {
     if (curr.type === TokenType.Comment) return true;
     if (curr.text === ';') return false;
     if (curr.text === ',') return false;
-    if (curr.text === ':') return false;
+
+    if (curr.text === ':') {
+        // Ternary operator needs space ($a ? $b : $c)
+        // Return type (: void) - No space before : (PSR-12 says no space between ) and :)
+        // Named arguments (arg: $val) - No space before :
+        // Switch Case (case 1:) - No space before : (PSR-2)
+
+        if (prev.text === ')') return false; // Return type likely
+
+        // Named args (inside parens)
+        if (parenDepth > 0) return false;
+
+        // Switch Case (check if line started with case/default)
+        if (lineTokens.length > 0 && ['case', 'default'].includes(lineTokens[0].text)) return false;
+
+        // Otherwise assume Ternary
+        return true;
+    }
+
     if (curr.text === ')') return false;
     if (curr.text === ']') return false;
 
     if (prev.text === '(' || prev.text === '[') return false;
-    if (prev.text === '->' || prev.text === '::') return false;
-    if (curr.text === '->' || curr.text === '::') return false;
+    if (prev.text === '->' || prev.text === '::' || prev.text === '?->') return false;
+    if (curr.text === '->' || curr.text === '::' || curr.text === '?->') return false;
     if (prev.text === '!' || prev.text === '...') return false;
+    if (curr.text === '...') return false; // function(...$args)
+
+    if (prev.text === '\\' || curr.text === '\\') return false; // Namespace separator
 
     if (prev.type === TokenType.Operator || curr.type === TokenType.Operator) {
          if (['++', '--'].includes(prev.text) || ['++', '--'].includes(curr.text)) return false;
@@ -245,6 +312,8 @@ function needsSpace(prev: Token, curr: Token): boolean {
 
     if (prev.type === TokenType.Keyword) {
         if (['fn', 'function', 'super', 'this'].includes(prev.text) && curr.text === '(') return false;
+        // PSR-12: method call: $foo->bar().
+        // Keyword 'class', 'extends', 'implements' need spaces.
         return true;
     }
 
@@ -254,7 +323,7 @@ function needsSpace(prev: Token, curr: Token): boolean {
     }
 
     if (prev.text === ',') return true;
-    if (prev.text === ')' && curr.text === '{') return true;
+    if (prev.text === ')' && curr.text === '{') return true; // Control structures: if (...) {
     if (prev.text === '}' && ['else', 'elseif', 'catch', 'finally'].includes(curr.text)) return true;
     if (prev.type === TokenType.OpenTag) return true;
 
