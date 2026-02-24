@@ -100,6 +100,19 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
         if (token.type === TokenType.Unknown && /^[a-zA-Z_$][a-zA-Z0-9_$\-]*$/.test(token.text)) {
             // Treat as unquoted string key/value
              append(`"${token.text}"`);
+        } else if (token.type === TokenType.String) {
+            // Convert single quotes to double quotes
+            const content = token.text;
+            if (content.startsWith("'") && content.endsWith("'")) {
+                const inner = content.substring(1, content.length - 1);
+                // Unescape existing single quotes and escape double quotes
+                const processed = inner
+                    .replace(/\\'/g, "'")
+                    .replace(/"/g, '\\"');
+                append(`"${processed}"`);
+            } else {
+                append(content);
+            }
         } else {
             append(token.text);
         }
