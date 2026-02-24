@@ -1,5 +1,6 @@
 # To-Improve List
 
+- [x] XML (Deep Formatting Implemented)
 - [x] JSON (Deep Formatting Implemented)
 - [x] CSS (Deep Formatting Implemented)
 - [x] SASS (Deep Formatting Implemented)
