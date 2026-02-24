@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Astro (Deep Formatting Implemented)
 - [x] Svelte (Deep Formatting Implemented)
 - [x] CSS (Deep Formatting Implemented)
 - [x] SASS (Deep Formatting Implemented)
