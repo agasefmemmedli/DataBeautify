@@ -101,4 +101,26 @@ if (!formatted.includes('\n  />') && !formatted.includes('\n  >')) {
     }
 }
 
+// 10. Check Mixed Content Preservation (New Feature)
+console.log('Testing Mixed Content Preservation...');
+const mixedContent = '<p>This is <b>bold</b> text.</p>';
+const formattedMixed = formatXMLDeep(mixedContent, {
+    tabSize: 2,
+    insertSpaces: true,
+    printWidth: 80
+});
+
+console.log('Mixed Content Formatted:', formattedMixed);
+
+if (formattedMixed.includes('\n')) {
+    console.error('❌ Mixed content check failed: Should be inline.');
+    process.exit(1);
+}
+if (formattedMixed.trim() !== '<p>This is <b>bold</b> text.</p>') {
+    console.error('❌ Mixed content check failed: Structure changed.');
+    console.error('Expected: <p>This is <b>bold</b> text.</p>');
+    console.error('Actual:   ' + formattedMixed.trim());
+    process.exit(1);
+}
+
 console.log('✅ XML Deep Formatting Verification Passed!');

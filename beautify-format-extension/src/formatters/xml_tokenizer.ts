@@ -213,9 +213,25 @@ export class XMLTokenizer {
                             this.advance(1);
                             while (this.pos < this.input.length) {
                                 const c = this.input[this.pos];
+
+                                // Handle escaped quotes for resilience (e.g. \" inside attribute)
+                                let isEscaped = false;
+                                if (c === quote && this.pos > 0 && this.input[this.pos - 1] === '\\') {
+                                    // Check for even number of backslashes (e.g. \\" is not escaped quote)
+                                    let backslashCount = 0;
+                                    let k = this.pos - 1;
+                                    while (k >= 0 && this.input[k] === '\\') {
+                                        backslashCount++;
+                                        k--;
+                                    }
+                                    if (backslashCount % 2 !== 0) {
+                                        isEscaped = true;
+                                    }
+                                }
+
                                 val += c;
                                 this.advance(1);
-                                if (c === quote) break;
+                                if (c === quote && !isEscaped) break;
                             }
                         } else {
                              // Unquoted?
