@@ -47,6 +47,7 @@ export function formatRubyDeep(text: string): string {
     let output = '';
     let indentLevel = 0;
     let currentLine = '';
+    const blockStack: string[] = [];
 
     const blockKeywords = new Set(['module', 'class', 'def', 'do', 'begin', 'case', 'for']);
     const conditionalKeywords = new Set(['if', 'unless', 'while', 'until']);
@@ -114,9 +115,7 @@ export function formatRubyDeep(text: string): string {
             }
             if (blockKeywords.has(token.text)) {
                  if (token.text === 'do') {
-                     // `do` stays on same line usually, unless multiline needed?
-                     // Standard: method call do ... end
-                     // forceNewline = false;
+                     // `do` stays on same line usually
                  } else {
                      // Check if it's start of line already
                      if (token.precedingNewlines === 0 && prev) {
@@ -248,12 +247,6 @@ export function formatRubyDeep(text: string): string {
                  if (inBlockParams && prev.text === ',') {
                      spaceBefore = true;
                  }
-                 // Remove spaces inside pipes if strictly parameters
-                 // Actually, spaceBefore logic above handles it?
-                 // |x|
-                 // Pipe start: spaceBefore=true (after {). inBlockParams=true.
-                 // x: prev=|. inBlockParams=true. We need spaceBefore=false.
-                 // Correct: "Just started params: |x| -> no space after first pipe" (above)
 
                  // Brackets/Parens
                  if (token.text === '(' || token.text === '[') {
@@ -272,15 +265,13 @@ export function formatRubyDeep(text: string): string {
 
                  // Hash rocket or key: spacing
                  if (prev.text === ':') {
-                     // Check if it was symbol (:sym) or key (key:)
-                     // Tokenizer doesn't distinguish fully, but if it is TokenType.Symbol, it starts with :
-                     // If prev is : (Punctuation/Operator), it might be key: (if we split it) or :sym
-                     // Wait, my tokenizer emits Symbol token for :foo. So prev wouldn't be just ':'.
-                     // If prev is ':', it's likely a hash key ending in colon (if I parsed it that way?)
-                     // My tokenizer parses `key:` as identifier `key` then punctuation `:`.
-                     // So if prev.text is `:`, it is likely end of key.
                      spaceBefore = true;
                  }
+                 // Fix for key: value (Identifier 'key:' followed by 'value')
+                 if (prev.type === TokenType.Identifier && prev.text.endsWith(':')) {
+                     spaceBefore = true;
+                 }
+
                  if (token.type === TokenType.Symbol) {
                      // :foo
                      // Space before unless inside parens/brackets
@@ -289,6 +280,8 @@ export function formatRubyDeep(text: string): string {
                      if (prev.text === ':') spaceBefore = true;
                      // => :value
                      if (prev.text === '=>') spaceBefore = true;
+                     // key: :value (where key: is identifier)
+                     if (prev.type === TokenType.Identifier && prev.text.endsWith(':')) spaceBefore = true;
                  }
              }
 
@@ -304,13 +297,30 @@ export function formatRubyDeep(text: string): string {
         // --- Indent Logic (After processing) ---
         if (token.type === TokenType.Keyword) {
             if (isBlockOpener(token, prev)) {
-                indentLevel++;
+                // Check for double indentation (while ... do)
+                if (token.text === 'do' && blockStack.length > 0) {
+                     const top = blockStack[blockStack.length - 1];
+                     if (['while', 'until', 'for'].includes(top)) {
+                         // Don't indent, don't push
+                     } else {
+                         indentLevel++;
+                         blockStack.push(token.text);
+                     }
+                } else {
+                    indentLevel++;
+                    blockStack.push(token.text);
+                }
             } else if (intermediateKeywords.has(token.text)) {
                 // We dedented before printing, now indent for the body
                 indentLevel++;
+            } else if (endKeywords.has(token.text)) {
+                blockStack.pop();
             }
         } else if (token.text === '{' || token.text === '[' || token.text === '(') {
             indentLevel++;
+            blockStack.push(token.text);
+        } else if (token.text === '}' || token.text === ']' || token.text === ')') {
+            blockStack.pop();
         }
 
         prevIsUnary = isUnary;
