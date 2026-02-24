@@ -6,157 +6,269 @@ export interface JSONFormatOptions {
     isJSONC?: boolean;
 }
 
+type ASTNode =
+    | { type: 'Object', properties: Property[], comments?: string[] }
+    | { type: 'Array', items: ASTNode[], comments?: string[] }
+    | { type: 'Literal', value: string, tokenType: TokenType, comments?: string[] };
+
+interface Property {
+    key: string;
+    value: ASTNode;
+    comments?: string[];
+}
+
 export function formatJSONDeep(text: string, options?: JSONFormatOptions): string {
     const tokenizer = new JSONTokenizer(text);
-    const tokens = tokenizer.tokenize();
+    const rawTokens = tokenizer.tokenize();
 
-    if (tokens.length === 0) return '';
+    if (rawTokens.length === 0) return '';
 
-    // Configuration
     const tabSize = options?.tabSize || 2;
     const insertSpaces = options?.insertSpaces !== false;
     const isJSONC = options?.isJSONC || false;
     const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
 
-    const meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace);
-
-    let outputLines: string[] = [];
-    let currentLine = '';
-    let indentLevel = 0;
-
-    const pushLine = () => {
-        if (currentLine.trim() !== '') {
-            outputLines.push(currentLine);
-        }
-        currentLine = '';
-    };
-
-    const append = (str: string) => {
-        if (currentLine === '') {
-            currentLine = indentString.repeat(indentLevel) + str;
-        } else {
-            currentLine += str;
-        }
-    };
-
-    // State for Fault Tolerance
-    const stack: ('OBJECT' | 'ARRAY')[] = [];
+    // Phase 1: Sanitize / Repair Stream
+    const tokens: Token[] = [];
+    const meaningfulTokens = rawTokens.filter(t => t.type !== TokenType.Whitespace);
 
     for (let i = 0; i < meaningfulTokens.length; i++) {
         const token = meaningfulTokens[i];
         const next = i + 1 < meaningfulTokens.length ? meaningfulTokens[i+1] : null;
-        const prev = i > 0 ? meaningfulTokens[i-1] : null;
 
-        // --- Pre-Processing / Fault Tolerance Checks ---
+        // Strict Mode: Skip comments
+        if (!isJSONC && token.type === TokenType.Comment) {
+            continue;
+        }
 
-        // 1. Missing Comma: Value followed by Value/Key
-        // Value tokens: String, Number, Boolean, Null, BraceClose, BracketClose
+        // Missing Comma Injection
         const isValue = (t: Token) => [TokenType.String, TokenType.Number, TokenType.Boolean, TokenType.Null, TokenType.BraceClose, TokenType.BracketClose].includes(t.type);
         const isStartOfValue = (t: Token) => [TokenType.String, TokenType.Number, TokenType.Boolean, TokenType.Null, TokenType.BraceOpen, TokenType.BracketOpen].includes(t.type);
 
-        if (prev && isValue(prev) && isStartOfValue(token)) {
-            // Detected missing comma: "a": 1 "b": 2
-            append(',');
-            pushLine();
-        }
-
-        // 2. Trailing Comma: Comma followed by Close
-        if (token.type === TokenType.Comma && next && (next.type === TokenType.BraceClose || next.type === TokenType.BracketClose)) {
-            if (!isJSONC) {
-                // Skip this comma for Strict JSON
-                continue;
+        if (tokens.length > 0) {
+            const last = tokens[tokens.length - 1];
+            // If last was a value, and current is start of value (and not a comment), insert comma
+            if (isValue(last) && isStartOfValue(token) && token.type !== TokenType.Comment) {
+                tokens.push({ type: TokenType.Comma, text: ',', line: last.line, col: last.col + 1 });
             }
         }
 
-        // --- Indentation Logic (Pre-Append) ---
-        if (token.type === TokenType.BraceClose || token.type === TokenType.BracketClose) {
-            indentLevel = Math.max(0, indentLevel - 1);
-            if (currentLine.trim() !== '') pushLine();
+        // Trailing Comma Removal (Strict Mode)
+        if (!isJSONC && token.type === TokenType.Comma && next && (next.type === TokenType.BraceClose || next.type === TokenType.BracketClose)) {
+            continue;
         }
 
-        // --- Spacing Logic ---
-        let spaceBefore = false;
-
-        if (currentLine !== '') {
-            if (token.type === TokenType.Colon) {
-                spaceBefore = false; // "key": value
-            } else if (prev && prev.type === TokenType.Colon) {
-                spaceBefore = true; // "key": value
-            } else if (token.type === TokenType.Comma) {
-                spaceBefore = false; // "value",
-            } else if (token.type === TokenType.Comment) {
-                 spaceBefore = true;
-            } else if (token.type === TokenType.BraceOpen || token.type === TokenType.BracketOpen) {
-                 if (prev && prev.type === TokenType.Colon) spaceBefore = true;
-                 else if (prev && (prev.type === TokenType.BraceOpen || prev.type === TokenType.BracketOpen)) spaceBefore = false;
-                 else spaceBefore = true; // space before { if not start
-            }
-        }
-
-        if (spaceBefore && currentLine !== '') append(' ');
-
-        // --- Append Token ---
-        // Quote keys if missing (simple heuristic)
-        if (token.type === TokenType.Unknown && /^[a-zA-Z_$][a-zA-Z0-9_$\-]*$/.test(token.text)) {
-            // Treat as unquoted string key/value
-             append(`"${token.text}"`);
-        } else if (token.type === TokenType.String) {
-            // Convert single quotes to double quotes
-            const content = token.text;
+        // String Normalization
+        let processedToken = { ...token };
+        if (token.type === TokenType.String) {
+             const content = token.text;
             if (content.startsWith("'") && content.endsWith("'")) {
                 const inner = content.substring(1, content.length - 1);
                 // Unescape existing single quotes and escape double quotes
-                const processed = inner
-                    .replace(/\\'/g, "'")
-                    .replace(/"/g, '\\"');
-                append(`"${processed}"`);
-            } else {
-                append(content);
+                const processed = inner.replace(/\\'/g, "'").replace(/"/g, '\\"');
+                processedToken.text = `"${processed}"`;
             }
-        } else {
-            append(token.text);
+        } else if (token.type === TokenType.Unknown && /^[a-zA-Z_$][a-zA-Z0-9_$\-]*$/.test(token.text)) {
+             // Unquoted key
+             processedToken.type = TokenType.String;
+             processedToken.text = `"${token.text}"`;
         }
 
-        // --- Post-Append Logic / State Update ---
-        if (token.type === TokenType.BraceOpen) {
-            stack.push('OBJECT');
-            // Check for empty object
-            if (next && next.type === TokenType.BraceClose) {
-                // Empty object {}, don't push line
-            } else {
-                indentLevel++;
-                pushLine();
+        tokens.push(processedToken);
+    }
+
+    // Phase 2: Build AST (Simple Recursive Descent)
+    let current = 0;
+
+    function parseValue(): ASTNode | null {
+        if (current >= tokens.length) return null;
+
+        // Collect comments before value
+        const comments: string[] = [];
+        while (current < tokens.length && tokens[current].type === TokenType.Comment) {
+            comments.push(tokens[current].text);
+            current++;
+        }
+        if (current >= tokens.length) return null;
+
+        const t = tokens[current];
+
+        if (t.type === TokenType.BraceOpen) {
+            current++;
+            const properties: Property[] = [];
+            while (current < tokens.length && tokens[current].type !== TokenType.BraceClose) {
+                if (tokens[current].type === TokenType.Comma) {
+                    current++;
+                    continue;
+                }
+
+                // Parse Property
+                // Key Comments
+                let keyComments: string[] = [];
+                while (current < tokens.length && tokens[current].type === TokenType.Comment) {
+                     keyComments.push(tokens[current].text);
+                     current++;
+                }
+                if (current >= tokens.length) break;
+
+                if (tokens[current].type === TokenType.BraceClose) break;
+
+                const keyToken = tokens[current];
+                let key = keyToken.text;
+                if (keyToken.type !== TokenType.String) {
+                     key = `"${keyToken.text}"`;
+                }
+                current++;
+
+                // Expect Colon
+                if (current < tokens.length && tokens[current].type === TokenType.Colon) {
+                    current++;
+                }
+
+                // Value
+                const value = parseValue();
+                if (value) {
+                    properties.push({ key, value, comments: keyComments }); // attach comments to property
+                } else {
+                     break;
+                }
             }
-        } else if (token.type === TokenType.BracketOpen) {
-            stack.push('ARRAY');
-            // Check for empty array
-            if (next && next.type === TokenType.BracketClose) {
-                // Empty array [], don't push line
-            } else {
-                indentLevel++;
-                pushLine();
+            if (current < tokens.length && tokens[current].type === TokenType.BraceClose) {
+                current++;
             }
-        } else if (token.type === TokenType.BraceClose || token.type === TokenType.BracketClose) {
-            stack.pop();
-            // Ensure newline after block close if followed by something other than comma/close
-            if (next && next.type !== TokenType.Comma && next.type !== TokenType.BraceClose && next.type !== TokenType.BracketClose) {
-                 pushLine();
+            return { type: 'Object', properties, comments };
+        } else if (t.type === TokenType.BracketOpen) {
+            current++;
+            const items: ASTNode[] = [];
+            while (current < tokens.length && tokens[current].type !== TokenType.BracketClose) {
+                if (tokens[current].type === TokenType.Comma) {
+                    current++;
+                    continue;
+                }
+                const val = parseValue();
+                if (val) {
+                    items.push(val);
+                } else {
+                    if (tokens[current].type === TokenType.BracketClose) break;
+                    current++;
+                }
             }
-        } else if (token.type === TokenType.Comma) {
-            pushLine();
-        } else if (token.type === TokenType.Comment) {
-            pushLine();
-        } else if (token.type === TokenType.Colon) {
-            // No newline
+            if (current < tokens.length && tokens[current].type === TokenType.BracketClose) {
+                current++;
+            }
+            return { type: 'Array', items, comments };
         } else {
-            // Values
-            if (next && (next.type === TokenType.BraceClose || next.type === TokenType.BracketClose)) {
-                pushLine();
-            }
+            // Literal
+            current++;
+            return { type: 'Literal', value: t.text, tokenType: t.type, comments };
         }
     }
 
-    if (currentLine.trim() !== '') pushLine();
+    const roots: ASTNode[] = [];
+    while (current < tokens.length) {
+        // Skip trailing commas at root level
+        if (tokens[current].type === TokenType.Comma) {
+            current++;
+            continue;
+        }
+        const root = parseValue();
+        if (root) roots.push(root);
+        else current++;
+    }
 
-    return outputLines.join('\n');
+    // Phase 3: Print
+    function measure(node: ASTNode): number {
+        if (node.comments && node.comments.length > 0) return 9999; // Force expansion if comments exist
+
+        if (node.type === 'Literal') return node.value.length;
+        if (node.type === 'Array') {
+            let len = 2; // []
+            for (let i = 0; i < node.items.length; i++) {
+                len += measure(node.items[i]);
+                if (i < node.items.length - 1) len += 2;
+            }
+            return len;
+        }
+        if (node.type === 'Object') {
+            let len = 2; // {}
+            for (let i = 0; i < node.properties.length; i++) {
+                if (node.properties[i].comments && node.properties[i].comments!.length > 0) return 9999;
+                len += node.properties[i].key.length + 2; // key:
+                len += measure(node.properties[i].value);
+                if (i < node.properties.length - 1) len += 2;
+            }
+            return len;
+        }
+        return 0;
+    }
+
+    function isComplex(node: ASTNode): boolean {
+        if (node.comments && node.comments.length > 0) return true;
+        if (node.type === 'Literal') return false;
+        if (node.type === 'Array') {
+            return node.items.some(isComplex);
+        }
+        if (node.type === 'Object') {
+             return node.properties.some(p => isComplex(p.value) || (p.comments && p.comments.length > 0));
+        }
+        return false;
+    }
+
+    function print(node: ASTNode, indent: number): string {
+        const space = indentString.repeat(indent);
+
+        let commentStr = '';
+        if (node.comments) {
+            for (const c of node.comments) {
+                commentStr += `${space}${c}\n`;
+            }
+        }
+
+        if (node.type === 'Literal') {
+            return commentStr + space + node.value;
+        }
+
+        const len = measure(node);
+        const shouldCompact = len < 80 && !isComplex(node);
+
+        if (shouldCompact) {
+            if (node.type === 'Array') {
+                const items = node.items.map(item => print(item, 0).trim()).join(', ');
+                return commentStr + space + `[${items}]`;
+            } else if (node.type === 'Object') {
+                const props = node.properties.map(p => `${p.key}: ${print(p.value, 0).trim()}`).join(', ');
+                return commentStr + space + `{ ${props} }`;
+            }
+        }
+
+        // Expanded
+        if (node.type === 'Array') {
+            if (node.items.length === 0) return commentStr + space + '[]';
+            const itemLines = node.items.map(item => print(item, indent + 1));
+            return commentStr + space + '[\n' + itemLines.join(',\n') + '\n' + space + ']';
+        } else if (node.type === 'Object') {
+            if (node.properties.length === 0) return commentStr + space + '{}';
+            const propLines = node.properties.map(p => {
+                let pComment = '';
+                if (p.comments) {
+                    for (const c of p.comments) {
+                        pComment += indentString.repeat(indent + 1) + c + '\n';
+                    }
+                }
+
+                let valStr = print(p.value, indent + 1);
+                // If value has comments attached to it (not property), force newline
+                if (p.value.comments && p.value.comments.length > 0) {
+                     return pComment + indentString.repeat(indent + 1) + `${p.key}:\n${valStr}`;
+                } else {
+                     return pComment + indentString.repeat(indent + 1) + `${p.key}: ${valStr.trimStart()}`;
+                }
+            });
+            return commentStr + space + '{\n' + propLines.join(',\n') + '\n' + space + '}';
+        }
+
+        return '';
+    }
+
+    return roots.map(r => print(r, 0)).join('\n');
 }

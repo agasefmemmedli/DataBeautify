@@ -1,5 +1,6 @@
 # To-Improve List
 
+- [x] JSON (Deep Formatting Implemented)
 - [x] CSS (Deep Formatting Implemented)
 - [x] SASS (Deep Formatting Implemented)
 - [x] Dart (Deep Formatting Implemented)
