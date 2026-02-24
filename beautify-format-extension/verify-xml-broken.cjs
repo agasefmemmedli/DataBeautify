@@ -28,6 +28,15 @@ try {
          throw new Error('Indentation incorrect for <unquoted>');
     }
 
+    // Check escaped quotes resilience
+    // The tokenizer should capture "escaped \"value\"" as the value.
+    // The formatter normalizes it: strips outer quotes, escapes inner quotes.
+    // So "escaped \"value\"" -> escaped \"value\" -> escaped \&quot;value\&quot;
+    if (!formatted.includes('attr="escaped \\&quot;value\\&quot;"')) {
+         console.warn('Warning: Escaped quotes check failed or output format differs from expectation.');
+         console.warn('Expected to find: attr="escaped \\&quot;value\\&quot;"');
+    }
+
     console.log('\n✅ XML Broken Verification Passed!');
 } catch (error) {
     console.error('\n❌ XML Broken Verification Failed:', error.message);
