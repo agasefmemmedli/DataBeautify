@@ -6,7 +6,9 @@ enum ContextType {
     Paren,       // ( ... )
     Array,       // [ ... ]
     Switch,      // switch ... { ... }
+    Case,        // case ...:
     Generic,     // < ... >
+    Control,     // if, guard, while
 }
 
 interface Context {
@@ -16,23 +18,55 @@ interface Context {
     isSwitch?: boolean;
 }
 
+class TokenStream {
+    private tokens: Token[];
+    private pos: number = 0;
+
+    constructor(tokens: Token[]) {
+        this.tokens = tokens;
+    }
+
+    peek(offset: number = 0): Token | null {
+        if (this.pos + offset < this.tokens.length) {
+            return this.tokens[this.pos + offset];
+        }
+        return null;
+    }
+
+    current(): Token | null {
+        return this.peek(0);
+    }
+
+    advance(): Token | null {
+        if (this.pos < this.tokens.length) {
+            return this.tokens[this.pos++];
+        }
+        return null;
+    }
+}
+
 export function formatSwiftDeep(text: string): string {
     const tokenizer = new SwiftTokenizer(text);
-    const tokens = tokenizer.tokenize();
+    const rawTokens = tokenizer.tokenize();
+    // Filter whitespace but keep newlines
+    const tokens = rawTokens.filter(t => t.type !== TokenType.Whitespace);
 
     if (tokens.length === 0) return '';
 
+    const stream = new TokenStream(tokens);
     const outputLines: string[] = [];
     let currentLine = '';
     let indentLevel = 0;
-
     const TAB = '    ';
 
     const contextStack: Context[] = [];
     const currentContext = () => contextStack.length > 0 ? contextStack[contextStack.length - 1] : null;
 
-    let importBuffer: string[] = [];
+    let newlinePending = 0; // 0=none, 1=newline, 2=blank line
+    let spacePending = false;
 
+    // Import Sorting
+    let importBuffer: string[] = [];
     const flushImports = () => {
         if (importBuffer.length > 0) {
             importBuffer.sort();
@@ -42,323 +76,392 @@ export function formatSwiftDeep(text: string): string {
     };
 
     const pushLine = () => {
-        const trimmed = currentLine.trim();
+        const trimmed = currentLine.trimEnd();
         if (trimmed.length > 0) {
             if (trimmed.startsWith('import ') && indentLevel === 0) {
-                importBuffer.push(currentLine);
+                importBuffer.push(trimmed);
             } else {
                 flushImports();
-                outputLines.push(currentLine);
+                outputLines.push(trimmed);
             }
         } else {
-            flushImports();
-            if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
+             flushImports();
+             if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
                 outputLines.push('');
             }
         }
         currentLine = '';
+        spacePending = false;
     };
 
-    const append = (str: string) => {
-        if (currentLine === '') {
-            currentLine = TAB.repeat(indentLevel);
-        }
-        currentLine += str;
-    };
+    const getIndentString = (level: number) => TAB.repeat(Math.max(0, level));
 
-    let processedTokens: Token[] = [];
-    for (const t of tokens) {
-        if (t.type !== TokenType.Whitespace) {
-            processedTokens.push(t);
-        }
-    }
+    let lastToken: Token | null = null;
+    let penultimateToken: Token | null = null; // For deeper lookbehind
 
-    for (let i = 0; i < processedTokens.length; i++) {
-        const token = processedTokens[i];
-        const nextToken = i + 1 < processedTokens.length ? processedTokens[i + 1] : null;
-        const prevToken = i > 0 ? processedTokens[i - 1] : null;
+    while (stream.current()) {
+        const token = stream.current()!;
+        const nextToken = stream.peek(1);
 
+        // --- Newline Handling ---
         if (token.type === TokenType.Newline) {
-            pushLine();
+            const count = (token.text.match(/\n/g) || []).length;
+            newlinePending = Math.max(newlinePending, count > 1 ? 2 : 1);
+            stream.advance();
             continue;
+        }
+
+        if (newlinePending > 0) {
+            pushLine();
+            if (newlinePending > 1 && outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
+                outputLines.push('');
+            }
+            newlinePending = 0;
+
+            // Calculate Indent for New Line
+            let lineIndent = indentLevel;
+
+            // Adjust indent for closing tokens at start of line
+            if (token.text === '}') {
+                const ctx = currentContext();
+                if (ctx && (ctx.type === ContextType.Block || ctx.type === ContextType.Switch)) {
+                    lineIndent = ctx.indent;
+                } else {
+                     lineIndent = Math.max(0, indentLevel - 1);
+                }
+            } else if (token.text === ']' || token.text === ')') {
+                const ctx = currentContext();
+                if (ctx && (ctx.type === ContextType.Array || ctx.type === ContextType.Paren)) {
+                    lineIndent = ctx.indent;
+                } else {
+                    lineIndent = Math.max(0, indentLevel - 1);
+                }
+            } else if (token.text === 'case' || token.text === 'default') {
+                const ctx = currentContext();
+                if (ctx && ctx.type === ContextType.Switch) {
+                    lineIndent = ctx.indent + 1;
+                }
+            } else {
+                // Check if we are inside a Control statement (guard/if conditions)
+                const ctx = currentContext();
+                if (ctx && ctx.type === ContextType.Control) {
+                    lineIndent = ctx.indent + 1;
+                }
+            }
+
+            currentLine = getIndentString(lineIndent);
         }
 
         // --- Context Management ---
 
+        // Control Flow Start
+        if (['if', 'guard', 'while'].includes(token.text)) {
+            contextStack.push({
+                type: ContextType.Control,
+                startLine: outputLines.length,
+                indent: indentLevel
+            });
+        }
+
+        // Control Flow End (else or {)
+        if (token.text === 'else') {
+             const ctx = currentContext();
+             if (ctx && ctx.type === ContextType.Control) {
+                 contextStack.pop();
+             }
+        }
+
         if (token.text === '{') {
-            let isSwitch = false;
-            let k = i - 1;
-            while (k >= 0) {
-                if (processedTokens[k].type === TokenType.Newline) break;
-                if (processedTokens[k].type === TokenType.Keyword && processedTokens[k].text === 'switch') {
-                    isSwitch = true;
-                    break;
-                }
-                k--;
+            // If previous was Control context, pop it (end of conditions)
+            const ctx = currentContext();
+            if (ctx && ctx.type === ContextType.Control) {
+                contextStack.pop();
             }
 
+            let isSwitch = false;
+            // Check if last non-newline token was 'switch'
+            if (lastToken && lastToken.text === 'switch') isSwitch = true;
+            // Or if line starts with switch
+            if (currentLine.trim().startsWith('switch')) isSwitch = true;
+
             contextStack.push({
-                type: ContextType.Block,
+                type: isSwitch ? ContextType.Switch : ContextType.Block,
                 startLine: outputLines.length,
                 indent: indentLevel,
                 isSwitch: isSwitch
             });
 
-            if (currentLine.trim().length > 0) append(' ');
-            append('{');
+            if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+            currentLine += '{';
+            spacePending = false;
             indentLevel++;
+
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
             continue;
         }
 
         if (token.text === '}') {
-            const ctx = currentContext();
-            if (ctx && ctx.type === ContextType.Block) {
-                contextStack.pop();
-                // Restore indent to context base indent
+            const ctx = contextStack.pop();
+            if (ctx) {
                 indentLevel = ctx.indent;
             } else {
                 indentLevel = Math.max(0, indentLevel - 1);
             }
 
-            if (currentLine.trim().length > 0) {
-                pushLine();
-            }
-            append('}');
+            if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+            currentLine += '}';
 
-            if (nextToken && ['else', 'catch'].includes(nextToken.text)) {
-                append(' ');
-            } else if (nextToken && [')', ']', ',', '.', ';'].includes(nextToken.text)) {
-                // no newline
-            } else {
-                // newline
+            spacePending = true; // Default space after }
+            if (nextToken && [')', ']', ',', ';', '.'].includes(nextToken.text)) {
+                spacePending = false;
             }
+
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
             continue;
         }
 
         if (token.text === '(' || token.text === '[') {
+            const isParen = token.text === '(';
             contextStack.push({
-                type: token.text === '(' ? ContextType.Paren : ContextType.Array,
+                type: isParen ? ContextType.Paren : ContextType.Array,
                 startLine: outputLines.length,
                 indent: indentLevel
             });
-            append(token.text);
+
+            if (spacePending) {
+                if (lastToken && lastToken.type === TokenType.Identifier) {
+                     if (['if', 'while', 'for', 'switch', 'guard', 'catch'].includes(lastToken.text)) {
+                         // Space
+                     } else {
+                         spacePending = false;
+                     }
+                } else if (lastToken && ['init', 'subscript'].includes(lastToken.text)) {
+                    spacePending = false;
+                } else if (lastToken && (lastToken.text === ']' || lastToken.text === ')')) {
+                     spacePending = false;
+                }
+            }
+
+            if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+            currentLine += token.text;
+            spacePending = false;
+
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
             continue;
         }
 
         if (token.text === ')' || token.text === ']') {
-            const ctx = currentContext();
-            if (ctx && (ctx.type === ContextType.Paren || ctx.type === ContextType.Array)) {
-                contextStack.pop();
-            }
-            append(token.text);
+            const ctx = contextStack.pop();
+
+            currentLine += token.text;
+            spacePending = false;
+
+            if (nextToken && nextToken.text === '{') spacePending = true;
+            if (nextToken && nextToken.text === '->') spacePending = true;
+
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
             continue;
         }
 
-        // Generics < >
-        if (token.text === '<') {
-            let isGeneric = false;
-            // Strict Heuristic: Only if prev is Capitalized Identifier (Type) or Definition Keyword
-            if (prevToken) {
-                if (prevToken.type === TokenType.Identifier) {
-                    const firstChar = prevToken.text[0];
-                    if (firstChar >= 'A' && firstChar <= 'Z') {
-                        isGeneric = true;
-                    } else {
-                        // Check if definition (func foo<T>)
-                        let prevPrevIndex = i - 2;
-                        while (prevPrevIndex >= 0 && processedTokens[prevPrevIndex].type === TokenType.Newline) prevPrevIndex--;
-                        const prevPrev = prevPrevIndex >= 0 ? processedTokens[prevPrevIndex] : null;
-                        if (prevPrev && ['func', 'init', 'subscript', 'typealias', 'associatedtype'].includes(prevPrev.text)) {
-                            isGeneric = true;
-                        }
-                    }
-                } else if (['Array', 'Dictionary', 'Set', 'Optional'].includes(prevToken.text)) { // Just in case Tokenizer types differ
-                    isGeneric = true;
-                }
-            }
+        // --- Keywords & Identifiers ---
 
-            if (isGeneric) {
-                contextStack.push({
-                    type: ContextType.Generic,
-                    startLine: outputLines.length,
-                    indent: indentLevel
-                });
-                append('<');
-                continue;
-            }
-        }
-
-        if (token.text === '>' || token.text === '>>') {
-            const ctx = currentContext();
-            if (ctx && ctx.type === ContextType.Generic) {
-                if (token.text === '>') {
-                    contextStack.pop();
-                    append('>');
-                    continue;
-                } else if (token.text === '>>') {
-                    contextStack.pop();
-                    const ctx2 = currentContext();
-                    if (ctx2 && ctx2.type === ContextType.Generic) {
-                        contextStack.pop();
-                    }
-                    append('>>');
-                    continue;
-                }
-            }
-        }
-
-        if (token.type === TokenType.Keyword && (token.text === 'case' || token.text === 'default')) {
-            const ctx = currentContext();
-            if (ctx && ctx.type === ContextType.Block && ctx.isSwitch) {
-                // Indent case at base + 1
-                indentLevel = ctx.indent + 1;
-
-                if (currentLine.trim().length > 0) pushLine();
-                append(token.text);
-                continue;
-            }
+        if (token.text === 'case' || token.text === 'default') {
+             if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+             currentLine += token.text;
+             spacePending = true; // space required (case pattern)
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
         }
 
         if (token.text === ':') {
-            append(':');
-            const ctx = currentContext();
-            if (ctx && ctx.type === ContextType.Block && ctx.isSwitch) {
-                if (/^\s*(case|default)\b/.test(currentLine)) {
-                    indentLevel++;
-                }
-            }
-            append(' ');
-            continue;
+             currentLine += ':';
+             spacePending = true;
+
+             // Indentation adjustment for case body
+             const ctx = currentContext();
+             if (ctx && ctx.type === ContextType.Switch) {
+                 if (/^\s*(case|default)\b/.test(currentLine)) {
+                     indentLevel = ctx.indent + 2;
+                 }
+             }
+
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
         }
 
         if (token.text === ',') {
-            append(',');
-            append(' ');
+            currentLine += ',';
+            spacePending = true;
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
             continue;
+        }
+
+        if (token.text === ';') {
+            currentLine += ';';
+            spacePending = true;
+            newlinePending = 1;
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
+            continue;
+        }
+
+        // --- Generics ---
+        if (token.text === '<') {
+             let isGeneric = false;
+             if (lastToken) {
+                 if (['Array', 'Dictionary', 'Set', 'Optional', 'Result'].includes(lastToken.text)) isGeneric = true;
+                 else if (lastToken.type === TokenType.Identifier) {
+                     // Heuristic: Capitalized -> Type -> Generic
+                     if (/^[A-Z]/.test(lastToken.text)) isGeneric = true;
+
+                     // Exception: `func foo<T>`
+                     // Check penultimate token
+                     if (penultimateToken && ['func', 'init', 'subscript', 'typealias'].includes(penultimateToken.text)) {
+                         isGeneric = true;
+                     }
+                 }
+             }
+
+             if (isGeneric) {
+                 contextStack.push({ type: ContextType.Generic, startLine: 0, indent: 0 });
+                 currentLine += '<';
+                 spacePending = false;
+             } else {
+                 // Operator <
+                 if (currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+                 currentLine += '<';
+                 spacePending = true;
+             }
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
+        }
+
+        if (token.text === '>' || token.text === '>>') {
+             const ctx = currentContext();
+             if (ctx && ctx.type === ContextType.Generic) {
+                 if (token.text === '>>') {
+                     contextStack.pop();
+                     const ctx2 = currentContext();
+                     if (ctx2 && ctx2.type === ContextType.Generic) {
+                         contextStack.pop();
+                     }
+                     currentLine += '>>';
+                 } else {
+                     contextStack.pop();
+                     currentLine += '>';
+                 }
+                 spacePending = true;
+                 if (nextToken && nextToken.text === '(') spacePending = false;
+             } else {
+                 // Operator >
+                 if (currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+                 currentLine += token.text;
+                 spacePending = true;
+             }
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
+        }
+
+        // --- Operators ---
+        if (token.type === TokenType.Operator) {
+            let isBinary = true;
+            if (['!', '?'].includes(token.text)) isBinary = false;
+
+            if (lastToken) {
+                 if (['(', '[', '{', ',', ':', '=', 'return', 'case', 'if', 'while', 'guard'].includes(lastToken.text)) isBinary = false;
+                 if (lastToken.type === TokenType.Operator) isBinary = false;
+            } else {
+                isBinary = false;
+            }
+
+            if (token.text === '->') isBinary = true;
+
+            if (isBinary) {
+                if (currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+                currentLine += token.text;
+                spacePending = true;
+            } else {
+                if (['?', '!'].includes(token.text)) {
+                     // Exclude keywords except `try`
+                     const isKeyword = lastToken && lastToken.type === TokenType.Keyword;
+                     const allowedKeyword = lastToken && ['try', 'self'].includes(lastToken.text);
+
+                     if (lastToken && (lastToken.type === TokenType.Identifier || (isKeyword && allowedKeyword) || [')', ']', '}', '"'].includes(lastToken.text))) {
+                        // Postfix
+                        currentLine += token.text;
+                        spacePending = true;
+                        if (nextToken && (nextToken.text === '.' || nextToken.text === ')' || nextToken.text === ',' || nextToken.text === '(')) spacePending = false;
+                     } else {
+                        // Prefix (e.g. !isEmpty)
+                        if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+                        currentLine += token.text;
+                        spacePending = false;
+                     }
+                } else {
+                    if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+                    currentLine += token.text;
+                    spacePending = false;
+                }
+            }
+
+            stream.advance();
+            penultimateToken = lastToken;
+            lastToken = token;
+            continue;
+        }
+
+        // --- Default Token Handling ---
+
+        if (token.text === '.') {
+             currentLine += '.';
+             spacePending = false;
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
         }
 
         if (token.type === TokenType.Comment) {
-            if (currentLine.trim().length > 0) append(' ');
-            append(token.text);
-            continue;
+             if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+             currentLine += token.text;
+             spacePending = true;
+             stream.advance();
+             penultimateToken = lastToken;
+             lastToken = token;
+             continue;
         }
 
-        // --- Spacing Logic ---
-        let spaceBefore = false;
+        if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+        currentLine += token.text;
 
-        if (prevToken) {
-            const prevIsKeyword = prevToken.type === TokenType.Keyword;
-            const prevIsIdentifier = prevToken.type === TokenType.Identifier;
-            const prevIsNumber = prevToken.type === TokenType.Number;
-            const prevIsString = prevToken.type === TokenType.String;
-            const prevIsOperator = prevToken.type === TokenType.Operator;
-            // Punctuation: ( ) [ ] { } , : ; @ #
-            const prevIsPunctuation = prevToken.type === TokenType.Punctuation;
-            const prevIsAttribute = prevToken.type === TokenType.Attribute;
+        spacePending = true;
+        if (token.text === '.') spacePending = false;
 
-            const currIsKeyword = token.type === TokenType.Keyword;
-            const currIsIdentifier = token.type === TokenType.Identifier;
-            const currIsNumber = token.type === TokenType.Number;
-            const currIsString = token.type === TokenType.String;
-            const currIsOperator = token.type === TokenType.Operator;
-            const currIsPunctuation = token.type === TokenType.Punctuation;
-            const currIsAttribute = token.type === TokenType.Attribute;
-
-            // 1. Words/Literals spacing
-            if ((prevIsKeyword || prevIsIdentifier || prevIsNumber || prevIsString || prevIsAttribute) &&
-                (currIsKeyword || currIsIdentifier || currIsNumber || currIsString || currIsAttribute)) {
-                spaceBefore = true;
-            }
-
-            // 2. Operators
-            if (currIsOperator) {
-                if (['.', '?', '!'].includes(token.text)) {
-                    spaceBefore = false;
-                } else if (token.text === '->') {
-                    spaceBefore = true;
-                } else {
-                    // Binary vs Unary
-                    if (prevIsOperator) spaceBefore = false;
-                    else if (['(', '[', '{', ',', ':', '='].includes(prevToken.text)) spaceBefore = false;
-                    else if (prevIsKeyword && !['return', 'case', 'throw', 'if', 'guard', 'while', 'for', 'in', 'as', 'is', 'try'].includes(prevToken.text)) spaceBefore = false;
-                    else spaceBefore = true;
-                }
-            }
-
-            if (prevIsOperator) {
-                if (['.', '?', '!'].includes(prevToken.text)) {
-                    spaceBefore = false;
-                } else if (prevToken.text === '->') {
-                    spaceBefore = true;
-                } else {
-                    // Check if prev was unary
-                    let prevPrevIndex = i - 2;
-                    while (prevPrevIndex >= 0 && processedTokens[prevPrevIndex].type === TokenType.Newline) prevPrevIndex--;
-                    const prevPrev = prevPrevIndex >= 0 ? processedTokens[prevPrevIndex] : null;
-
-                    let prevWasUnary = false;
-                    if (prevPrev) {
-                        if (prevPrev.type === TokenType.Operator || ['(', '[', '{', ',', ':', '='].includes(prevPrev.text)) {
-                            prevWasUnary = true;
-                        }
-                    } else {
-                        prevWasUnary = true;
-                    }
-
-                    if (prevWasUnary) spaceBefore = false;
-                    else spaceBefore = true;
-                }
-            }
-
-            // 3. Punctuation
-            if (token.text === '{') spaceBefore = true;
-
-            if (['}', ')', ']'].includes(prevToken.text)) {
-                if (currIsIdentifier || currIsKeyword || currIsOperator || currIsNumber || currIsString) {
-                    spaceBefore = true;
-                    // Exceptions
-                    if (prevToken.text === ']' && token.text === '[') spaceBefore = false; // arr[0][1]
-                    if (prevToken.text === ']' && (token.text === '.' || token.text === '?' || token.text === '!')) spaceBefore = false;
-                }
-            }
-
-            if (token.text === '[') {
-                if (prevIsIdentifier) spaceBefore = false;
-                else if ([']', ')'].includes(prevToken.text)) spaceBefore = false;
-                else spaceBefore = true;
-            }
-
-            // Overrides
-
-            // case .active
-            if (prevToken.text === 'case' && token.text === '.') spaceBefore = true;
-
-            // guard !
-            if (token.text === '!' && ['guard', 'if', 'while', 'return'].includes(prevToken.text)) spaceBefore = true;
-
-            // Generics
-            const ctx = currentContext();
-            if (ctx && ctx.type === ContextType.Generic) {
-                if (prevToken.text === '<') spaceBefore = false;
-                if (token.text === '>') spaceBefore = false;
-                if (token.text === '>>') spaceBefore = false;
-            }
-
-            // Attributes
-            if (currIsAttribute && currentLine.trim().length > 0) pushLine();
-        }
-
-        if (spaceBefore && currentLine.length > 0 && !currentLine.endsWith(' ')) {
-            append(' ');
-        }
-
-        append(token.text);
-
-        if (token.text === '->') append(' ');
+        stream.advance();
+        penultimateToken = lastToken;
+        lastToken = token;
     }
 
     pushLine();
-    flushImports();
-
+    flushImports(); // Ensure imports are flushed if file ends without newline
     return outputLines.join('\n');
 }
