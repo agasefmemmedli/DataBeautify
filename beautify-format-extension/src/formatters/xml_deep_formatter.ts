@@ -88,7 +88,7 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
             for (const attr of attributes) {
                 singleLineAttrs += ` ${attr.name}`;
                 if (attr.value !== undefined) {
-                    singleLineAttrs += `=${attr.value}`;
+                    singleLineAttrs += `=${normalizeAttributeValue(attr.value)}`;
                 }
             }
 
@@ -145,7 +145,7 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                 for (const attr of attributes) {
                     let attrStr = ` ${attr.name}`;
                     if (attr.value !== undefined) {
-                        attrStr += `=${attr.value}`;
+                        attrStr += `=${normalizeAttributeValue(attr.value)}`;
                     }
                     formattedLines.push(getIndent(indentLevel + 1) + attrStr.trim());
                 }
@@ -186,4 +186,19 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
     }
 
     return formattedLines.join('\n');
+}
+
+function normalizeAttributeValue(value: string): string {
+    if (!value) return '""';
+
+    let content = value;
+    // Check if quoted and strip quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        content = value.substring(1, value.length - 1);
+    }
+
+    // Escape double quotes inside content to &quot;
+    // Note: If content already has escaped quotes or entities, we preserve them but ensure " is escaped
+    const escaped = content.replace(/"/g, '&quot;');
+    return `"${escaped}"`;
 }

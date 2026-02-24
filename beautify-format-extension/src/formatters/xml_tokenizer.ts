@@ -207,8 +207,9 @@ export class XMLTokenizer {
                         const valLine = this.line;
                         const valCol = this.col;
                         const quote = this.input[this.pos];
-                        let val = quote;
+                        let val = '';
                         if (quote === '"' || quote === "'") {
+                            val = quote;
                             this.advance(1);
                             while (this.pos < this.input.length) {
                                 const c = this.input[this.pos];

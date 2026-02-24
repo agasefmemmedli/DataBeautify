@@ -1,0 +1,11 @@
+<root>
+    <unquoted id=123 class=main />
+    <single-quoted type='test' />
+    <mixed attr="v'a'l" attr2='v"a"l' />
+    <boolean checked disabled />
+    <nested-quotes attr="escaped \"value\"" />
+    <mixed-content>
+        Here is some text with <bold>bold</bold> inside.
+    </mixed-content>
+    <broken-attributes invalid=val!ue />
+</root>
