@@ -26,6 +26,18 @@ enabled = true
 [clients]
 data = [ ["gamma", "delta"], [1, 2] ]
 
+# Nested Multiline Array Test
+nested_data = [
+  [
+    "item1",
+    "item2"
+  ],
+  [
+    "item3",
+    "item4"
+  ]
+]
+
 # Line breaks are OK when inside arrays
 hosts = [
   "alpha",

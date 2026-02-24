@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] TOML (Deep Formatting Implemented)
 - [x] HTML (Deep Formatting Implemented)
 - [x] Markdown (Deep Formatting Implemented)
 - [x] CSV (Deep Formatting Implemented)
