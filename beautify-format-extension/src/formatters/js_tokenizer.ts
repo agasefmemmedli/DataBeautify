@@ -4,7 +4,10 @@ export type TokenType =
     | 'LineComment'
     | 'BlockComment'
     | 'String'
-    | 'Template' // Full template string or parts
+    | 'Template' // Full template string
+    | 'TemplateHead' // `...${
+    | 'TemplateMiddle' // }...${
+    | 'TemplateTail' // }...`
     | 'Regex'
     | 'Keyword'
     | 'Identifier'
@@ -50,6 +53,10 @@ export function tokenize(text: string): Token[] {
         pos += value.length;
     };
 
+    // Stack to track template brace levels
+    const templateStack: number[] = [];
+    let braceLevel = 0;
+
     while (pos < len) {
         const char = text[pos];
 
@@ -92,6 +99,53 @@ export function tokenize(text: string): Token[] {
             }
         }
 
+        // Check for template closing brace '}'
+        if (char === '}' && templateStack.length > 0 && braceLevel === templateStack[templateStack.length - 1]) {
+            let value = '}';
+            let i = pos + 1;
+            let foundEnd = false;
+
+            while (i < len) {
+                if (text[i] === '\\') {
+                    value += text[i];
+                    if (i + 1 < len) {
+                        value += text[i + 1];
+                        i += 2;
+                        continue;
+                    }
+                }
+
+                // Check for start of new expression: ${
+                if (text[i] === '$' && i + 1 < len && text[i + 1] === '{') {
+                    value += '${';
+                    addToken('TemplateMiddle', value);
+                    foundEnd = true;
+                    // We stay in the same stack level as we re-entered expression immediately
+                    break;
+                }
+
+                // Check for end of template: `
+                if (text[i] === '`') {
+                    value += '`';
+                    templateStack.pop(); // We are done with this template
+                    addToken('TemplateTail', value);
+                    foundEnd = true;
+                    break;
+                }
+
+                value += text[i];
+                i++;
+            }
+
+            if (foundEnd) continue;
+
+            if (i >= len) {
+                 templateStack.pop();
+                 addToken('TemplateTail', value);
+                 continue;
+            }
+        }
+
         // Strings
         if (char === "'" || char === '"') {
             let value = char;
@@ -115,16 +169,12 @@ export function tokenize(text: string): Token[] {
             continue;
         }
 
-        // Template Literals (Basic handling - treats whole string as one token if possible, or handles parts)
-        // For deep formatting, simply tokenizing the backtick content is often enough if we don't need to format *inside* the template expressions deeply right now.
-        // But strict parsing would require recursing.
-        // For resilience, let's treat it like a string but allow ${...} to be part of it?
-        // No, if we want to format code inside ${...}, we need to break it out.
-        // But for a tokenizer, maybe just treating it as a string is safer for now to avoid complexity?
-        // Let's try to handle it as a single token for now to ensure we don't break simple cases.
+        // Template Literals (Start)
         if (char === '`') {
-             let value = char;
+            let value = char;
             let i = pos + 1;
+            let foundEnd = false;
+
             while (i < len) {
                 if (text[i] === '\\') {
                     value += text[i];
@@ -134,16 +184,32 @@ export function tokenize(text: string): Token[] {
                         continue;
                     }
                 }
-                value += text[i];
-                if (text[i] === '`') {
+
+                if (text[i] === '$' && i + 1 < len && text[i + 1] === '{') {
+                    value += '${';
+                    templateStack.push(braceLevel);
+                    addToken('TemplateHead', value);
+                    foundEnd = true;
                     break;
                 }
-                // TODO: Handle ${...} properly if we want deep formatting inside.
-                // For now, we just consume it.
+
+                if (text[i] === '`') {
+                    value += '`';
+                    addToken('Template', value); // Full string, no interpolation
+                    foundEnd = true;
+                    break;
+                }
+
+                value += text[i];
                 i++;
             }
-            addToken('Template', value);
-            continue;
+
+            if (foundEnd) continue;
+
+            if (i >= len) {
+                addToken('Template', value);
+                continue;
+            }
         }
 
         // Regex Literals
@@ -155,6 +221,7 @@ export function tokenize(text: string): Token[] {
                 lastToken.type === 'Number' ||
                 lastToken.type === 'String' ||
                 lastToken.type === 'Template' ||
+                lastToken.type === 'TemplateTail' || // Tail acts like string/expression end
                 (lastToken.type === 'Punctuation' && (lastToken.value === ')' || lastToken.value === ']'))
             );
 
@@ -182,9 +249,6 @@ export function tokenize(text: string): Token[] {
                             value += text[i];
                             i++;
                         }
-                        // Adjust back since addToken adds length
-                        // Wait, addToken advances pos by value.length.
-                        // So I need to stop loop here.
                         break;
                     }
                     i++;
@@ -211,7 +275,6 @@ export function tokenize(text: string): Token[] {
                 }
             } else {
                 while (i < len && /[0-9.]/.test(text[i])) {
-                     // Handle multiple dots? Just consume for now.
                     value += text[i];
                     i++;
                 }
@@ -287,6 +350,8 @@ export function tokenize(text: string): Token[] {
 
         // Punctuation
         if (/[(){}\[\],:;.]/.test(char)) {
+            if (char === '{') braceLevel++;
+            if (char === '}') braceLevel--; // This is only reached if not handled by templateStack logic above
             addToken('Punctuation', char);
             continue;
         }

@@ -41,7 +41,7 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
         let length = 0;
         for (let i = startIndex + 1; i < tokens.length; i++) {
             const t = tokens[i];
-            if (t.value === '}') return length < 50;
+            if (t.value === '}' || t.type === 'TemplateMiddle' || t.type === 'TemplateTail') return length < 50;
             if (t.value.includes('\n')) return false;
             length += t.value.length;
             if (length > 50) return false;
@@ -58,7 +58,14 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             const newlines = (token.value.match(/\n/g) || []).length;
             if (newlines > 1) newlinePending = Math.max(newlinePending, 2);
             else if (newlines === 1) newlinePending = Math.max(newlinePending, 1);
-            else if (token.value.includes(' ') || token.value.includes('\t')) spacePending = true;
+            else if (token.value.includes(' ') || token.value.includes('\t')) {
+                // Ignore whitespace immediately after template head/middle (start of interpolation)
+                if (lastToken && (lastToken.type === 'TemplateHead' || lastToken.type === 'TemplateMiddle')) {
+                    spacePending = false;
+                } else {
+                    spacePending = true;
+                }
+            }
             continue;
         }
 
@@ -101,8 +108,8 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
 
         // --- Core Formatting Logic ---
 
-        // 1. Dedent before closing brace
-        if (token.value === '}') {
+        // 1. Dedent before closing brace (or template tail/middle)
+        if (token.value === '}' || token.type === 'TemplateMiddle' || token.type === 'TemplateTail') {
             const currentBlock = blockStack.pop();
             const isInline = currentBlock ? currentBlock.inline : false;
 
@@ -116,7 +123,12 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             if (!isInline) {
                  newlinePending = 1;
             } else {
-                spacePending = true;
+                // No space before closing brace in templates for compactness, space for normal blocks
+                if (token.type === 'TemplateMiddle' || token.type === 'TemplateTail') {
+                    spacePending = false;
+                } else {
+                    spacePending = true;
+                }
                 newlinePending = 0;
             }
         }
@@ -151,13 +163,19 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
 
         // 4. Post-Token Logic
 
-        // Indent after open brace
-        if (token.value === '{') {
+        // Indent after open brace (or template head/middle)
+        if (token.value === '{' || token.type === 'TemplateHead' || token.type === 'TemplateMiddle') {
             const isSwitch = pendingSwitch;
             pendingSwitch = false;
 
             if (isShortBlock(i) && !isSwitch) {
-                spacePending = true;
+                // No space after opening brace in templates
+                if (token.type === 'TemplateHead' || token.type === 'TemplateMiddle') {
+                    spacePending = false;
+                } else {
+                    spacePending = true;
+                }
+
                 indentLevel++;
                 blockStack.push({ type: 'other', inline: true });
             } else {
