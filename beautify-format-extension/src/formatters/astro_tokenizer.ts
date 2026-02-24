@@ -23,6 +23,11 @@ export interface Token {
     col: number;
 }
 
+interface TokenizerState {
+    type: 'NORMAL' | 'STRING_DOUBLE' | 'STRING_SINGLE' | 'TEMPLATE' | 'COMMENT_LINE' | 'COMMENT_BLOCK';
+    targetDepth?: number;
+}
+
 export class AstroTokenizer {
     private input: string;
     private pos: number = 0;
@@ -83,8 +88,6 @@ export class AstroTokenizer {
 
             if (char === '{') {
                 // Potential expression
-                // But could be text if not in tag?
-                // In Astro, {expr} is an expression in text context too.
                 tokens.push(this.readExpressionToken());
             } else if (char === '<') {
                 if (this.input.startsWith('<!--', this.pos)) {
@@ -123,18 +126,12 @@ export class AstroTokenizer {
 
     private readFrontmatter(): Token | null {
         // --- ... ---
-        // Must be at start (checked by caller or pos=0 check)
-        // Check matching ---
         const startLine = this.line;
         const startCol = this.col;
 
         // Find closing ---
         const endIdx = this.input.indexOf('\n---', this.pos + 3);
         if (endIdx !== -1) {
-            // Include the newline in the frontmatter token?
-            // Actually, usually we want --- ... ---
-            // endIdx is index of \n before ---
-            // So frontmatter ends at endIdx + 4 (length of \n---)
             const length = (endIdx + 4) - this.pos;
             const text = this.input.substring(this.pos, this.pos + length);
 
@@ -149,61 +146,137 @@ export class AstroTokenizer {
     private readExpressionToken(): Token {
         const startLine = this.line;
         const startCol = this.col;
-        const text = this.readExpression(); // Consumes and returns text including {}
+        const text = this.readExpression();
         return { type: TokenType.Expression, text, line: startLine, col: startCol };
     }
 
-    // Reads { ... } balanced
+    // Reads { ... } balanced with JS comment awareness
     private readExpression(): string {
         const startPos = this.pos;
-        let braceCount = 0;
-        let inString = false;
-        let quoteChar = '';
-        let inTemplateString = false;
+        const stack: TokenizerState[] = [{ type: 'NORMAL', targetDepth: 0 }];
+        let braceDepth = 0;
 
         while (this.pos < this.input.length) {
             const char = this.input[this.pos];
+            const nextChar = this.input[this.pos + 1];
+            const currentState = stack[stack.length - 1];
 
-            if (inString) {
-                if (char === '\\') {
-                    this.advance(2); // Skip escaped char
-                    continue;
-                }
-                if (char === quoteChar) {
-                    inString = false;
+            if (currentState.type === 'COMMENT_LINE') {
+                if (char === '\n') {
+                    stack.pop();
                 }
                 this.advance(1);
-            } else if (inTemplateString) {
-                if (char === '\\') {
-                     this.advance(2);
-                     continue;
-                }
-                if (char === '`') {
-                    inTemplateString = false;
-                }
-                this.advance(1);
-            } else {
-                if (char === '"' || char === "'") {
-                    inString = true;
-                    quoteChar = char;
-                    this.advance(1);
-                } else if (char === '`') {
-                    inTemplateString = true;
-                    this.advance(1);
-                } else if (char === '{') {
-                    braceCount++;
-                    this.advance(1);
-                } else if (char === '}') {
-                    braceCount--;
-                    this.advance(1);
-                    if (braceCount === 0) {
-                        return this.input.substring(startPos, this.pos);
-                    }
+                continue;
+            }
+
+            if (currentState.type === 'COMMENT_BLOCK') {
+                if (char === '*' && nextChar === '/') {
+                    stack.pop();
+                    this.advance(2);
                 } else {
                     this.advance(1);
                 }
+                continue;
+            }
+
+            if (currentState.type === 'STRING_DOUBLE') {
+                if (char === '\\') {
+                    this.advance(2);
+                    continue;
+                }
+                if (char === '"') {
+                    stack.pop();
+                }
+                this.advance(1);
+                continue;
+            }
+
+            if (currentState.type === 'STRING_SINGLE') {
+                if (char === '\\') {
+                    this.advance(2);
+                    continue;
+                }
+                if (char === "'") {
+                    stack.pop();
+                }
+                this.advance(1);
+                continue;
+            }
+
+            if (currentState.type === 'TEMPLATE') {
+                if (char === '\\') {
+                    this.advance(2);
+                    continue;
+                }
+                if (char === '$' && nextChar === '{') {
+                    stack.push({ type: 'NORMAL', targetDepth: braceDepth });
+                    braceDepth++;
+                    this.advance(2);
+                    continue;
+                }
+                if (char === '`') {
+                    stack.pop();
+                }
+                this.advance(1);
+                continue;
+            }
+
+            if (currentState.type === 'NORMAL') {
+                // Comments
+                if (char === '/' && nextChar === '/') {
+                    stack.push({ type: 'COMMENT_LINE' });
+                    this.advance(2);
+                    continue;
+                }
+                if (char === '/' && nextChar === '*') {
+                    stack.push({ type: 'COMMENT_BLOCK' });
+                    this.advance(2);
+                    continue;
+                }
+
+                // Strings
+                if (char === '"') {
+                    stack.push({ type: 'STRING_DOUBLE' });
+                    this.advance(1);
+                    continue;
+                }
+                if (char === "'") {
+                    stack.push({ type: 'STRING_SINGLE' });
+                    this.advance(1);
+                    continue;
+                }
+                if (char === '`') {
+                    stack.push({ type: 'TEMPLATE' });
+                    this.advance(1);
+                    continue;
+                }
+
+                // Braces
+                if (char === '{') {
+                    braceDepth++;
+                    this.advance(1);
+                    continue;
+                }
+                if (char === '}') {
+                    braceDepth--;
+                    this.advance(1);
+
+                    if (braceDepth === currentState.targetDepth!) {
+                        if (stack.length > 1) {
+                            stack.pop(); // End of interpolation
+                        } else {
+                            // End of top-level expression
+                            return this.input.substring(startPos, this.pos);
+                        }
+                    }
+                    continue;
+                }
+
+                this.advance(1);
+                continue;
             }
         }
+
         // Unbalanced or end of file
         return this.input.substring(startPos, this.pos);
     }
@@ -337,8 +410,6 @@ export class AstroTokenizer {
                 const exprLine = this.line;
                 const exprCol = this.col;
                 const exprText = this.readExpression();
-                // Treat spread as an attribute without value? Or dedicated token?
-                // Let's treat it as AttributeName for formatting purposes (it's self contained)
                 tokens.push({ type: TokenType.AttributeName, text: exprText, line: exprLine, col: exprCol });
             } else {
                 // Attribute Name
