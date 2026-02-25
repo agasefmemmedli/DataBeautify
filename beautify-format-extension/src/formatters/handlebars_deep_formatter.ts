@@ -411,13 +411,50 @@ class HandlebarsPrinter {
 
     private printBlockInternal(block: Block, indentLevel: number, isChained: boolean): string {
         const indent = this.indentString.repeat(indentLevel);
-        let header = '';
+        const blockName = block.name.split(' ')[0];
+
+        let headerRaw = '';
         if (isChained) {
-            header = indent + `{{else ${block.name}}}`;
+            headerRaw = `{{else ${block.name}}}`;
         } else {
-            header = indent + `{{#${block.name}}}`;
+            headerRaw = `{{#${block.name}}}`;
         }
 
+        // Try inline formatting first
+        try {
+            const childrenInline = this.printChildrenInline(block.children);
+            let inverseInline = '';
+            let isInlinePossible = !childrenInline.includes('\n');
+
+            if (isInlinePossible && block.inverse && block.inverse.length > 0) {
+                if (block.inverse.length === 1 && block.inverse[0].type === 'Block') {
+                    // Chained blocks (else if) usually shouldn't be inline unless very simple,
+                    // but recursive inline check is hard. Let's assume chained blocks are multiline for now.
+                    isInlinePossible = false;
+                } else {
+                    const invContent = this.printChildrenInline(block.inverse);
+                    if (invContent.includes('\n')) {
+                        isInlinePossible = false;
+                    } else {
+                        inverseInline = `{{else}}${invContent}`;
+                    }
+                }
+            }
+
+            if (isInlinePossible) {
+                const closeRaw = `{{/${blockName}}}`;
+                const combined = `${headerRaw}${childrenInline}${inverseInline}${closeRaw}`;
+
+                if ((indent.length + combined.length) <= (this.options.printWidth || 80)) {
+                    return indent + combined;
+                }
+            }
+        } catch (e) {
+            // Ignore errors in inline attempt and fallback
+        }
+
+        // Multiline formatting
+        const header = indent + headerRaw;
         const children = this.printChildren(block.children, indentLevel + 1);
 
         if (block.inverse && block.inverse.length > 0) {
@@ -427,11 +464,11 @@ class HandlebarsPrinter {
                 return header + '\n' + children + '\n' + inverseStr;
             } else {
                 const inverseContent = this.printChildren(block.inverse, indentLevel + 1);
-                const close = indent + `{{/${block.name.split(' ')[0]}}}`;
+                const close = indent + `{{/${blockName}}}`;
                 return header + '\n' + children + '\n' + indent + '{{else}}\n' + inverseContent + '\n' + close;
             }
         } else {
-            const close = indent + `{{/${block.name.split(' ')[0]}}}`;
+            const close = indent + `{{/${blockName}}}`;
             return header + '\n' + children + '\n' + close;
         }
     }

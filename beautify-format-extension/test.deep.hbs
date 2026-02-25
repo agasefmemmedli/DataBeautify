@@ -17,6 +17,13 @@
     </div>
     {{/unless}}
 {{/if}}
+
+{{!-- Inline block test --}}
+<div>
+    {{#if showIcon}}<i class="icon"></i>{{/if}}
+    <span>{{#if label}}{{label}}{{else}}Default{{/if}}</span>
+</div>
+
 <script>
     const data = {
         id: {{id}},
