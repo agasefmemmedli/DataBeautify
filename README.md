@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Handlebars (Deep Formatting Implemented)
 - [x] Liquid (Deep Formatting Implemented)
 - [x] Twig (Deep Formatting Implemented)
 - [x] PowerShell (Deep Formatting Implemented)
