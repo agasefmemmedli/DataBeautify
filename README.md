@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] ENV (Deep Formatting Implemented)
 - [x] Makefile (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)
 - [x] LaTeX (Deep Formatting Implemented)
