@@ -1112,16 +1112,51 @@ async function handleSVG(editor: vscode.TextEditor, text: string) {
     }
 
     try {
-        // Format SVG using xml-formatter
-        formatted = xmlFormatter(text, {
-            indentation: '  ',
-            collapseContent: true,
-            lineSeparator: '\n',
-            whiteSpaceAtEndOfSelfclosingTag: true
+        // Try Prettier first (Industry Standard)
+        formatted = await prettier.format(text, {
+            parser: 'html',
+            tabWidth: 2,
+            printWidth: 80,
+            htmlWhitespaceSensitivity: 'ignore'
         });
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format SVG: ${error.message}`);
-        return;
+    } catch (prettierError) {
+        // Fallback to resilient formatting if Prettier fails
+        try {
+            // Manual Deep Formatting
+            let processedText = text;
+
+            // Format <style> blocks
+            processedText = processedText.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, content) => {
+                try {
+                    const formattedCSS = jsbeautify.css(content, { indent_size: 2 });
+                    return match.replace(content, '\n' + formattedCSS + '\n');
+                } catch (e) {
+                    return match;
+                }
+            });
+
+            // Format <script> blocks
+            processedText = processedText.replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, (match, content) => {
+                try {
+                    const formattedJS = jsbeautify.js(content, { indent_size: 2 });
+                    return match.replace(content, '\n' + formattedJS + '\n');
+                } catch (e) {
+                    return match;
+                }
+            });
+
+            // Format XML structure
+            // Use collapseContent: false to prevent collapsing our formatted blocks back into one line
+            formatted = xmlFormatter(processedText, {
+                indentation: '  ',
+                collapseContent: false,
+                lineSeparator: '\n',
+                whiteSpaceAtEndOfSelfclosingTag: true
+            });
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format SVG: ${error.message}`);
+            return;
+        }
     }
 
     await applyEdit(editor, formatted);

@@ -19,6 +19,7 @@ import * as ini from 'ini';
 import * as graphql from 'graphql';
 import * as pythonAst from 'python-ast';
 import * as javaAst from 'java-ast';
+import * as prettier from 'prettier';
 
 /**
  * This method is called when the extension is activated
