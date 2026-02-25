@@ -43,4 +43,25 @@
 % This is a comment
 % Another comment with \begin{itemize} inside (should be ignored)
 
+% Testing verbatim (should NOT be indented)
+\begin{verbatim}
+def hello():
+    print("Hello")
+\end{verbatim}
+
+% Testing optional arguments
+\begin{itemize}[label=\alph*]
+    \item Alpha
+    \item Beta
+\end{itemize}
+
+% Testing escaped characters in tables
+\begin{tabular}{c|c}
+    Col A & Col B \\
+    A \& B & C \\
+\end{tabular}
+
+% Testing multiple braces on one line
+\section{Title} \label{sec:title}
+
 \end{document}
