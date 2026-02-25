@@ -7,8 +7,8 @@ export interface JSONFormatOptions {
 }
 
 type ASTNode =
-    | { type: 'Object', properties: Property[], comments?: string[] }
-    | { type: 'Array', items: ASTNode[], comments?: string[] }
+    | { type: 'Object', properties: Property[], comments?: string[], trailingComments?: string[] }
+    | { type: 'Array', items: ASTNode[], comments?: string[], trailingComments?: string[] }
     | { type: 'Literal', value: string, tokenType: TokenType, comments?: string[] };
 
 interface Property {
@@ -96,6 +96,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
         if (t.type === TokenType.BraceOpen) {
             current++;
             const properties: Property[] = [];
+            let trailingComments: string[] = [];
             while (current < tokens.length && tokens[current].type !== TokenType.BraceClose) {
                 if (tokens[current].type === TokenType.Comma) {
                     current++;
@@ -111,7 +112,10 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
                 }
                 if (current >= tokens.length) break;
 
-                if (tokens[current].type === TokenType.BraceClose) break;
+                if (tokens[current].type === TokenType.BraceClose) {
+                    trailingComments = keyComments;
+                    break;
+                }
 
                 const keyToken = tokens[current];
                 let key = keyToken.text;
@@ -136,15 +140,40 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
             if (current < tokens.length && tokens[current].type === TokenType.BraceClose) {
                 current++;
             }
-            return { type: 'Object', properties, comments };
+
+            // Sort properties alphabetically
+            properties.sort((a, b) => {
+                const keyA = a.key.replace(/^"|"$/g, '');
+                const keyB = b.key.replace(/^"|"$/g, '');
+                return keyA.localeCompare(keyB);
+            });
+
+            return { type: 'Object', properties, comments, trailingComments };
         } else if (t.type === TokenType.BracketOpen) {
             current++;
             const items: ASTNode[] = [];
+            let trailingComments: string[] = [];
             while (current < tokens.length && tokens[current].type !== TokenType.BracketClose) {
                 if (tokens[current].type === TokenType.Comma) {
                     current++;
                     continue;
                 }
+
+                // Check for trailing comments
+                let tempCurrent = current;
+                let potentialComments: string[] = [];
+                while (tempCurrent < tokens.length && tokens[tempCurrent].type === TokenType.Comment) {
+                    potentialComments.push(tokens[tempCurrent].text);
+                    tempCurrent++;
+                }
+
+                if (tempCurrent < tokens.length && tokens[tempCurrent].type === TokenType.BracketClose) {
+                    // These are trailing comments
+                    current = tempCurrent;
+                    trailingComments = potentialComments;
+                    break;
+                }
+
                 const val = parseValue();
                 if (val) {
                     items.push(val);
@@ -156,7 +185,9 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
             if (current < tokens.length && tokens[current].type === TokenType.BracketClose) {
                 current++;
             }
-            return { type: 'Array', items, comments };
+            return { type: 'Array', items, comments, trailingComments };
+        } else if (t.type === TokenType.BraceClose || t.type === TokenType.BracketClose) {
+            return null;
         } else {
             // Literal
             current++;
@@ -179,6 +210,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
     // Phase 3: Print
     function measure(node: ASTNode): number {
         if (node.comments && node.comments.length > 0) return 9999; // Force expansion if comments exist
+        if ((node.type === 'Object' || node.type === 'Array') && node.trailingComments && node.trailingComments.length > 0) return 9999;
 
         if (node.type === 'Literal') return node.value.length;
         if (node.type === 'Array') {
@@ -204,6 +236,8 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
 
     function isComplex(node: ASTNode): boolean {
         if (node.comments && node.comments.length > 0) return true;
+        if ((node.type === 'Object' || node.type === 'Array') && node.trailingComments && node.trailingComments.length > 0) return true;
+
         if (node.type === 'Literal') return false;
         if (node.type === 'Array') {
             return node.items.some(isComplex);
@@ -243,11 +277,21 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
 
         // Expanded
         if (node.type === 'Array') {
-            if (node.items.length === 0) return commentStr + space + '[]';
+            if (node.items.length === 0 && (!node.trailingComments || node.trailingComments.length === 0)) return commentStr + space + '[]';
+
             const itemLines = node.items.map(item => print(item, indent + 1));
-            return commentStr + space + '[\n' + itemLines.join(',\n') + '\n' + space + ']';
+            let content = itemLines.join(',\n');
+
+            if (node.trailingComments && node.trailingComments.length > 0) {
+                const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
+                if (content.length > 0) content += '\n';
+                content += trailingStr;
+            }
+
+            return commentStr + space + '[\n' + content + '\n' + space + ']';
         } else if (node.type === 'Object') {
-            if (node.properties.length === 0) return commentStr + space + '{}';
+            if (node.properties.length === 0 && (!node.trailingComments || node.trailingComments.length === 0)) return commentStr + space + '{}';
+
             const propLines = node.properties.map(p => {
                 let pComment = '';
                 if (p.comments) {
@@ -264,7 +308,16 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
                      return pComment + indentString.repeat(indent + 1) + `${p.key}: ${valStr.trimStart()}`;
                 }
             });
-            return commentStr + space + '{\n' + propLines.join(',\n') + '\n' + space + '}';
+
+            let content = propLines.join(',\n');
+
+            if (node.trailingComments && node.trailingComments.length > 0) {
+                const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
+                if (content.length > 0) content += '\n';
+                content += trailingStr;
+            }
+
+            return commentStr + space + '{\n' + content + '\n' + space + '}';
         }
 
         return '';
