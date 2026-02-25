@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Prisma (Deep Formatting Implemented)
 - [x] Jupyter Notebook (Deep Formatting Implemented)
 - [x] Java (Deep Formatting Implemented)
 - [x] SVG (Deep Formatting Implemented)
