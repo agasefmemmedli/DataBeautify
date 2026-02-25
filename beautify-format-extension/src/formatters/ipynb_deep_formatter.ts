@@ -1,5 +1,17 @@
 import { formatPythonDeep } from './python_deep_formatter';
 import { formatMarkdownDeep } from './markdown_deep_formatter';
+import { formatJSDeep } from './js_deep_formatter';
+import { formatHTMLDeep } from './html_deep_formatter';
+import { formatSQLDeep } from './sql_deep_formatter';
+import { formatCSSDeep } from './css_deep_formatter';
+import { formatRubyDeep } from './ruby_deep_formatter';
+import { formatPHPDeep } from './php_deep_formatter';
+import { formatGoDeep } from './go_deep_formatter';
+import { formatRustDeep } from './rust_deep_formatter';
+import { formatJavaDeep } from './java_deep_formatter';
+import { formatKotlinDeep } from './kotlin_deep_formatter';
+import { formatCDeep } from './c_deep_formatter';
+import { formatCppDeep } from './cpp_deep_formatter';
 
 // We need to import jsonrepair dynamically or use require if not using ESM
 // But since we are in TS file that compiles to JS/CJS, we can use require for external module if needed,
@@ -33,6 +45,16 @@ export async function formatIPYNBDeep(text: string): Promise<string> {
         console.warn('Prettier not available for Markdown cells inside Notebook.');
     }
 
+    // Determine Language
+    let language = 'python'; // Default
+    if (notebook.metadata) {
+        if (notebook.metadata.kernelspec && notebook.metadata.kernelspec.language) {
+            language = notebook.metadata.kernelspec.language.toLowerCase();
+        } else if (notebook.metadata.language_info && notebook.metadata.language_info.name) {
+            language = notebook.metadata.language_info.name.toLowerCase();
+        }
+    }
+
     for (const cell of notebook.cells) {
         if (cell.source) {
             let source = '';
@@ -49,10 +71,42 @@ export async function formatIPYNBDeep(text: string): Promise<string> {
 
             if (cell.cell_type === 'code') {
                 try {
-                    // Python Deep Formatting
-                    formattedSource = formatPythonDeep(source);
+                    // Dispatch based on language
+                    if (language === 'python') {
+                        formattedSource = formatPythonDeep(source);
+                    } else if (language === 'javascript' || language === 'js' || language === 'node') {
+                        formattedSource = formatJSDeep(source, { tabSize: 2, insertSpaces: true });
+                    } else if (language === 'typescript' || language === 'ts') {
+                        // formatJSDeep handles TS reasonably well for formatting purposes usually
+                        formattedSource = formatJSDeep(source, { tabSize: 2, insertSpaces: true });
+                    } else if (language === 'html') {
+                        formattedSource = formatHTMLDeep(source);
+                    } else if (language === 'sql') {
+                        formattedSource = await formatSQLDeep(source);
+                    } else if (language === 'css') {
+                        formattedSource = formatCSSDeep(source);
+                    } else if (language === 'ruby') {
+                        formattedSource = formatRubyDeep(source);
+                    } else if (language === 'php') {
+                        formattedSource = formatPHPDeep(source);
+                    } else if (language === 'go') {
+                        formattedSource = formatGoDeep(source);
+                    } else if (language === 'rust') {
+                        formattedSource = formatRustDeep(source);
+                    } else if (language === 'java') {
+                        formattedSource = formatJavaDeep(source);
+                    } else if (language === 'kotlin') {
+                        formattedSource = formatKotlinDeep(source);
+                    } else if (language === 'c') {
+                        formattedSource = formatCDeep(source);
+                    } else if (language === 'cpp' || language === 'c++') {
+                        formattedSource = formatCppDeep(source);
+                    } else {
+                        // Unknown language: Keep original source (Safety first)
+                        // console.log(`Skipping formatting for unknown language: ${language}`);
+                    }
                 } catch (e: any) {
-                    console.warn('Failed to format Python cell:', e);
+                    console.warn(`Failed to format ${language} cell:`, e);
                     // Keep original source if formatting fails
                 }
             } else if (cell.cell_type === 'markdown') {
@@ -80,48 +134,15 @@ export async function formatIPYNBDeep(text: string): Promise<string> {
                 }
             }
 
-            // Convert back to array of strings if needed (Jupyter convention: lines end with \n)
-            // But actually, modern Jupyter/Lab often saves as array of strings, split by newline.
-            // We should respect the original format (array vs string) if possible, but standardizing to array is common.
-            // Let's stick to array if it was array, string if it was string.
+            // Convert back to array of strings if needed
             if (isArray) {
                 const lines = formattedSource.split('\n');
                 cell.source = lines.map((line, i) => {
-                    // Append \n to all lines except the last one if it doesn't have it?
-                    // Jupyter convention is explicit \n at end of lines in array.
-                    // But split removes \n. So we add it back.
-                    // However, if the last line is empty (due to trailing newline in source), split gives empty string.
                     if (i < lines.length - 1) {
                         return line + '\n';
                     }
                     return line;
                 });
-
-                // Remove last empty line if it was created by split on trailing newline
-                // But wait, split('a\n') -> ['a', '']
-                // So if last element is empty string, it means original ended with \n.
-                // We should keep it as empty string? No, Jupyter usually doesn't have empty string as last element unless it's a blank line.
-                // Let's refine:
-                // If source ends with \n, we want the last element to be ""? No.
-                // Actually, if we use split('\n'), "a\n" becomes ["a", ""].
-                // Jupyter usually stores "a\n" as ["a\n"].
-                // "a\nb" as ["a\n", "b"].
-                // So we should map lines and join them? No.
-
-                // Let's use a smarter split or just follow the logic in markup.ts which was:
-                /*
-                const lines = formattedSource.split('\n');
-                cell.source = lines.map((line, i) => {
-                    if (i < lines.length - 1) {
-                        return line + '\n';
-                    }
-                    return line;
-                });
-                */
-               // This logic converts "a\nb" -> ["a\n", "b"]. Correct.
-               // "a\n" -> ["a\n", ""]. This adds an empty line at the end.
-               // Jupyter usually avoids the trailing empty string in the array unless it's a real empty line.
-               // But let's stick to the previous logic for consistency as it was "Deep Formatting" in markup.ts.
             } else {
                 cell.source = formattedSource;
             }
