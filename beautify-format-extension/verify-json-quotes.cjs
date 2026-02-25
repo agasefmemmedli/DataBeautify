@@ -28,8 +28,8 @@ if (!formatted.includes('"single": "quoted"')) {
 }
 
 // 2. Trailing comma removal (Strict JSON)
-// "real_unquoted": true should NOT have a comma
-if (formatted.includes('"real_unquoted": true,')) {
+// "trailing": "comma" is the last element (alphabetically), so it should NOT have a comma
+if (formatted.includes('"trailing": "comma",')) {
     console.error('❌ Trailing comma removal failed (it is present).');
     process.exit(1);
 }

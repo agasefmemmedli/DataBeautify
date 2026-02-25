@@ -101,7 +101,8 @@ async function runTest() {
         }
 
         // 2. Check JSON
-        if (formattedText.includes('CMD ["npm","start"]')) {
+        // Expect standard spacing: ["npm", "start"]
+        if (formattedText.includes('CMD ["npm", "start"]')) {
             console.log("✅ JSON formatted correctly.");
         } else {
             console.error("❌ JSON formatting failed.");
