@@ -5,10 +5,14 @@ import * as YAML from 'yaml';
  * - Robust parsing using 'yaml' package
  * - Vertical alignment of keys
  * - 2-space indentation
+ * - Context-aware alignment (skips multiline strings)
  */
 export function formatYAMLDeep(text: string): string {
     // 1. Parse and Standardize
     // We let parsing errors propagate so the caller can handle fallback or error reporting.
+    // However, if we want fault tolerance, we can try to parse and if it fails, try to repair or just standardize as best as possible.
+    // Here we stick to 'yaml' default fault tolerance (parsing document).
+
     const doc = YAML.parseDocument(text);
     if (doc.errors.length > 0) {
         // Fault tolerance: clear errors to attempt partial formatting
@@ -26,11 +30,53 @@ export function formatYAMLDeep(text: string): string {
         defaultStringType: 'PLAIN'
     });
 
-    // 2. Vertical Alignment
-    return alignYAML(standard);
+    // 2. Identify Protected Lines (inside multiline scalars)
+    // We re-parse the standardized output to find scalar ranges.
+    const protectedLines = new Set<number>();
+    try {
+        const lineCounter = new YAML.LineCounter();
+        const stdDoc = YAML.parseDocument(standard, { lineCounter });
+
+        YAML.visit(stdDoc, {
+            Scalar(_, node) {
+                if (node.range) {
+                    const startIdx = node.range[0];
+                    const endIdx = node.range[1];
+                    const startPos = lineCounter.linePos(startIdx);
+                    const endPos = lineCounter.linePos(endIdx);
+
+                    // YAML LineCounter is 1-based for lines.
+                    // We need 0-based for alignYAML.
+                    const startLine = startPos.line - 1;
+                    const endLine = endPos.line - 1;
+
+                    if (startLine < endLine) {
+                        // Multiline scalar
+                        // Protect lines strictly between start and end
+                        for (let i = startLine + 1; i < endLine; i++) {
+                            protectedLines.add(i);
+                        }
+
+                        // Protect end line if it has content (col > 1)
+                        // endPos.col is 1-based. If > 1, it means there is content on that line.
+                        if (endPos.col > 1) {
+                            protectedLines.add(endLine);
+                        }
+                    }
+                }
+            }
+        });
+    } catch (e) {
+        // Fallback: if re-parsing fails, we proceed without protection (unsafe alignment)
+        // or we could skip alignment entirely. For now, we proceed as legacy behavior.
+        console.warn('Deep YAML: Failed to analyze structure for alignment protection.', e);
+    }
+
+    // 3. Vertical Alignment with Protection
+    return alignYAML(standard, protectedLines);
 }
 
-function alignYAML(text: string): string {
+function alignYAML(text: string, protectedLines: Set<number> = new Set()): string {
     const lines = text.split('\n');
     const result: string[] = [];
 
@@ -72,6 +118,13 @@ function alignYAML(text: string): string {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+
+        // Check protection
+        if (protectedLines.has(i)) {
+            flushGroup();
+            result.push(line);
+            continue;
+        }
 
         // Skip empty lines (flush group)
         if (line.trim() === '') {
