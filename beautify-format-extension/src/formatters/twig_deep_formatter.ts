@@ -5,6 +5,62 @@ interface FormatterOptions {
     insertSpaces?: boolean;
 }
 
+function formatTwigExpression(text: string): string {
+    const startMatch = text.match(/^\{\{-?/);
+    const endMatch = text.match(/-?\}\}$/);
+    if (!startMatch || !endMatch) return text;
+
+    const startDelim = startMatch[0];
+    const endDelim = endMatch[0];
+    let content = text.substring(startDelim.length, text.length - endDelim.length).trim();
+
+    // Normalize whitespace
+    content = content.replace(/\s+/g, ' ');
+
+    // Add spaces around pipe | if not in string
+    let newContent = '';
+    let inQuote = false;
+    let quoteChar = '';
+    for (let i = 0; i < content.length; i++) {
+        const char = content[i];
+        if (inQuote) {
+            newContent += char;
+            if (char === quoteChar) {
+                inQuote = false;
+            }
+        } else {
+            if (char === '"' || char === "'") {
+                inQuote = true;
+                quoteChar = char;
+                newContent += char;
+            } else if (char === '|') {
+                newContent += '|';
+            } else {
+                newContent += char;
+            }
+        }
+    }
+    // Clean up double spaces
+    content = newContent.replace(/\s+/g, ' ').replace(/\s\|\s/g, '|');
+
+    return `${startDelim} ${content} ${endDelim}`;
+}
+
+function formatTwigTag(text: string): string {
+    const startMatch = text.match(/^\{%-?/);
+    const endMatch = text.match(/-?%\}$/);
+    if (!startMatch || !endMatch) return text;
+
+    const startDelim = startMatch[0];
+    const endDelim = endMatch[0];
+    let content = text.substring(startDelim.length, text.length - endDelim.length).trim();
+
+    // Normalize whitespace
+    content = content.replace(/\s+/g, ' ');
+
+    return `${startDelim} ${content} ${endDelim}`;
+}
+
 export function formatTwigDeep(input: string, options: FormatterOptions = { tabSize: 2, insertSpaces: true }): string {
     const tokenizer = new TwigTokenizer(input);
     const tokens = tokenizer.tokenize();
@@ -25,7 +81,7 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
 
     // Inline elements
     const inlineTags = new Set([
-        'a', 'abbr', 'b', 'bdo', 'button', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img', 'ins', 'kbd', 'label', 'map', 'object', 'q', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'tt', 'var'
+        'a', 'abbr', 'b', 'bdo', 'button', 'cite', 'code', 'del', 'dfn', 'em', 'i', 'img', 'ins', 'kbd', 'label', 'map', 'object', 'q', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'tt', 'var', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th', 'label'
     ]);
 
     // Tags where whitespace must be preserved exactly
@@ -40,38 +96,30 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
 
         if (token.type === TokenType.Whitespace) continue;
 
-        // If in preserved block (like pre, script), output everything exactly until closing tag
+        // If in preserved block
         if (inPreserveWhitespace && token.type !== TokenType.TagClose && token.type !== TokenType.RawBlock) {
-             // For RawBlock (verbatim), we handle it separately
-             // But if we are in <pre>, we should preserve token text?
-             // The tokenizer doesn't return Whitespace tokens by default (it skips them in loop unless readText captures them?).
-             // Wait, `readText` captures newlines/spaces if they are not skipped?
-             // My tokenizer `tokenize` loop does NOT skip whitespace explicitly except inside `readHTMLTagOpen`.
-             // But `readText` consumes until it hits a tag start. So it captures whitespace.
-             // So `TokenType.Text` contains the whitespace.
-             // My tokenizer does not emit `TokenType.Whitespace` explicitly.
-             // So the check `if (token.type === TokenType.Whitespace)` is redundant but harmless.
+             formatted += token.text;
+             continue;
         }
 
         switch (token.type) {
             case TokenType.TagOpen:
-                // <div or {% include
-                // Distinguish between HTML TagOpen and Twig TagOpen?
-                // The tokenizer uses TokenType.TagOpen for both generic Twig tags and HTML tags.
-                // But my tokenizer `readHTMLTagOpen` returns `TagOpen` with `<div`.
-                // `readTwigTag` returns `TagOpen` with `{% include ... %}`.
-
                 if (token.text.startsWith('<')) {
                     // HTML Tag
-                    const tagName = token.text.substring(1).toLowerCase();
+                    const match = token.text.match(/^<([a-zA-Z0-9-]+)/);
+                    const tagName = match ? match[1].toLowerCase() : '';
 
                     if (inlineTags.has(tagName)) {
                         if (inlineLevel === 0) {
-                             if (formatted.length > 0 && !formatted.endsWith('\n') && !formatted.endsWith(' ')) {
-                                 formatted += ' ';
-                             } else if (formatted.endsWith('\n')) {
+                             if (formatted.length > 0 && !formatted.endsWith('\n')) {
+                                 // Enforce newline + indent if starting a new inline sequence
+                                 if (!formatted.endsWith(' ')) formatted += '\n' + getIndent();
+                             } else {
                                  formatted += getIndent();
                              }
+                        } else {
+                             // Nested inline
+                             if (!formatted.endsWith(' ') && !formatted.endsWith('\n')) formatted += '';
                         }
                         inlineLevel++;
                         formatted += token.text;
@@ -84,10 +132,11 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
                 } else {
                     // Twig Tag (standalone like include, extends)
                     if (inlineLevel > 0) {
-                        formatted += ' ' + token.text;
+                         // Inside inline element
+                         formatted += ' ' + formatTwigTag(token.text);
                     } else {
                         if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
-                        formatted += getIndent() + token.text;
+                        formatted += getIndent() + formatTwigTag(token.text);
                     }
                 }
                 break;
@@ -97,23 +146,25 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
                 break;
 
             case TokenType.AttributeValue:
-                formatted += '=' + token.text;
+                // Handle Twig in attribute value logic is in Tokenizer (it concatenates)
+                // We try to format any Twig expressions inside the attribute value
+                let attrVal = token.text;
+                attrVal = attrVal.replace(/\{\{.*?\}\}/g, (match) => {
+                    return formatTwigExpression(match);
+                });
+                formatted += '=' + attrVal;
                 break;
 
             case TokenType.TagEnd:
                 // >
                 formatted += token.text;
                 if (!voidTags.has(currentTagName) && !inlineTags.has(currentTagName) && !token.text.startsWith('%}')) {
-                    // Only indent if it was an HTML tag end >
-                    // And not void/inline.
                     indentLevel++;
                 }
 
                 if (preserveWhitespaceTags.has(currentTagName)) {
                     inPreserveWhitespace = true;
                 }
-
-                currentTagName = '';
                 break;
 
             case TokenType.TagSelfClose:
@@ -121,12 +172,12 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
                 if (inlineTags.has(currentTagName)) {
                     inlineLevel = Math.max(0, inlineLevel - 1);
                 }
-                currentTagName = '';
                 break;
 
             case TokenType.TagClose:
                 // </div>
-                const closeTagName = token.text.substring(2, token.text.length - 1).toLowerCase();
+                const closeMatch = token.text.match(/^<\/([a-zA-Z0-9-]+)/);
+                const closeTagName = closeMatch ? closeMatch[1].toLowerCase() : '';
 
                 if (inlineTags.has(closeTagName)) {
                     inlineLevel = Math.max(0, inlineLevel - 1);
@@ -146,64 +197,53 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
 
             case TokenType.BlockOpen:
                 // {% block ... %}
+                const formattedBlockOpen = formatTwigTag(token.text);
                 if (inlineLevel > 0) {
-                    formatted += ' ' + token.text;
+                    formatted += ' ' + formattedBlockOpen;
                 } else {
                     if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
-                    formatted += getIndent() + token.text;
+                    formatted += getIndent() + formattedBlockOpen;
                     indentLevel++;
                 }
                 break;
 
             case TokenType.BlockClose:
                 // {% endblock %}
+                const formattedBlockClose = formatTwigTag(token.text);
                 if (inlineLevel > 0) {
-                    formatted += ' ' + token.text;
+                    formatted += ' ' + formattedBlockClose;
                 } else {
                     indentLevel = Math.max(0, indentLevel - 1);
                     if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
-                    formatted += getIndent() + token.text;
+                    formatted += getIndent() + formattedBlockClose;
                 }
                 break;
 
             case TokenType.BlockInverse:
                 // {% else %}
+                const formattedBlockInverse = formatTwigTag(token.text);
                 if (inlineLevel > 0) {
-                    formatted += ' ' + token.text;
+                    formatted += ' ' + formattedBlockInverse;
                 } else {
                     indentLevel = Math.max(0, indentLevel - 1);
                     if (formatted.length > 0 && !formatted.endsWith('\n')) formatted += '\n';
-                    formatted += getIndent() + token.text;
+                    formatted += getIndent() + formattedBlockInverse;
                     indentLevel++;
                 }
                 break;
 
             case TokenType.OutputOpen:
-                // {{
+                // {{ ... }}
+                const formattedExpr = formatTwigExpression(token.text);
                 if (inlineLevel > 0) {
-                    formatted += token.text; // Start immediately? Or add space?
-                    // Usually {{ ... }} has spaces inside.
-                    // But before {{ ?
-                    // If previous was text, it depends.
-                    // Let's assume text token handles trailing spaces.
+                    formatted += formattedExpr;
                 } else {
                     if (formatted.length > 0 && !formatted.endsWith('\n')) {
-                         // Check if we should wrap? For now, append inline or new line?
-                         // If we are in block context, usually we want {{ }} on new line if it's substantial?
-                         // But simple vars {{ page.title }} are often inline.
-                         // Let's look at next tokens.
-                         // But deep formatter usually enforces structure.
-                         // Let's stick to: if we are in block context (inlineLevel == 0), prefer new line.
-                         formatted += '\n' + getIndent() + token.text;
+                         formatted += '\n' + getIndent() + formattedExpr;
                     } else {
-                         formatted += getIndent() + token.text;
+                         formatted += getIndent() + formattedExpr;
                     }
                 }
-                break; // Wait, OutputOpen is just `{{`. We need to handle content inside?
-                // The tokenizer returns `OutputOpen` with full text `{{ ... }}` in my implementation?
-                // Let's check `readTwigOutput` in tokenizer.
-                // It returns `TokenType.OutputOpen` with the FULL text `{{ ... }}`.
-                // So this case handles the whole output block.
                 break;
 
             case TokenType.Comment:
@@ -226,9 +266,9 @@ export function formatTwigDeep(input: string, options: FormatterOptions = { tabS
                 if (inPreserveWhitespace) {
                     formatted += token.text;
                 } else if (inlineLevel > 0) {
-                     // Inside inline tag: collapse whitespace
-                     const collapsed = token.text.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ');
-                     formatted += collapsed;
+                     // Inside inline tag: collapse whitespace to single space
+                     const text = token.text.replace(/[\n\r]+/g, ' ');
+                     formatted += text.replace(/\s+/g, ' ');
                 } else {
                      // Block context text: split and indent
                      const lines = token.text.split('\n');
