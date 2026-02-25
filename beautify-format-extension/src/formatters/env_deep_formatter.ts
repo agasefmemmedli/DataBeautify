@@ -1,110 +1,207 @@
 export function formatENVDeep(text: string): string {
-    const lines = text.split('\n');
-    const parsedLines: {
-        raw: string;
-        prefix: string;
-        key: string;
-        value: string;
-        comment: string;
-        isAssignment: boolean;
-    }[] = [];
+    interface EnvLine {
+        type: 'empty' | 'comment' | 'assignment';
+        prefix?: string;
+        key?: string;
+        value?: string;
+        comment?: string;
+        quoteChar?: string;
+    }
 
-    // 1. Parse
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed === '' || trimmed.startsWith('#')) {
-            parsedLines.push({ raw: line, prefix: '', key: '', value: '', comment: '', isAssignment: false });
+    const lines: EnvLine[] = [];
+
+    let i = 0;
+    const n = text.length;
+
+    while (i < n) {
+        let char = text[i];
+
+        // Skip leading whitespace (indentation)
+        if (char === ' ' || char === '\t') {
+            i++;
             continue;
         }
 
-        const eqIndex = line.indexOf('=');
-        if (eqIndex === -1) {
-            // Not an assignment (maybe just 'export KEY' without value? or garbage)
-            parsedLines.push({ raw: line, prefix: '', key: '', value: '', comment: '', isAssignment: false });
+        // Empty line
+        if (char === '\n' || char === '\r') {
+            lines.push({ type: 'empty' });
+            if (char === '\r' && i + 1 < n && text[i+1] === '\n') i++;
+            i++;
             continue;
         }
 
-        const leftPart = line.substring(0, eqIndex);
-        const rightPart = line.substring(eqIndex + 1);
+        // Comment line
+        if (char === '#') {
+            let comment = '';
+            i++; // skip #
+            while (i < n && text[i] !== '\n' && text[i] !== '\r') {
+                comment += text[i];
+                i++;
+            }
+            lines.push({ type: 'comment', comment: comment.trim() });
 
-        // Parse left part: prefix + key
+            // Consume newline
+            if (i < n && (text[i] === '\n' || text[i] === '\r')) {
+                if (text[i] === '\r' && i + 1 < n && text[i+1] === '\n') i++;
+                i++;
+            }
+            continue;
+        }
+
+        // Assignment or Key
+        // Read Key
+        let keyBuffer = '';
+        while (i < n && text[i] !== '=' && text[i] !== '\n' && text[i] !== '\r' && text[i] !== '#') {
+            keyBuffer += text[i];
+            i++;
+        }
+
+        let key = keyBuffer.trim();
         let prefix = '';
-        let key = leftPart.trim();
-
         if (key.startsWith('export ')) {
             prefix = 'export ';
             key = key.substring(7).trim();
         }
 
-        // Parse right part: value + comment
-        let value = '';
-        let comment = '';
+        // Check if we hit end of line or file or comment start
+        if (i >= n || text[i] === '\n' || text[i] === '\r') {
+            // Key only
+            if (key) lines.push({ type: 'assignment', prefix, key, value: '', quoteChar: '' });
 
-        const trimmedRight = rightPart.trim();
-
-        if (trimmedRight.startsWith('"') || trimmedRight.startsWith("'")) {
-            const quoteChar = trimmedRight[0];
-            // Find closing quote
-            let closeQuoteIndex = -1;
-            for (let i = 1; i < trimmedRight.length; i++) {
-                if (trimmedRight[i] === quoteChar && trimmedRight[i-1] !== '\\') {
-                    closeQuoteIndex = i;
-                    break;
-                }
+            // Consume newline
+            if (i < n && (text[i] === '\n' || text[i] === '\r')) {
+                 if (text[i] === '\r' && i + 1 < n && text[i+1] === '\n') i++;
+                 i++;
             }
-
-            if (closeQuoteIndex !== -1) {
-                value = trimmedRight.substring(0, closeQuoteIndex + 1);
-                const afterValue = trimmedRight.substring(closeQuoteIndex + 1).trim();
-                if (afterValue.startsWith('#')) {
-                    comment = afterValue;
-                }
-            } else {
-                // Unclosed quote? Treat whole thing as value
-                value = trimmedRight;
-            }
-        } else {
-            // Unquoted
-            const commentIndex = trimmedRight.indexOf('#');
-            if (commentIndex !== -1) {
-                value = trimmedRight.substring(0, commentIndex).trim();
-                comment = trimmedRight.substring(commentIndex).trim();
-            } else {
-                value = trimmedRight;
-            }
-        }
-
-        parsedLines.push({ raw: line, prefix, key, value, comment, isAssignment: true });
-    }
-
-    // 2. Calculate Alignment
-    let maxKeyLength = 0;
-    for (const item of parsedLines) {
-        if (item.isAssignment) {
-            const len = item.prefix.length + item.key.length;
-            if (len > maxKeyLength) {
-                maxKeyLength = len;
-            }
-        }
-    }
-
-    // 3. Reconstruct
-    const formattedLines: string[] = [];
-    for (const item of parsedLines) {
-        if (!item.isAssignment) {
-            formattedLines.push(item.raw.trim());
             continue;
         }
 
-        const fullKey = item.prefix + item.key;
-        const padding = ' '.repeat(maxKeyLength - fullKey.length);
+        if (text[i] === '#') {
+             // Key followed by comment (no =)
+             let comment = '';
+             i++; // skip #
+             while (i < n && text[i] !== '\n' && text[i] !== '\r') {
+                 comment += text[i];
+                 i++;
+             }
+             lines.push({ type: 'assignment', prefix, key, value: '', quoteChar: '', comment: comment.trim() });
 
-        let line = `${fullKey}${padding} = ${item.value}`;
-        if (item.comment) {
-            line += ` ${item.comment}`;
+             // Consume newline
+             if (i < n && (text[i] === '\n' || text[i] === '\r')) {
+                 if (text[i] === '\r' && i + 1 < n && text[i+1] === '\n') i++;
+                 i++;
+             }
+             continue;
         }
-        formattedLines.push(line);
+
+        if (text[i] === '=') {
+            i++; // skip =
+            // Read Value
+            // skip whitespace after =
+            while (i < n && (text[i] === ' ' || text[i] === '\t')) i++;
+
+            let value = '';
+            let quoteChar = '';
+            let comment = '';
+
+            if (i < n) {
+                if (text[i] === '"' || text[i] === "'") {
+                    quoteChar = text[i];
+                    i++; // skip open quote
+
+                    let isEscaped = false;
+                    while (i < n) {
+                        if (isEscaped) {
+                            value += text[i];
+                            isEscaped = false;
+                        } else {
+                            if (text[i] === '\\') {
+                                value += text[i]; // keep escape
+                                isEscaped = true;
+                            } else if (text[i] === quoteChar) {
+                                i++; // skip close quote
+                                break;
+                            } else {
+                                value += text[i];
+                            }
+                        }
+                        i++;
+                    }
+
+                    // Check for trailing comment after quote
+                    // We must skip whitespace first
+                    while (i < n && (text[i] === ' ' || text[i] === '\t')) i++;
+
+                    if (i < n && text[i] === '#') {
+                        i++; // skip #
+                        while (i < n && text[i] !== '\n' && text[i] !== '\r') {
+                            comment += text[i];
+                            i++;
+                        }
+                    }
+                } else {
+                    // Unquoted value
+                    while (i < n && text[i] !== '\n' && text[i] !== '\r') {
+                        if (text[i] === '#') {
+                            // Comment start
+                             i++; // skip #
+                             while (i < n && text[i] !== '\n' && text[i] !== '\r') {
+                                 comment += text[i];
+                                 i++;
+                             }
+                             break;
+                        }
+                        value += text[i];
+                        i++;
+                    }
+                    value = value.trim();
+                }
+            }
+
+            lines.push({ type: 'assignment', prefix, key, value, quoteChar, comment: comment.trim() });
+
+            // Consume newline
+            if (i < n && (text[i] === '\n' || text[i] === '\r')) {
+                 if (text[i] === '\r' && i + 1 < n && text[i+1] === '\n') i++;
+                 i++;
+            }
+        }
     }
 
-    return formattedLines.join('\n');
+    // Calculate Max Key Length (Global)
+    let maxKeyLen = 0;
+    lines.forEach(line => {
+        if (line.type === 'assignment' && line.key) {
+            const len = (line.prefix || '').length + line.key.length;
+            if (len > maxKeyLen) maxKeyLen = len;
+        }
+    });
+
+    // Reconstruct
+    const result: string[] = [];
+    lines.forEach(line => {
+        if (line.type === 'empty') {
+            result.push('');
+        } else if (line.type === 'comment') {
+            result.push(`# ${line.comment}`);
+        } else if (line.type === 'assignment') {
+            if (!line.key) return; // Should not happen
+
+            const fullKey = (line.prefix || '') + line.key;
+            const padding = ' '.repeat(Math.max(0, maxKeyLen - fullKey.length));
+
+            let valuePart = line.value || '';
+            if (line.quoteChar) {
+                valuePart = `${line.quoteChar}${valuePart}${line.quoteChar}`;
+            }
+
+            let output = `${fullKey}${padding} = ${valuePart}`;
+            if (line.comment) {
+                output += ` # ${line.comment}`;
+            }
+            result.push(output);
+        }
+    });
+
+    return result.join('\n');
 }
