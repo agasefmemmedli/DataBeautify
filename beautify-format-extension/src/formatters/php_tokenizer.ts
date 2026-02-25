@@ -93,7 +93,6 @@ export class PHPTokenizer {
                 } else if (remaining.startsWith('<?')) {
                     // Short open tag <? might be disabled, but let's assume enabled or xml
                     // If followed by space or newline, likely PHP short tag
-                    // Ideally we should check config, but for beautifier let's treat <? as PHP start if valid
                     // But beware of <?xml
                     if (remaining.startsWith('<?xml')) {
                         // XML declaration, treat as HTML
@@ -181,8 +180,7 @@ export class PHPTokenizer {
                     const after = remaining.substring(3);
                     const idMatch = after.match(/^\s*([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*|'[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*'|"[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*")/);
                     if (idMatch) {
-                        const label = idMatch[1]; // Label without quotes logic needs to be inside consumeHeredoc or here
-                        // Pass the full start length to helper
+                        const label = idMatch[1];
                         const startLen = 3 + idMatch[0].length;
                         const str = this.consumeHeredoc(label, startLen);
                         tokens.push(this.createToken(TokenType.String, str));
@@ -297,9 +295,6 @@ export class PHPTokenizer {
 
         if (endIdx === -1) endIdx = remaining.length; // EOF
         const text = remaining.substring(0, endIdx);
-        // Include newline in comment or separate? Standard is usually separate
-        // But here we matched until \n. Tokenizer usually consumes \n as whitespace or separate token.
-        // Let's consume just content.
         tokens.push(this.createToken(TokenType.Comment, text));
         this.advance(text.length);
     }
@@ -341,14 +336,16 @@ export class PHPTokenizer {
 
         // Find end identifier
         // Needs to match \n\s*LABEL;?
-        const endRegex = new RegExp(`\\n\\s*${rawLabel};?`);
+        // We use regex with captured group to ensure we get the full match length including the newline
+        const endRegex = new RegExp(`(\\n\\s*${rawLabel};?)(?=\\r?\\n|$)`);
         const match = current.match(endRegex);
 
         if (match && match.index !== undefined) {
              return this.code.substring(this.pos, this.pos + startLen + match.index + match[0].length);
         }
 
-        return this.code.substring(this.pos); // Unclosed
+        // If not found, consume until EOF
+        return this.code.substring(this.pos);
     }
 
     private matchNumber(text: string): string | null {
@@ -365,13 +362,6 @@ export class PHPTokenizer {
     }
 
     private matchOperator(text: string): string | null {
-        // Sort operators by length desc
-        // We can optimize by checking common prefixes
-        // But iterating is safer for correctness first
-        // Need to be careful with 'and', 'or', 'xor' which are keywords but also operators
-        // They are in KEYWORDS set, so Identifier check handles them as Keywords.
-        // OPERATORS set should only contain symbols.
-
         // Check 3 chars
         if (text.length >= 3) {
             const sub = text.substring(0, 3);

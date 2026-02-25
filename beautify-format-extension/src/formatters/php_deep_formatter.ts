@@ -40,17 +40,26 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
 
         // Determine context for upcoming brace
         if (token.type === TokenType.Keyword) {
-            if (['class', 'interface', 'trait'].includes(token.text)) {
+            if (['class', 'interface', 'trait', 'enum'].includes(token.text)) {
                 pendingBraceContext = 'class';
             } else if (token.text === 'function') {
-                pendingBraceContext = 'function';
-            } else if (['if', 'else', 'elseif', 'while', 'do', 'for', 'foreach', 'switch', 'try', 'catch', 'finally'].includes(token.text)) {
+                const next = peekNextCode(i);
+                if (next && next.text === '(') {
+                     pendingBraceContext = 'control'; // Anonymous function: same line
+                } else {
+                     pendingBraceContext = 'function'; // Named function: next line
+                }
+            } else if (['if', 'else', 'elseif', 'while', 'do', 'for', 'foreach', 'switch', 'try', 'catch', 'finally', 'match'].includes(token.text)) {
                 pendingBraceContext = 'control';
             }
+        } else if (token.text === 'fn') {
+             pendingBraceContext = 'control'; // Arrow function: same line
         }
 
-        // Handle Imports
+        // Handle Imports (use ...)
         if (token.type === TokenType.Keyword && token.text === 'use' && (!prev || prev.text !== ')')) {
+            // Check if it's an import (top level or inside namespace) or trait use or closure use
+            // Simplistic check: if followed by identifier
             let stmtTokens = [token];
             let j = i + 1;
             let hasSemicolon = false;
@@ -61,26 +70,43 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
                     hasSemicolon = true;
                     break;
                 }
+                if (t.text === '{' || t.text === '(') {
+                    // Likely closure use or something else, not a simple import
+                    hasSemicolon = false;
+                    break;
+                }
                 j++;
             }
 
             if (hasSemicolon) {
+                // Determine if this is a trait use (inside class) or import (top level)
+                // If indentLevel > 0, likely trait use? Not always (nested namespace).
+                // Let's assume indentLevel 0 or namespace scope means import.
+                // But for beautifier, sorting trait imports is also okay? No, usually distinct.
+                // Let's only sort if indentLevel is 0?
+                // Or verify if we are inside a class.
+                // Ideally, we should track context stack.
+                // For now, let's just flush and print, only sort if contiguous sequence.
+
                 if (currentLineTokens.length > 0) {
                     flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                     currentLineTokens = [];
                 }
 
                 const stmtStr = stmtTokens.map(t => t.text).join(' ')
-                    .replace(/\s*\\\s*/g, '\\') // Remove spaces around backslash in imports
+                    .replace(/\s*\\\s*/g, '\\') // Remove spaces around backslash
                     .replace(/\s*;\s*$/, ';')
                     .replace(/^use\s+/, 'use ');
 
+                // Only sort if we are in import block (consecutive uses)
+                // And we are not inside a class (heuristic: indentLevel 0 or checking previous tokens)
+                // Let's just collect them.
                 importBuffer.push(stmtStr);
                 i = j;
 
                 const nextT = peekNextCode(j);
                 if (!nextT || nextT.text !== 'use' || (nextT.text === 'use' && tokens[j].text === ')')) {
-                    if (options.sortImports !== false) {
+                    if (options.sortImports !== false && indentLevel === 0) { // Only sort top-level imports
                         importBuffer.sort();
                     }
                     importBuffer.forEach(s => formattedLines.push(getIndent(indentLevel, indentString) + s));
@@ -96,7 +122,50 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
                 flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
                 currentLineTokens = [];
             }
-            formattedLines.push(token.text);
+
+            // Normalize HTML Indentation
+            const rawHtml = token.text;
+            const lines = rawHtml.split(/\r?\n/);
+
+            // Find base indentation of the HTML block (ignoring first line if it's on same line as tag, but InlineHTML token usually starts after ?>)
+            // But wait, our tokenizer separates ?> and InlineHTML.
+            // If the HTML immediately follows ?>, it might be on the same line.
+            // Example: ?><div>
+
+            // Calculate minimum indentation of non-empty lines
+            let minIndent = Infinity;
+            const nonEmptyLines = lines.filter(l => l.trim().length > 0);
+
+            for (const line of nonEmptyLines) {
+                 const match = line.match(/^\s*/);
+                 if (match) {
+                     const len = match[0].length;
+                     if (len < minIndent) minIndent = len;
+                 }
+            }
+            if (minIndent === Infinity) minIndent = 0;
+
+            for (let j = 0; j < lines.length; j++) {
+                const line = lines[j];
+                if (line.trim().length === 0) {
+                     // Preserve empty lines if they are not just whitespace at ends?
+                     // Just output empty line
+                     if (j < lines.length - 1 || line.length > 0) formattedLines.push('');
+                     continue;
+                }
+
+                // Dedent and Indent
+                // If line starts with minIndent, strip it.
+                let content = line;
+                if (line.startsWith(' '.repeat(minIndent))) {
+                    content = line.substring(minIndent);
+                } else if (line.match(/^\s+/)) {
+                     // Fallback: trim left
+                     content = line.trimStart();
+                }
+
+                formattedLines.push(getIndent(indentLevel, indentString) + content);
+            }
             continue;
         }
 
@@ -118,29 +187,34 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
 
         // Check for start of statement keywords (Flush BEFORE)
         if (token.type === TokenType.Keyword && currentLineTokens.length > 0) {
-            const startKeywords = ['if', 'while', 'do', 'for', 'foreach', 'switch', 'try', 'return', 'echo', 'print', 'class', 'interface', 'trait', 'namespace', 'use'];
-             if (startKeywords.includes(token.text)) {
-                // Check exceptions
-                const last = currentLineTokens[currentLineTokens.length - 1];
-                let safeToFlush = true;
+            const startKeywords = ['if', 'while', 'do', 'for', 'foreach', 'switch', 'try', 'return', 'echo', 'print', 'class', 'interface', 'trait', 'namespace', 'use', 'throw', 'public', 'private', 'protected', 'final', 'abstract', 'const'];
 
-                if (token.text === 'if' && last.text === 'else') safeToFlush = false;
-                if (token.text === 'while' && last.text === '}') safeToFlush = false; // do { } while
+            // Heuristic: If we are already building a declaration (e.g., final class), don't flush.
+            // modifiers: final, abstract, public, protected, private, static, readonly
+            const modifiers = new Set(['final', 'abstract', 'public', 'protected', 'private', 'static', 'readonly', 'function', 'const', 'var']);
 
-                if (safeToFlush) {
-                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
-                    currentLineTokens = [];
+            let shouldFlush = false;
+
+            if (startKeywords.includes(token.text)) {
+                // If current token is a modifier, and previous tokens are modifiers, don't flush.
+                if (modifiers.has(token.text)) {
+                     const last = currentLineTokens[currentLineTokens.length - 1];
+                     if (!modifiers.has(last.text) && last.type !== TokenType.Comment) {
+                         shouldFlush = true;
+                     }
+                } else {
+                     // Regular keyword logic
+                     const last = currentLineTokens[currentLineTokens.length - 1];
+                     if (token.text === 'if' && last.text === 'else') shouldFlush = false; // else if
+                     else if (token.text === 'while' && last.text === '}') shouldFlush = false; // do { } while
+                     else if (modifiers.has(last.text)) shouldFlush = false; // public function
+                     else shouldFlush = true;
                 }
-            } else if (token.text === 'function') {
-                const last = currentLineTokens[currentLineTokens.length - 1];
-                const modifiers = ['public', 'private', 'protected', 'static', 'abstract', 'final', 'function'];
-                if (!modifiers.includes(last.text) && last.text !== '=') {
-                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
-                    currentLineTokens = [];
-                }
-            } else if (['public', 'private', 'protected'].includes(token.text)) {
-                 flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
-                 currentLineTokens = [];
+            }
+
+            if (shouldFlush) {
+                flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
+                currentLineTokens = [];
             }
         }
 
@@ -162,7 +236,7 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
                 indentLevel++;
 
                 // Flush line immediately
-                let flushLevel = indentLevel - 1; // Flush at parent level (the line containing {)
+                let flushLevel = indentLevel - 1;
                 flushLine(formattedLines, currentLineTokens, flushLevel, indentString, lineStartParenDepth);
                 currentLineTokens = [];
                 pendingBraceContext = null;
