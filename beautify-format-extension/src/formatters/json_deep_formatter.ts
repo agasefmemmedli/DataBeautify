@@ -282,6 +282,11 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
             const itemLines = node.items.map(item => print(item, indent + 1));
             let content = itemLines.join(',\n');
 
+            // Trailing Comma for JSONC
+            if (isJSONC && itemLines.length > 0) {
+                content += ',';
+            }
+
             if (node.trailingComments && node.trailingComments.length > 0) {
                 const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
                 if (content.length > 0) content += '\n';
@@ -310,6 +315,11 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
             });
 
             let content = propLines.join(',\n');
+
+            // Trailing Comma for JSONC
+            if (isJSONC && propLines.length > 0) {
+                content += ',';
+            }
 
             if (node.trailingComments && node.trailingComments.length > 0) {
                 const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
