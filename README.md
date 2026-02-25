@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] SVG (Deep Formatting Implemented)
 - [x] MongoDB Shell (Deep Formatting Implemented)
 - [x] Log Files (Deep Formatting Implemented)
 - [x] Rust (Deep Formatting Implemented)
