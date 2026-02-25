@@ -147,8 +147,24 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
 
                     // Heuristic limit to avoid performance issues on huge blocks
                     if (innerTokens.length < 50) {
-                        // Reconstruct XML (raw)
-                        const innerXML = innerTokens.map(t => t.text).join('');
+                        // Reconstruct XML (raw) with proper spacing
+                        let innerXML = '';
+                        for (let k = 0; k < innerTokens.length; k++) {
+                            const t = innerTokens[k];
+                            // Add space before AttributeName
+                            if (t.type === TokenType.AttributeName) {
+                                innerXML += ' ';
+                            }
+
+                            innerXML += t.text;
+
+                            // Add = between Name and Value if implied
+                            if (t.type === TokenType.AttributeName) {
+                                if (k + 1 < innerTokens.length && innerTokens[k + 1].type === TokenType.AttributeValue) {
+                                    innerXML += '=';
+                                }
+                            }
+                        }
 
                         // Try formatting inline with infinite width to see if it fits structurally
                         const formattedInner = formatXMLDeep(innerXML, {
