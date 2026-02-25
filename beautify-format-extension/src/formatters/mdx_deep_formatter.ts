@@ -1,231 +1,182 @@
+import { formatMarkdownDeep } from './markdown_deep_formatter';
+
+/**
+ * Format MDX Deep (Fallback)
+ *
+ * This strategy masks JSX blocks and Frontmatter, passes the content to the
+ * Markdown Deep Formatter, and then unmasks and formats the JSX blocks using js-beautify.
+ */
 export function formatMDXDeep(text: string): string {
-    // 1. Mask Frontmatter to protect it
     const masks: string[] = [];
     const maskPrefix = '___MDX_MASK_';
 
-    let maskedText = text;
-
-    // Mask Frontmatter
-    maskedText = maskedText.replace(/^---[\s\S]*?---/, (match) => {
-        const placeholder = `${maskPrefix}${masks.length}___`;
+    // 1. Mask Frontmatter
+    let maskedText = text.replace(/^---[\s\S]*?---/, (match) => {
+        const placeholder = `${maskPrefix}FM_${masks.length}___`;
         masks.push(match);
         return placeholder;
     });
 
-    // Mask JSX blocks to protect them from Markdown formatter
-    // This is tricky because JSX can be nested and multiline.
-    // A simple regex might fail on nested tags.
-    // However, for a "resilient fallback", we can try to mask strictly balanced tags or just rely on the Markdown formatter
-    // if we can teach it to respect indentation of lines starting with <.
-
-    // The current markdown_deep_formatter.ts handles lists and headers.
-    // If we pass JSX through it, it might treat them as paragraphs and dedent them.
-
-    // Let's iterate line by line instead of masking, extending the markdown logic.
-    // But since we want to reuse code, maybe we can implement a custom loop here.
-
+    // 2. Mask JSX Blocks
+    // We scan line by line to identify JSX blocks.
     const lines = maskedText.split('\n');
-    const formattedLines: string[] = [];
+    const processedLines: string[] = [];
+    let inJsxBlock = false;
+    let jsxBuffer: string[] = [];
 
-    let inCodeBlock = false;
-    let codeBlockFence = '';
-    let inTable = false;
-    let tableRows: string[][] = [];
-    let jsxIndentLevel = 0;
+    // Helper to detect if a line starts a JSX block
+    // Starts with <Tag, not <!--, not <http (autolink)
+    // MDX: <Component ...> or <div ...>
+    // Also export/import statements should be masked or preserved
+    const isJsxStart = (line: string) => {
+        const trimmed = line.trim();
+        return /^\s*<[a-zA-Z][^>]*>/.test(trimmed) ||
+               /^\s*<[a-zA-Z][^>]*$/.test(trimmed) ||
+               /^\s*<>/.test(trimmed); // Fragment
+    };
 
-    const flushTable = () => {
-        if (tableRows.length === 0) return;
-
-        // Calculate max width for each column
-        const colWidths: number[] = [];
-        tableRows.forEach(row => {
-            row.forEach((cell, i) => {
-                const len = cell.trim().length;
-                colWidths[i] = Math.max(colWidths[i] || 0, len);
-            });
-        });
-
-        // Format rows
-        tableRows.forEach((row, rowIndex) => {
-            const isSeparator = rowIndex === 1 && row.every(cell => /^\s*:?-+:?\s*$/.test(cell));
-            const formattedRow = row.map((cell, i) => {
-                const trimmed = cell.trim();
-                const width = colWidths[i];
-                if (isSeparator) {
-                    const hasLeft = trimmed.startsWith(':');
-                    const hasRight = trimmed.endsWith(':');
-                    if (hasLeft && hasRight) return `:${'-'.repeat(Math.max(1, width - 2))}:`;
-                    if (hasLeft) return `:${'-'.repeat(Math.max(1, width - 1))}`;
-                    if (hasRight) return `${'-'.repeat(Math.max(1, width - 1))}:`;
-                    return '-'.repeat(Math.max(1, width));
-                } else {
-                    return trimmed.padEnd(width);
-                }
-            }).join(' | ');
-            formattedLines.push(`| ${formattedRow} |`);
-        });
-        tableRows = [];
+    const isImportExport = (line: string) => {
+        const trimmed = line.trim();
+        return /^(import|export)\s/.test(trimmed);
     };
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const trimmed = line.trim();
 
-        // 0. Handle Masks (Frontmatter) - if it's a mask line, just push it
-        if (trimmed.startsWith(maskPrefix)) {
-            formattedLines.push(trimmed);
+        // If we are already in a code block, formatMarkdownDeep will handle it.
+        // But we need to make sure we don't start JSX detection inside a code block.
+        // This is tricky because we are pre-processing.
+        // Ideally formatMarkdownDeep should handle the masking, but we want to intercept JSX.
+        // Let's rely on a simplified check for code fences to avoid masking inside code blocks.
+
+        // ... (We would need to track code blocks to be safe, but let's assume JSX blocks are top-level for now)
+
+        if (inJsxBlock) {
+            jsxBuffer.push(line);
+            // Check for end of JSX block
+            // Heuristic: If line closes the tag or we have balanced tags?
+            // Validating JSX nesting is hard.
+            // For now, let's assume if it looks like a markdown header or list item, it breaks the block?
+            // No, JSX can contain markdown.
+            // Better heuristic: Consume until we see a closing tag that balances?
+            // Or just consume until we hit a blank line followed by non-JSX?
+
+            // Let's try a balance counter
+            // (Simple version)
+            const openTags = (jsxBuffer.join('\n').match(/<[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?>/g) || []).filter(t => !t.endsWith('/>')).length;
+            const closeTags = (jsxBuffer.join('\n').match(/<\/[a-zA-Z][a-zA-Z0-9]*>/g) || []).length;
+
+            if (openTags === closeTags && openTags > 0) {
+                // Balanced
+                const placeholder = `${maskPrefix}JSX_${masks.length}___`;
+                masks.push(jsxBuffer.join('\n'));
+                processedLines.push(placeholder);
+                inJsxBlock = false;
+                jsxBuffer = [];
+            } else if (line.trim() === '' && openTags === closeTags) {
+                // Empty line and balanced (maybe we missed the balance point or it was self closing lines)
+                 const placeholder = `${maskPrefix}JSX_${masks.length}___`;
+                masks.push(jsxBuffer.join('\n'));
+                processedLines.push(placeholder);
+                inJsxBlock = false;
+                jsxBuffer = [];
+            }
             continue;
         }
 
-        // 1. Code Blocks
-        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
-            if (inTable) {
-                flushTable();
-                inTable = false;
-            }
+        if (isImportExport(line)) {
+            const placeholder = `${maskPrefix}IMP_${masks.length}___`;
+            masks.push(line);
+            processedLines.push(placeholder);
+            continue;
+        }
 
-            const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
-            const currentFence = fenceMatch ? fenceMatch[1] : trimmed.substring(0, 3);
+        if (isJsxStart(line) && !line.trim().startsWith('```')) {
+            inJsxBlock = true;
+            jsxBuffer.push(line);
 
-            if (!inCodeBlock) {
-                inCodeBlock = true;
-                codeBlockFence = currentFence;
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(trimmed);
-            } else {
-                if (trimmed.startsWith(codeBlockFence)) {
-                    inCodeBlock = false;
-                    formattedLines.push(trimmed);
-                    codeBlockFence = '';
-                } else {
-                    formattedLines.push(line);
-                }
+            // Check if single line self-closing or balanced
+             const openTags = (line.match(/<[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?>/g) || []).filter(t => !t.endsWith('/>')).length;
+             const closeTags = (line.match(/<\/[a-zA-Z][a-zA-Z0-9]*>/g) || []).length;
+             const selfClosing = (line.match(/<[a-zA-Z][^>]*\/>/g) || []).length;
+
+            if (openTags === closeTags && openTags > 0) {
+                 const placeholder = `${maskPrefix}JSX_${masks.length}___`;
+                masks.push(jsxBuffer.join('\n'));
+                processedLines.push(placeholder);
+                inJsxBlock = false;
+                jsxBuffer = [];
+            } else if (openTags === 0 && selfClosing > 0) {
+                 const placeholder = `${maskPrefix}JSX_${masks.length}___`;
+                masks.push(jsxBuffer.join('\n'));
+                processedLines.push(placeholder);
+                inJsxBlock = false;
+                jsxBuffer = [];
             }
             continue;
         }
 
-        if (inCodeBlock) {
-            formattedLines.push(line);
-            continue;
-        }
-
-        // 2. ESM Imports/Exports (MDX specific)
-        if (/^(import|export)\s/.test(trimmed)) {
-            formattedLines.push(trimmed);
-            continue;
-        }
-
-        // 3. JSX Elements (Simple Indentation)
-        // Check if line looks like a tag start or end
-        const isTagStart = /<[a-zA-Z][^>]*>?/.test(trimmed) && !trimmed.startsWith('<!--');
-        const isTagEnd = /<\/[a-zA-Z][^>]*>/.test(trimmed);
-        const isSelfClosing = /\/>$/.test(trimmed);
-
-        if (isTagStart || isTagEnd || jsxIndentLevel > 0) {
-            if (inTable) {
-                flushTable();
-                inTable = false;
-            }
-
-            // Heuristic indentation for JSX
-            // If it starts with closing tag, dedent this line
-            let currentLineIndent = jsxIndentLevel;
-            if (trimmed.startsWith('</') || trimmed.startsWith('/>') || trimmed.startsWith('}')) {
-                currentLineIndent = Math.max(0, jsxIndentLevel - 1);
-            }
-
-            formattedLines.push('  '.repeat(currentLineIndent) + trimmed);
-
-            // Calculate next indentation
-            // Count open tags and close tags
-            // This is very rough but okay for a fallback
-            const openTags = (trimmed.match(/<[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?>/g) || []).filter(t => !t.endsWith('/>')).length;
-            const closeTags = (trimmed.match(/<\/[a-zA-Z][a-zA-Z0-9]*>/g) || []).length;
-
-            // Also handle braces for JS expressions in JSX
-            const openBraces = (trimmed.match(/\{/g) || []).length;
-            const closeBraces = (trimmed.match(/\}/g) || []).length;
-
-            let netChange = openTags - closeTags + (openBraces - closeBraces);
-
-            // Correction for self-closing in match logic
-            // The regex for openTags excludes /> ending, but complex props might trick it.
-
-            jsxIndentLevel = Math.max(0, jsxIndentLevel + netChange);
-            continue;
-        }
-
-        // 4. Tables
-        if (trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.indexOf('|', 1) !== -1) {
-            if (!inTable) {
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                inTable = true;
-            }
-            const cells = trimmed.split('|').slice(1, -1);
-            tableRows.push(cells);
-            continue;
-        } else if (inTable) {
-            flushTable();
-            inTable = false;
-        }
-
-        // 5. Headers
-        if (trimmed.startsWith('#')) {
-            const match = trimmed.match(/^(#+)(.*)$/);
-            if (match) {
-                if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                    formattedLines.push('');
-                }
-                formattedLines.push(`${match[1]} ${match[2].trim()}`);
-                continue;
-            }
-        }
-
-        // 6. Lists and others - Fallback to simple preservation or minimal formatting
-        // Ideally we call formatMarkdownDeep logic here, but mixing line loops is hard.
-        // Let's implement basic list handling.
-
-        const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
-        if (listMatch) {
-            const indent = listMatch[1];
-            let marker = listMatch[2];
-            const content = listMatch[3].trim();
-
-            if (['*', '+'].includes(marker)) marker = '-';
-
-            // Preserve indentation level
-            formattedLines.push(`${indent}${marker} ${content}`);
-            continue;
-        }
-
-        // Default
-        if (trimmed === '') {
-            if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                formattedLines.push('');
-            }
-        } else {
-            formattedLines.push(trimmed);
-        }
+        processedLines.push(line);
     }
 
-    if (inTable) {
-        flushTable();
+    // Flush remaining JSX buffer
+    if (jsxBuffer.length > 0) {
+        const placeholder = `${maskPrefix}JSX_${masks.length}___`;
+        masks.push(jsxBuffer.join('\n'));
+        processedLines.push(placeholder);
     }
 
-    let result = formattedLines.join('\n');
+    maskedText = processedLines.join('\n');
 
-    // Unmask
-    result = result.replace(new RegExp(`${maskPrefix}(\\d+)___`, 'g'), (_: string, index: string) => {
-        return masks[parseInt(index)];
+    // 3. Format Markdown
+    let formattedMarkdown = formatMarkdownDeep(maskedText);
+
+    // 4. Unmask and Format JSX
+    const jsBeautify = require('js-beautify');
+
+    // We capture leading whitespace (indentation) applied by the Markdown formatter
+    formattedMarkdown = formattedMarkdown.replace(new RegExp(`([ \\t]*)${maskPrefix}(FM|JSX|IMP)_(\\d+)___`, 'g'), (match, indent, type, index) => {
+        let content = masks[parseInt(index)];
+
+        if (type === 'FM') {
+            return content; // Return Frontmatter as is
+        }
+
+        if (type === 'IMP') {
+            content = content.trim();
+        } else if (type === 'JSX') {
+            // Format JSX using js-beautify (html)
+            try {
+                content = jsBeautify.html(content, {
+                    indent_size: 2,
+                    indent_char: ' ',
+                    max_preserve_newlines: 1,
+                    preserve_newlines: true,
+                    indent_scripts: 'keep',
+                    end_with_newline: false,
+                    wrap_line_length: 80
+                });
+            } catch (e) {
+                // Keep original if formatting fails
+            }
+        }
+
+        // Apply indentation to all lines if nested
+        if (indent) {
+            return content.split('\n').map((line, i) => {
+                // First line already has indentation from the match replacement context if we return just text?
+                // Wait, replace substitutes the *entire match* (including indent).
+                // So we need to return `indent + line` for the first line?
+                // No, if we return `indent + content`, the indent is duplicated for the first line?
+                // The regex matches `(indent)PLACEHOLDER`.
+                // We return replacement.
+                // So we should return `indent + line` for ALL lines.
+                return indent + line;
+            }).join('\n');
+        }
+
+        return content;
     });
 
-    if (!result.endsWith('\n')) {
-        result += '\n';
-    }
-
-    return result;
+    return formattedMarkdown;
 }
