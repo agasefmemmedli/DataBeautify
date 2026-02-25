@@ -1,167 +1,268 @@
 import { tokenize, Token } from './powershell_tokenizer';
 
+class TokenStream {
+    private tokens: Token[];
+    private position: number;
+
+    constructor(tokens: Token[]) {
+        this.tokens = tokens;
+        this.position = 0;
+    }
+
+    public peek(offset: number = 0): Token | null {
+        if (this.position + offset >= this.tokens.length) return null;
+        return this.tokens[this.position + offset];
+    }
+
+    public next(): Token | null {
+        if (this.position >= this.tokens.length) return null;
+        return this.tokens[this.position++];
+    }
+
+    public hasMore(): boolean {
+        return this.position < this.tokens.length;
+    }
+}
+
 export function formatPowerShellDeep(text: string): string {
     const tokens = tokenize(text);
     if (tokens.length === 0) return '';
 
+    const stream = new TokenStream(tokens);
     let formatted = '';
     let indentLevel = 0;
-    const indentString = '    ';
-
+    const indentString = '    '; // 4 spaces standard
     let lastToken: Token | null = null;
-    let lastLastToken: Token | null = null;
-    let i = 0;
+    let newlinePending = 0; // 0: none, 1: strict newline, 2: blank line
+    let spacePending = false;
+    let lastTokenIsUnary = false;
 
-    // Configurable rules
-    const rules = {
-        keywordCase: 'lower',
-        indentSize: 4,
-        otbs: true
-    };
+    // Track context
+    const stack: string[] = [];
 
-    while (i < tokens.length) {
-        const token = tokens[i];
+    function getIndent(): string {
+        return indentString.repeat(Math.max(0, indentLevel));
+    }
 
-        // Whitespace Handling
-        if (token.type === 'Whitespace') {
-            const newlines = token.value.match(/\n/g);
-            if (newlines) {
-                const count = Math.min(newlines.length, 2);
-                let existingNewlines = 0;
-                let j = formatted.length - 1;
-                while (j >= 0 && formatted[j] === '\n') {
-                    existingNewlines++;
-                    j--;
-                }
-                const needed = count - existingNewlines;
-                if (needed > 0) {
-                    formatted += '\n'.repeat(needed);
-                }
+    function append(str: string) {
+        if (newlinePending > 0) {
+            if (formatted.length > 0) {
+                formatted = formatted.trimEnd();
+                formatted += '\n'.repeat(newlinePending);
             }
-            i++;
+            formatted += getIndent();
+            newlinePending = 0;
+            spacePending = false;
+        } else if (spacePending && formatted.length > 0 && !formatted.endsWith(' ') && !formatted.endsWith('\n')) {
+            formatted += ' ';
+            spacePending = false;
+        }
+        formatted += str;
+    }
+
+    const isWord = (t: Token) => ['Identifier', 'Keyword', 'Variable', 'String', 'Unknown'].includes(t.type);
+
+    while (stream.hasMore()) {
+        const token = stream.next()!;
+
+        // 1. Handle Whitespace/Comments
+        if (token.type === 'Whitespace') {
+            const newlines = (token.value.match(/\n/g) || []).length;
+            if (newlines > 0) {
+                 if (newlinePending === 0) {
+                     newlinePending = newlines > 1 ? 2 : 1;
+                 } else if (newlines > 1) {
+                     newlinePending = 2;
+                 }
+            } else {
+                spacePending = true;
+            }
             continue;
         }
 
-        // Determine Value and Apply Case Normalization
-        let value = token.value;
-
-        if (token.type === 'Keyword') {
-            if (rules.keywordCase === 'lower') {
-                value = value.toLowerCase();
+        if (token.type === 'Comment') {
+            if (!newlinePending && formatted.length > 0 && !formatted.endsWith('\n')) {
+                spacePending = true;
             }
-        } else if (token.type === 'Identifier') {
-            // PascalCase for Cmdlets (Verb-Noun)
-            if (/^[a-z]+-[a-z]+$/i.test(value)) {
-                value = value.replace(/\b\w/g, l => l.toUpperCase()).replace(/-\w/g, l => l.toUpperCase());
+            append(token.value);
+            // Comments usually force newline after, unless block comment?
+            if (token.value.startsWith('#') && !token.value.startsWith('<#')) {
+                newlinePending = 1;
+            } else if (token.value.startsWith('<#')) {
+                if (token.value.includes('\n')) newlinePending = 1;
+                else spacePending = true;
             }
-        } else if (token.type === 'Variable') {
-            if (['$true', '$false', '$null', '$host', '$home', '$pshome', '$error'].includes(value.toLowerCase())) {
-                value = value.toLowerCase();
-            }
+            lastToken = token;
+            lastTokenIsUnary = false;
+            continue;
         }
 
-        // Logic to determine if we need a space before this token
-        let needsSpace = false;
+        // 2. Prepare Value (Case Normalization)
+        let value = token.value;
+        if (token.type === 'Keyword') {
+            value = value.toLowerCase();
+        } else if (token.type === 'Identifier') {
+             // Cmdlet PascalCase (Verb-Noun)
+             if (/^[a-z]+-[a-z]+$/i.test(value)) {
+                 value = value.replace(/\b\w/g, c => c.toUpperCase()).replace(/-\w/g, c => c.toUpperCase());
+             }
+        }
 
-        if (lastToken) {
-            const isStartOfLine = formatted.endsWith('\n') || formatted === '';
+        // 3. Logic: Before Append (Dedents)
 
-            if (!isStartOfLine) {
-                 if (!formatted.endsWith(' ')) {
-                     // 1. Generic "Word" Separation
-                     const isPunctuation = (t: Token) => t.type === 'Punctuation';
-                     // Treat Operator as Word generally, but exceptions handled later
-                     if (!isPunctuation(lastToken) && !isPunctuation(token)) {
-                         needsSpace = true;
-                     }
+        // Dedent on Closing
+        if (value === '}' || value === ')' || value === ']') {
+            if (stack.length > 0) {
+                 const ctx = stack[stack.length - 1];
+                 if ((value === '}' && (ctx === 'Block' || ctx === 'Hash')) ||
+                     (value === ')' && (ctx === 'Paren' || ctx === 'Array')) ||
+                     (value === ']' && ctx === 'Index')) {
+                     stack.pop();
+                     indentLevel = Math.max(0, indentLevel - 1);
+                 }
+            }
 
-                     // 2. Specific Rules (Overrides or Additions)
-
-                     // Comma/Semi
-                     if (lastToken.value === ',' || lastToken.value === ';') needsSpace = true;
-
-                     // Braces
-                     if (value === '{') needsSpace = true;
-                     if (lastToken.value === '}' && value !== ',' && value !== ';') needsSpace = true;
-
-                     // Pipe
-                     if (value === '|' || lastToken.value === '|') needsSpace = true;
-
-                     // Parentheses/Brackets - Inner logic
-                     // `( word` -> No space.
-                     if (['(', '['].includes(lastToken.value)) needsSpace = false;
-                     // `word )` -> No space.
-                     if ([')', ']'].includes(value)) needsSpace = false;
-
-                     // Keyword + ( -> Space
-                     if (lastToken.type === 'Keyword' && value === '(') needsSpace = true;
-
-                     // ) + { -> Space
-                     if (lastToken.value === ')' && value === '{') needsSpace = true;
-
-                     // 3. Exceptions (Force No Space)
-
-                     // Dot / Static / Range
-                     if (['.', '::', '..'].includes(value)) needsSpace = false;
-                     if (['.', '::', '..'].includes(lastToken.value)) needsSpace = false;
-
-                     // Unary Operators
-                     // ! (Not)
-                     if (lastToken.value === '!') needsSpace = false;
-
-                     // +/- Unary check
-                     if (['+', '-'].includes(lastToken.value)) {
-                         // Check if lastToken was Unary
-                         // If lastLastToken was Operator, Punctuation (openers), Keyword -> Unary
-                         // If lastLastToken was Identifier, Variable, String, Number, Punctuation (closers) -> Binary
-
-                         let isUnary = true; // Default to unary if start of file
-                         if (lastLastToken) {
-                             const llt = lastLastToken;
-                             if (['Identifier', 'Variable', 'String'].includes(llt.type)) isUnary = false;
-                             else if (llt.type === 'Punctuation' && [')', ']', '}'].includes(llt.value)) isUnary = false;
-                             // Else (Operator, Keyword, (, [, {, ,, ;) -> Unary
-                         }
-
-                         if (isUnary) needsSpace = false;
-                     }
-
-                     // ++ / --
-                     if (['++', '--'].includes(value) || ['++', '--'].includes(lastToken.value)) needsSpace = false;
-
-                     // Type Cast: ] $var -> No space
-                     if (lastToken.value === ']' && token.type === 'Variable') needsSpace = false;
+            if (value === '}') {
+                 // Empty block check
+                 if (lastToken && lastToken.value === '{') {
+                     newlinePending = 0;
+                     spacePending = false;
+                 } else {
+                     if (!newlinePending) newlinePending = 1;
                  }
             }
         }
 
-        // Apply Indentation and Spacing
-        const isStartOfLine = formatted.endsWith('\n') || formatted === '';
+        // 4. Determine Spacing
 
-        if (token.value === '}') {
-            indentLevel = Math.max(0, indentLevel - 1);
+        // Helper to determine if current token is unary
+        const isUnary = (curr: Token, prev: Token | null) => {
+            if (curr.type !== 'Operator') return false;
+            const val = curr.value.toLowerCase();
+            if (!['-', '+', '!', 'not', '-not', '-bnot'].includes(val)) return false;
+
+            // Check context
+            if (!prev) return true; // Start of file
+            const type = prev.type;
+            const pVal = prev.value;
+
+            if (['Operator', 'Keyword', 'Punctuation'].includes(type)) {
+                // Check specific punctuation closures that imply binary
+                if (type === 'Punctuation' && [')', ']', '}'].includes(pVal)) return false;
+                return true;
+            }
+            return false;
+        };
+
+        const currentIsUnary = isUnary(token, lastToken);
+
+        // Calculate addSpace
+        let addSpace: boolean = spacePending;
+
+        if (lastToken) {
+            // Word + Word -> Space
+            if (isWord(lastToken) && isWord(token)) addSpace = true;
+
+            // Keyword + ( -> Space
+            if (lastToken.type === 'Keyword' && value === '(') addSpace = true;
+
+            // ) + { -> Space
+            if (lastToken.value === ')' && value === '{') addSpace = true;
         }
 
-        if (isStartOfLine) {
-            formatted += indentString.repeat(indentLevel);
-        } else if (needsSpace) {
-            formatted += ' ';
+        // Operator Spacing
+        if (token.type === 'Operator') {
+             if (['.', '::', '..'].includes(value)) {
+                 addSpace = false;
+                 if (formatted.endsWith(' ')) formatted = formatted.slice(0, -1);
+             } else {
+                 // Space before operator (both unary and binary usually)
+                 // Exception: ( -unary
+                 if (lastToken && (lastToken.value === '(' || lastToken.value === '[' || lastToken.value === '{')) {
+                     addSpace = false;
+                 } else {
+                     addSpace = true;
+                 }
+             }
         }
 
-        formatted += value;
+        // Previous Operator Spacing (Space After)
+        if (lastToken && lastToken.type === 'Operator') {
+             if (['.', '::', '..'].includes(lastToken.value)) {
+                 addSpace = false;
+             } else {
+                 // If last was Unary -> NO space after (unless named operator like -not)
+                 if (lastTokenIsUnary) {
+                     if (/^-[a-z]/i.test(lastToken.value)) {
+                         addSpace = true;
+                     } else {
+                         addSpace = false;
+                     }
+                 } else {
+                     // Binary -> Space after
+                     addSpace = true;
+                 }
+             }
+        }
 
+        // Punctuation Spacing
+        if (value === ',' || value === ';') {
+             addSpace = false;
+             if (formatted.endsWith(' ')) formatted = formatted.slice(0, -1);
+        }
+
+        // Update spacePending
+        spacePending = addSpace;
+
+        // OTBS: } else {
+        if (['else', 'elseif', 'catch', 'finally', 'process', 'begin', 'end'].includes(value) && token.type === 'Keyword') {
+            if (lastToken && lastToken.value === '}') {
+                 newlinePending = 0;
+                 spacePending = true;
+            } else {
+                 if (!newlinePending) newlinePending = 1;
+            }
+        }
+
+        // 5. Append
+        append(value);
+
+        // 6. Logic: After Append (Indents, Newlines)
+
+        // Indent on Opening
         if (value === '{') {
+            stack.push('Block');
             indentLevel++;
+            newlinePending = 1;
+            if (lastToken && lastToken.value === '@') {
+                stack.pop();
+                stack.push('Hash');
+            }
+        } else if (value === '(') {
+            stack.push('Paren');
+            indentLevel++;
+            if (lastToken && lastToken.value === '@') {
+                stack.pop();
+                stack.push('Array');
+            }
+        } else if (value === '[') {
+             stack.push('Index');
+             indentLevel++;
         }
 
-        if (value === '|') {
-            formatted += '\n';
+        // Newline after specific tokens
+        if (value === ';') {
+            newlinePending = 1;
+        } else if (value === '|') {
+            newlinePending = 1;
+            // TODO: Handle pipeline indentation
+        } else if (value === ',') {
+            spacePending = true;
         }
 
-        lastLastToken = lastToken;
         lastToken = token;
-        i++;
+        lastTokenIsUnary = currentIsUnary;
     }
 
-    return formatted.trim() + '\n';
+    return formatted + '\n';
 }

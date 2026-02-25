@@ -15,14 +15,18 @@ export function tokenize(text: string): Token[] {
         'if', 'else', 'elseif', 'foreach', 'for', 'while', 'do', 'until', 'switch',
         'function', 'filter', 'workflow', 'class', 'enum', 'configuration',
         'try', 'catch', 'finally', 'throw', 'return', 'break', 'continue', 'exit',
-        'in', 'data', 'dynamicparam', 'param', 'begin', 'process', 'end'
+        'in', 'data', 'dynamicparam', 'param', 'begin', 'process', 'end',
+        'trap', 'using', 'assembly', 'command', 'module', 'namespace', 'type'
     ]);
 
     const operators = new Set([
         '-eq', '-ne', '-gt', '-ge', '-lt', '-le', '-like', '-notlike', '-match', '-notmatch',
         '-contains', '-notcontains', '-in', '-notin', '-replace', '-split', '-join', '-is', '-isnot',
         '-as', '-and', '-or', '-xor', '-not', '-band', '-bor', '-bxor', '-bnot',
-        '-f', '-c', '-i' // format, case-sensitive/insensitive prefix
+        '-f', '-c', '-i', '-ieq', '-ine', '-igt', '-ige', '-ilt', '-ile', '-ilike', '-inotlike',
+        '-imatch', '-inotmatch', '-icontains', '-inotcontains', '-iin', '-inotin', '-ireplace', '-isplit',
+        '-ceq', '-cne', '-cgt', '-cge', '-clt', '-cle', '-clike', '-cnotlike', '-cmatch', '-cnotmatch',
+        '-ccontains', '-cnotcontains', '-cin', '-cnotin', '-creplace', '-csplit'
     ]);
 
     while (i < text.length) {
@@ -100,7 +104,6 @@ export function tokenize(text: string): Token[] {
                 }
             } else {
                 // Regular variable $var
-                // Matches alphanumeric, _, ?, ^, :, etc.
                 while (i < text.length && /[a-zA-Z0-9_?^:]/.test(text[i])) {
                     value += text[i];
                     col++;
@@ -114,48 +117,37 @@ export function tokenize(text: string): Token[] {
         // Strings
         // Here-Strings check must come before regular strings
         if (char === '@' && (nextChar === '"' || nextChar === "'")) {
-            // Potential Here-String or Splatting or Array Literal @(
-            // Here-String must be followed by newline
+            // Check for Here-String Start
+            // Here-String must be followed by newline (or carriage return) immediately?
             // Actually, syntax is @' <newline> ... <newline> '@
-            // Checking if it's a here-string start is tricky without lookahead for newline.
-            // But let's check basic splatting first: @var
-            // Wait, @( is array. @{ is hash. @var is splat.
-            // @" and @' are here-strings.
+            // But strict parser requires check for newline.
+            // We'll be lenient and treat it as String if it looks like one.
 
-            if (nextChar === '"' || nextChar === "'") {
-                // Here-String Start?
-                // PowerShell is strict: @' must be last on line (followed by newline)
-                // We'll approximate.
-                // Actually, let's treat it as a String if it looks like one.
-                const quote = nextChar;
-                let value = '@' + quote;
-                const startCol = col;
-                i += 2;
-                col += 2;
+            const quote = nextChar;
+            let value = '@' + quote;
+            const startCol = col;
+            i += 2;
+            col += 2;
 
-                // Find end: newline + quote + @
-                // e.g. \n"@
-                while (i < text.length) {
-                    const c = text[i];
-                    if (c === '\n') {
-                        line++;
-                        col = 0;
-                    }
-                    value += c;
-
-                    if (value.endsWith('\n' + quote + '@') || value.endsWith('\r' + quote + '@')) {
-                         // End of here-string
-                         break;
-                    }
-                    col++;
-                    i++;
+            // Find end: newline + quote + @
+            while (i < text.length) {
+                const c = text[i];
+                if (c === '\n') {
+                    line++;
+                    col = 0;
                 }
-                // Determine if it was really a here-string.
-                // If we didn't find the end marker, maybe it wasn't a here-string?
-                // But @' is only valid as here-string start (or invalid syntax).
-                tokens.push({ type: 'String', value, line, col: startCol });
-                continue;
+                value += c;
+
+                if (value.endsWith('\n' + quote + '@') || value.endsWith('\r' + quote + '@')) {
+                     col++;
+                     i++;
+                     break;
+                }
+                col++;
+                i++;
             }
+            tokens.push({ type: 'String', value, line, col: startCol });
+            continue;
         }
 
         if (char === '"') {
@@ -280,7 +272,27 @@ export function tokenize(text: string): Token[] {
         }
 
         // Other Operators
-        if (/[|+=*/%!&]/.test(char)) {
+        // Handle % and ? specially as Alias/Identifier if standalone?
+        // Actually, let's treat % as Operator for now (consistent with |), but ? as Identifier/Alias.
+
+        if (char === '?' && !/[a-zA-Z0-9_]/.test(nextChar)) {
+             // Alias for Where-Object
+             tokens.push({ type: 'Identifier', value: '?', line, col });
+             i++;
+             col++;
+             continue;
+        }
+
+        if (char === '%' && !/[a-zA-Z0-9_]/.test(nextChar)) {
+             // Alias for ForEach-Object
+             // Treat as Identifier so it behaves like command
+             tokens.push({ type: 'Identifier', value: '%', line, col });
+             i++;
+             col++;
+             continue;
+        }
+
+        if (/[|+=*/!&\-]/.test(char)) {
              let value = char;
              const startCol = col;
              i++;
@@ -288,7 +300,6 @@ export function tokenize(text: string): Token[] {
 
              // Check for multi-char ops: +=, -=, *=, /=, %=, ++, --
              if (/[=+-]/.test(text[i])) {
-                  // e.g. +=, ++
                   value += text[i];
                   i++;
                   col++;
@@ -302,7 +313,6 @@ export function tokenize(text: string): Token[] {
             let value = '';
             const startCol = col;
             while (i < text.length && /[a-zA-Z0-9_\-]/.test(text[i])) {
-                // PowerShell identifiers can have dashes
                 value += text[i];
                 col++;
                 i++;
