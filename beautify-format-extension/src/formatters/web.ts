@@ -498,25 +498,24 @@ export async function handleSASS(editor: vscode.TextEditor, text: string) {
     }
 
     try {
-        // Try Deep Formatting (Fault Tolerant)
-        formatted = formatSassDeep(text);
+        // Try SassFormatter (Standard)
+        formatted = SassFormatter.Format(text, {
+            tabSize: 2,
+            insertSpaces: true,
+            setPropertySpace: true,
+            deleteEmptyRows: false,
+            lineEnding: 'LF'
+        });
 
-    } catch (deepError: any) {
-        console.warn('SASS Deep Formatting failed, falling back to SassFormatter', deepError);
-        // Fallback to SassFormatter
+    } catch (sassError: any) {
+        // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            formatted = SassFormatter.Format(text, {
-                tabSize: 2,
-                insertSpaces: true,
-                setPropertySpace: true,
-                deleteEmptyRows: false,
-                lineEnding: 'LF'
-            });
+            formatted = formatSassDeep(text);
             if (!validationMessage) {
-                 validationMessage = `Deep formatting failed. Used standard formatter. ${deepError.message}`;
+                 validationMessage = `Standard formatter failed, using resilient fallback. ${sassError.message}`;
             }
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format SASS: ${error.message}`);
+        } catch (deepError: any) {
+            vscode.window.showErrorMessage(`Failed to format SASS: ${deepError.message}`);
             return;
         }
     }
