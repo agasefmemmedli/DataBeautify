@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] CSS (Deep Formatting Implemented)
 - [x] SASS (Deep Formatting Implemented)
 - [x] ENV (Deep Formatting Implemented)
 - [x] Makefile (Deep Formatting Implemented)

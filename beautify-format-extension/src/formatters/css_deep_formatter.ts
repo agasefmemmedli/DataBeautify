@@ -377,26 +377,44 @@ function reconstructValue(tokens: Token[]): string {
 
 
 function reconstructSelector(tokens: Token[]): string {
-    // Selectors also need whitespace preservation inside strings (attribute selectors).
-    // So we should use similar logic to reconstruct, but be careful.
-    // `reconstruct` logic:
-    // t.type === Whitespace -> ' '
-    // t.type === String -> t.value (preserves internal space)
-    // Regex replace `/\s+/g, ' '` at the end...
-    // THIS BREAKS STRINGS!
-    // Because `t.value` ("   ") contains spaces. Regex will collapse them!
-
-    // Fix: Remove the regex replace in `reconstruct` and `reconstructSelector`.
-    // Rely on tokenizer merging whitespace tokens + outputting single space.
-
+    // Strict spacing for selectors (e.g. "div > span", "div, span")
     let res = '';
+    let pendingSpace = false;
+
     for (const t of tokens) {
         if (t.type === TokenType.Whitespace) {
-            res += ' ';
-        } else {
-            res += t.value;
+            pendingSpace = true;
+            continue;
         }
+
+        // Combinators need spaces around them
+        if (t.type === TokenType.Operator && ['>', '+', '~'].includes(t.value)) {
+            // Ensure space before
+            if (res.length > 0 && !res.endsWith(' ')) {
+                res += ' ';
+            }
+            res += t.value;
+            // Force space after
+            pendingSpace = true;
+            continue;
+        }
+
+        // Commas need space after, no space before
+        if (t.type === TokenType.Comma) {
+            res = res.trimEnd();
+            res += ',';
+            pendingSpace = true;
+            continue;
+        }
+
+        // Standard token handling
+        if (pendingSpace) {
+            if (res.length > 0) res += ' ';
+            pendingSpace = false;
+        }
+        res += t.value;
     }
+
     return res.trim();
 }
 
