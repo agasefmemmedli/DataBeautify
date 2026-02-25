@@ -1,12 +1,12 @@
 export enum TokenType {
     TagOpen,
     TagClose,
-    TagSelfClose, // Used for HTML self-closing
+    TagSelfClose, // Used for HTML self-closing />
     TagEnd, // Used for HTML >
     OutputOpen, // {{
     OutputClose, // }}
     Text,
-    Comment, // {% comment %} ... {% endcomment %}
+    Comment, // {% comment %} ... {% endcomment %} or <!-- ... -->
     BlockOpen, // {% if ... %}
     BlockClose, // {% endif %}
     BlockInverse, // {% else %}
@@ -30,14 +30,20 @@ export class LiquidTokenizer {
     private line: number = 1;
     private col: number = 1;
 
-    // Void elements in HTML
-    private voidTags = new Set([
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr', '!doctype'
+    // Standard Liquid blocks
+    private blockTags = new Set([
+        'if', 'unless', 'case', 'for', 'tablerow', 'capture', 'form', 'paginate'
     ]);
 
-    // Raw blocks in Liquid
-    private rawBlocks = new Set(['schema', 'style', 'javascript', 'raw']);
+    // Inverse blocks (intermediate)
+    private inverseTags = new Set([
+        'else', 'elsif', 'when'
+    ]);
+
+    // Raw blocks (content not parsed as Liquid/HTML usually)
+    private rawBlocks = new Set([
+        'schema', 'style', 'javascript', 'stylesheet', 'raw'
+    ]);
 
     constructor(input: string) {
         this.input = input;
@@ -45,19 +51,21 @@ export class LiquidTokenizer {
 
     public tokenize(): Token[] {
         const tokens: Token[] = [];
-        let currentTagName: string | null = null;
 
         while (this.pos < this.input.length) {
             const char = this.input[this.pos];
 
             // 1. Liquid Tags: {% ... %}
-            if (char === '{' && this.input.startsWith('{%', this.pos)) {
-                tokens.push(this.readLiquidTag());
-                continue;
+            if (char === '{' && (this.input.startsWith('{%', this.pos))) {
+                const tag = this.readLiquidTag();
+                if (tag) {
+                    tokens.push(tag);
+                    continue;
+                }
             }
 
             // 2. Liquid Outputs: {{ ... }}
-            if (char === '{' && this.input.startsWith('{{', this.pos)) {
+            if (char === '{' && (this.input.startsWith('{{', this.pos))) {
                 tokens.push(this.readLiquidOutput());
                 continue;
             }
@@ -76,13 +84,13 @@ export class LiquidTokenizer {
                 }
             }
 
-            // 4. Text
+            // 4. Text / Whitespace
             tokens.push(this.readText());
         }
         return tokens;
     }
 
-    private readLiquidTag(): Token {
+    private readLiquidTag(): Token | null {
         const startLine = this.line;
         const startCol = this.col;
         const startPos = this.pos;
@@ -111,25 +119,18 @@ export class LiquidTokenizer {
             this.advance(1);
         }
 
+        if (endTag === '') {
+             // Unterminated tag
+             return { type: TokenType.Unknown, text: this.input.substring(startPos), line: startLine, col: startCol };
+        }
+
         this.advance(endTag.length); // Consume closing
 
         const fullText = this.input.substring(startPos, this.pos);
         const trimmedContent = content.trim();
         const firstWord = trimmedContent.split(/\s+/)[0];
 
-        let type = TokenType.TagOpen; // Generic tag
-
         if (firstWord === 'comment') {
-            // It's a comment block start, read until endcomment
-            // Actually, Liquid comments are {% comment %} ... {% endcomment %}
-            // We should treat the whole block as a comment token?
-            // Or just treat start/end as tokens?
-            // Usually formatters indent comments. So treat as BlockOpen?
-            // But content inside is just text.
-            // Let's treat the whole block as Comment token to preserve it exactly?
-            // Or parse inside?
-            // Standard Liquid: comment block content is ignored.
-            // Let's read until {% endcomment %}
             return this.readLiquidCommentBlock(startPos, startLine, startCol);
         }
 
@@ -137,16 +138,14 @@ export class LiquidTokenizer {
             return this.readLiquidRawBlock(firstWord, startPos, startLine, startCol);
         }
 
+        let type = TokenType.TagOpen;
+
         if (/^end/.test(firstWord)) {
             type = TokenType.BlockClose;
-        } else if (/^(if|unless|case|for|tablerow|capture|form|paginate)$/.test(firstWord)) {
+        } else if (this.blockTags.has(firstWord)) {
             type = TokenType.BlockOpen;
-        } else if (/^(else|elsif|when)$/.test(firstWord)) {
+        } else if (this.inverseTags.has(firstWord)) {
             type = TokenType.BlockInverse;
-        } else {
-            // Assign, echo, render, include, section, etc.
-            // Treat as self-closing / generic tag (indentation neutral usually)
-            type = TokenType.TagOpen;
         }
 
         return { type, text: fullText, line: startLine, col: startCol };
@@ -182,7 +181,13 @@ export class LiquidTokenizer {
     private readHTMLComment(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
+
+        // Consume <!--
+        this.advance(4);
+        text += '<!--';
+
         while (this.pos < this.input.length) {
             if (this.input.startsWith('-->', this.pos)) {
                 text += '-->';
@@ -220,15 +225,16 @@ export class LiquidTokenizer {
         const tokens: Token[] = [];
         const startLine = this.line;
         const startCol = this.col;
-        let text = '<';
-        this.advance(1);
+        let tagName = '';
 
-        while (this.pos < this.input.length && /[^<>\s]/.test(this.input[this.pos])) {
-            text += this.input[this.pos];
+        this.advance(1); // <
+
+        while (this.pos < this.input.length && /[^<>\s/]/.test(this.input[this.pos])) {
+            tagName += this.input[this.pos];
             this.advance(1);
         }
 
-        tokens.push({ type: TokenType.TagOpen, text, line: startLine, col: startCol });
+        tokens.push({ type: TokenType.TagOpen, text: '<' + tagName, line: startLine, col: startCol });
 
         // Attributes loop
         while (this.pos < this.input.length) {
@@ -248,7 +254,8 @@ export class LiquidTokenizer {
             } else if (char === '{') {
                 // Liquid inside tag (e.g. <div {% if x %}class="foo"{% endif %}>)
                 if (this.input.startsWith('{%', this.pos)) {
-                    tokens.push(this.readLiquidTag());
+                    const tag = this.readLiquidTag();
+                    if (tag) tokens.push(tag);
                 } else if (this.input.startsWith('{{', this.pos)) {
                     tokens.push(this.readLiquidOutput());
                 } else {
@@ -295,7 +302,7 @@ export class LiquidTokenizer {
                                             val += output.text;
                                         } else {
                                             const tag = this.readLiquidTag();
-                                            val += tag.text;
+                                            if (tag) val += tag.text;
                                         }
                                         continue;
                                     }
@@ -314,7 +321,7 @@ export class LiquidTokenizer {
                         }
                     }
                 } else {
-                    // Unexpected
+                    // Unexpected char inside tag, consume one
                     this.advance(1);
                 }
             }
@@ -323,8 +330,8 @@ export class LiquidTokenizer {
     }
 
     private readLiquidCommentBlock(startPos: number, line: number, col: number): Token {
-        // We already consumed {% comment %}
-        // Read until {% endcomment %}
+        // We already consumed {% comment %} or {%- comment -%}
+        // Now read until {% endcomment %}
         while (this.pos < this.input.length) {
             if (this.input.startsWith('{%', this.pos)) {
                 const check = this.input.substring(this.pos);
@@ -373,7 +380,10 @@ export class LiquidTokenizer {
             text += char;
             this.advance(1);
         }
-        return { type: TokenType.Text, text, line: startLine, col: startCol };
+
+        // Mark as whitespace if only whitespace
+        const type = /^\s*$/.test(text) ? TokenType.Whitespace : TokenType.Text;
+        return { type, text, line: startLine, col: startCol };
     }
 
     private advance(n: number) {

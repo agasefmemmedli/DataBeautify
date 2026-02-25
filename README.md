@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Liquid (Deep Formatting Implemented)
 - [x] Twig (Deep Formatting Implemented)
 - [x] PowerShell (Deep Formatting Implemented)
 - [x] Git Config (Deep Formatting Implemented)
