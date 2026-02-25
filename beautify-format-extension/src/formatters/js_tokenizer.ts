@@ -15,6 +15,14 @@ export type TokenType =
     | 'Operator'
     | 'Punctuation'
     | 'Decorator'
+    | 'JSXTagOpen'
+    | 'JSXTagClose'
+    | 'JSXTagSelfClose'
+    | 'JSXAttributeName'
+    | 'JSXAttributeValue'
+    | 'JSXText'
+    | 'JSXExpressionStart'
+    | 'JSXExpressionEnd'
     | 'Unknown';
 
 export interface Token {
@@ -57,8 +65,139 @@ export function tokenize(text: string): Token[] {
     const templateStack: number[] = [];
     let braceLevel = 0;
 
+    // JSX State
+    type Mode = 'Normal' | 'JSXTag' | 'JSXChildren';
+    const modeStack: { mode: Mode, braceLevelAtEntry: number }[] = [{ mode: 'Normal', braceLevelAtEntry: 0 }];
+
     while (pos < len) {
         const char = text[pos];
+        const currentMode = modeStack[modeStack.length - 1].mode;
+
+        // --- JSX Children Mode ---
+        if (currentMode === 'JSXChildren') {
+             if (char === '{') {
+                 addToken('JSXExpressionStart', '{');
+                 braceLevel++;
+                 modeStack.push({ mode: 'Normal', braceLevelAtEntry: braceLevel });
+                 continue;
+             }
+             if (char === '<') {
+                 // Check if it's closing tag </
+                 if (text[pos+1] === '/') {
+                     // Read closing tag
+                     let value = '</';
+                     let i = pos + 2;
+                     while (i < len && /[a-zA-Z0-9_:.-]/.test(text[i])) {
+                         value += text[i];
+                         i++;
+                     }
+                     while (i < len && /\s/.test(text[i])) i++; // skip space
+                     if (text[i] === '>') {
+                         value += '>';
+                         i++;
+                     }
+                     addToken('JSXTagClose', value);
+                     modeStack.pop(); // Exit JSXChildren
+                     continue;
+                 } else {
+                     // Start of new tag
+                     let value = '<';
+                     let i = pos + 1;
+                     // Fragment check
+                     if (text[i] === '>') {
+                         value += '>';
+                         i++;
+                         addToken('JSXTagOpen', value);
+                         modeStack.push({ mode: 'JSXChildren', braceLevelAtEntry: braceLevel });
+                         continue;
+                     }
+
+                     while (i < len && /[a-zA-Z0-9_:.-]/.test(text[i])) {
+                         value += text[i];
+                         i++;
+                     }
+                     addToken('JSXTagOpen', value);
+                     modeStack.push({ mode: 'JSXTag', braceLevelAtEntry: braceLevel });
+                     continue;
+                 }
+             }
+
+             // JSX Text
+             let value = '';
+             let i = pos;
+             while (i < len && text[i] !== '<' && text[i] !== '{') {
+                 value += text[i];
+                 i++;
+             }
+             if (value.length > 0) {
+                 addToken('JSXText', value);
+             }
+             continue;
+        }
+
+        // --- JSX Tag Mode (Attributes) ---
+        if (currentMode === 'JSXTag') {
+            if (/\s/.test(char)) {
+                // consume whitespace
+                 let value = char;
+                let i = pos + 1;
+                while (i < len && /\s/.test(text[i])) {
+                    value += text[i];
+                    i++;
+                }
+                addToken('Whitespace', value);
+                continue;
+            }
+            if (char === '/') {
+                if (text[pos+1] === '>') {
+                    addToken('JSXTagSelfClose', '/>');
+                    modeStack.pop(); // Exit JSXTag (and don't enter Children)
+                    continue;
+                }
+            }
+            if (char === '>') {
+                addToken('Operator', '>');
+                modeStack.pop(); // Exit JSXTag
+                modeStack.push({ mode: 'JSXChildren', braceLevelAtEntry: braceLevel });
+                continue;
+            }
+            if (char === '{') {
+                 addToken('JSXExpressionStart', '{');
+                 braceLevel++;
+                 modeStack.push({ mode: 'Normal', braceLevelAtEntry: braceLevel });
+                 continue;
+            }
+            if (char === '=') {
+                addToken('Operator', '=');
+                continue;
+            }
+            if (char === '"' || char === "'") {
+                // Attribute String Value
+                 let value = char;
+                let i = pos + 1;
+                while (i < len) {
+                    if (text[i] === '\\') { value += text[i]; if(i+1<len) value += text[i+1]; i+=2; continue; }
+                    value += text[i];
+                    if (text[i] === char) { i++; break; }
+                    i++;
+                }
+                addToken('JSXAttributeValue', value);
+                continue;
+            }
+            if (/[a-zA-Z_$]/.test(char)) {
+                 let value = char;
+                let i = pos + 1;
+                while (i < len && /[a-zA-Z0-9_$:.-]/.test(text[i])) {
+                    value += text[i];
+                    i++;
+                }
+                addToken('JSXAttributeName', value);
+                continue;
+            }
+             // Unknown char in tag mode? consume 1
+             addToken('Unknown', char);
+             continue;
+        }
 
         // Whitespace
         if (/\s/.test(char)) {
@@ -146,6 +285,79 @@ export function tokenize(text: string): Token[] {
             }
         }
 
+        // Check for JSX Start Heuristic
+        if (char === '<') {
+             // Heuristic: is this a tag start?
+             let lastToken: Token | undefined;
+             for (let k = tokens.length - 1; k >= 0; k--) {
+                 const t = tokens[k];
+                 if (t.type !== 'Whitespace' && t.type !== 'LineComment' && t.type !== 'BlockComment') {
+                     lastToken = t;
+                     break;
+                 }
+             }
+
+             const isOperator = lastToken && (
+                lastToken.type === 'Identifier' ||
+                lastToken.type === 'Number' ||
+                lastToken.type === 'String' ||
+                lastToken.type === 'Template' ||
+                lastToken.type === 'TemplateTail' ||
+                lastToken.type === 'Regex' ||
+                (lastToken.type === 'Punctuation' && (lastToken.value === ')' || lastToken.value === ']'))
+            );
+
+            // Allow keywords to precede JSX
+            let isKeywordException = false;
+            if (lastToken && lastToken.type === 'Keyword') {
+                isKeywordException = true;
+            }
+
+            if (!isOperator) {
+                // Check lookahead for tag structure
+                let i = pos + 1;
+                let isTag = false;
+                if (text[i] === '/') isTag = true; // </
+                else if (text[i] === '>') isTag = true; // <>
+                else if (/[a-zA-Z_$]/.test(text[i])) { // <Tag
+                     isTag = true;
+                }
+
+                if (isTag) {
+                    // Enter JSX Tag Mode
+                    let value = '<';
+                     let i = pos + 1;
+                     if (text[i] === '>') {
+                         value += '>';
+                         i++;
+                         addToken('JSXTagOpen', value);
+                         modeStack.push({ mode: 'JSXChildren', braceLevelAtEntry: braceLevel });
+                         continue;
+                     }
+                     while (i < len && /[a-zA-Z0-9_:.-]/.test(text[i])) {
+                         value += text[i];
+                         i++;
+                     }
+                     addToken('JSXTagOpen', value);
+                     modeStack.push({ mode: 'JSXTag', braceLevelAtEntry: braceLevel });
+                     continue;
+                }
+            }
+        }
+
+        // Check for } to exit JSX Expression
+        if (char === '}') {
+             if (modeStack.length > 1) {
+                 const entryLevel = modeStack[modeStack.length - 1].braceLevelAtEntry;
+                 if (braceLevel === entryLevel) {
+                     addToken('JSXExpressionEnd', '}');
+                     braceLevel--;
+                     modeStack.pop();
+                     continue;
+                 }
+             }
+        }
+
         // Strings
         if (char === "'" || char === '"') {
             let value = char;
@@ -213,15 +425,22 @@ export function tokenize(text: string): Token[] {
         }
 
         // Regex Literals
-        // Heuristic: if previous token was keyword, punctuation (except ) and ]), or operator
         if (char === '/') {
-            const lastToken = tokens.filter(t => t.type !== 'Whitespace' && t.type !== 'LineComment' && t.type !== 'BlockComment').pop();
+            let lastToken: Token | undefined;
+            for (let k = tokens.length - 1; k >= 0; k--) {
+                 const t = tokens[k];
+                 if (t.type !== 'Whitespace' && t.type !== 'LineComment' && t.type !== 'BlockComment') {
+                     lastToken = t;
+                     break;
+                 }
+            }
+
             const isDivision = lastToken && (
                 lastToken.type === 'Identifier' ||
                 lastToken.type === 'Number' ||
                 lastToken.type === 'String' ||
                 lastToken.type === 'Template' ||
-                lastToken.type === 'TemplateTail' || // Tail acts like string/expression end
+                lastToken.type === 'TemplateTail' ||
                 (lastToken.type === 'Punctuation' && (lastToken.value === ')' || lastToken.value === ']'))
             );
 
@@ -307,37 +526,35 @@ export function tokenize(text: string): Token[] {
 
         // Operators
         if (/[+\-*/%=&|<>!^~?]/.test(char)) {
-            // Check for multi-char operators
             let value = char;
             let i = pos + 1;
             const next = text[i];
             const next2 = text[i+1];
 
             if (
-                (char === '=' && next === '>') || // =>
-                (char === '?' && next === '.') || // ?.
-                (char === '?' && next === '?') || // ??
-                (char === '+' && next === '+') || // ++
-                (char === '-' && next === '-') || // --
-                (char === '&' && next === '&') || // &&
-                (char === '|' && next === '|') || // ||
-                (char === '<' && next === '=') || // <=
-                (char === '>' && next === '=') || // >=
-                (char === '=' && next === '=') || // ==
-                (char === '!' && next === '=') || // !=
-                (char === '*' && next === '*') || // **
-                (char === '<' && next === '<') || // <<
-                (char === '>' && next === '>')    // >>
+                (char === '=' && next === '>') ||
+                (char === '?' && next === '.') ||
+                (char === '?' && next === '?') ||
+                (char === '+' && next === '+') ||
+                (char === '-' && next === '-') ||
+                (char === '&' && next === '&') ||
+                (char === '|' && next === '|') ||
+                (char === '<' && next === '=') ||
+                (char === '>' && next === '=') ||
+                (char === '=' && next === '=') ||
+                (char === '!' && next === '=') ||
+                (char === '*' && next === '*') ||
+                (char === '<' && next === '<') ||
+                (char === '>' && next === '>')
             ) {
                 value += next;
-                if (text[i+1] === '=') { // ===, !==, <<=, >>=, **=
+                if (text[i+1] === '=') {
                      value += text[i+1];
                 }
                  addToken('Operator', value);
                  continue;
             }
 
-            // Handle ===, !== checked above partially
              if ((char === '=' || char === '!') && next === '=' && next2 === '=') {
                  value = char + '==';
                  addToken('Operator', value);
@@ -351,7 +568,7 @@ export function tokenize(text: string): Token[] {
         // Punctuation
         if (/[(){}\[\],:;.]/.test(char)) {
             if (char === '{') braceLevel++;
-            if (char === '}') braceLevel--; // This is only reached if not handled by templateStack logic above
+            if (char === '}') braceLevel--;
             addToken('Punctuation', char);
             continue;
         }

@@ -309,34 +309,46 @@ export async function handleTSX(editor: vscode.TextEditor, text: string) {
             embeddedLanguageFormatting: 'auto'
         });
     } catch (prettierError: any) {
-        // Fallback to js-beautify (TSX/JSX-aware)
+         // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-             formatted = jsbeautify.js(text, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                indent_with_tabs: !insertSpaces,
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse,preserve-inline',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: true,
-                wrap_line_length: 120,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false,
-                space_after_anon_function: true,
-                indent_inner_html: true
+            formatted = formatJSDeep(text, {
+                tabSize: tabSize,
+                insertSpaces: insertSpaces,
+                printWidth: 120
             });
             if (!validationMessage) {
-                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (beautifyError: any) {
-            vscode.window.showErrorMessage(`Failed to format TSX: ${beautifyError.message}`);
-            return;
+        } catch (deepError: any) {
+            // Fallback to js-beautify (TSX/JSX-aware)
+            try {
+                 formatted = jsbeautify.js(text, {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    indent_with_tabs: !insertSpaces,
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse,preserve-inline',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: true,
+                    wrap_line_length: 120,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false,
+                    space_after_anon_function: true,
+                    indent_inner_html: true
+                });
+                if (!validationMessage) {
+                     validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                }
+            } catch (beautifyError: any) {
+                vscode.window.showErrorMessage(`Failed to format TSX: ${beautifyError.message}`);
+                return;
+            }
         }
     }
 
@@ -405,34 +417,46 @@ export async function handleJSX(editor: vscode.TextEditor, text: string) {
             bracketSameLine: false
         });
     } catch (prettierError: any) {
-         // Fallback to js-beautify
+         // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-             formatted = jsbeautify.js(text, {
-                indent_size: tabSize,
-                indent_char: insertSpaces ? ' ' : '\t',
-                indent_with_tabs: !insertSpaces,
-                max_preserve_newlines: 2,
-                preserve_newlines: true,
-                keep_array_indentation: false,
-                break_chained_methods: false,
-                brace_style: 'collapse,preserve-inline',
-                space_before_conditional: true,
-                unescape_strings: false,
-                jslint_happy: false,
-                end_with_newline: true,
-                wrap_line_length: 120,
-                comma_first: false,
-                e4x: true,
-                indent_empty_lines: false,
-                space_after_anon_function: true,
-                indent_inner_html: true
+            formatted = formatJSDeep(text, {
+                tabSize: tabSize,
+                insertSpaces: insertSpaces,
+                printWidth: 120
             });
             if (!validationMessage) {
-                 validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                validationMessage = `Prettier failed, using resilient formatter. ${prettierError.message.split('\n')[0]}`;
             }
-        } catch (beautifyError: any) {
-            vscode.window.showErrorMessage(`Failed to format JSX: ${beautifyError.message}`);
-            return;
+        } catch (deepError: any) {
+            // Fallback to js-beautify
+            try {
+                 formatted = jsbeautify.js(text, {
+                    indent_size: tabSize,
+                    indent_char: insertSpaces ? ' ' : '\t',
+                    indent_with_tabs: !insertSpaces,
+                    max_preserve_newlines: 2,
+                    preserve_newlines: true,
+                    keep_array_indentation: false,
+                    break_chained_methods: false,
+                    brace_style: 'collapse,preserve-inline',
+                    space_before_conditional: true,
+                    unescape_strings: false,
+                    jslint_happy: false,
+                    end_with_newline: true,
+                    wrap_line_length: 120,
+                    comma_first: false,
+                    e4x: true,
+                    indent_empty_lines: false,
+                    space_after_anon_function: true,
+                    indent_inner_html: true
+                });
+                if (!validationMessage) {
+                     validationMessage = `Prettier failed, using fallback. ${prettierError.message.split('\n')[0]}`;
+                }
+            } catch (beautifyError: any) {
+                vscode.window.showErrorMessage(`Failed to format JSX: ${beautifyError.message}`);
+                return;
+            }
         }
     }
 

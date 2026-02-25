@@ -21,3 +21,4 @@
 - [x] Ruby (Deep Formatting Implemented)
 - [x] PHP (Deep Formatting Implemented)
 - [x] Handlebars (Deep Formatting Implemented)
+- [x] JSX (Deep Formatting Implemented)
