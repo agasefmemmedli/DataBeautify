@@ -1511,8 +1511,8 @@ INFO: Git Config formatted successfully!
 [section "sub section"]
 	key       = value with \# hash
 	multiline = line1 \
-                line2 \
-                line3
+		line2 \
+		line3
 	escaped   = "quote \" inside"
 	path      = C:\\Program Files\\App
 
@@ -1933,6 +1933,13 @@ WARN: Handlebars has syntax issues but was beautified. Deep formatting (Prettier
     </div>
     {{/unless}}
 {{/if}}
+
+{{!-- Inline block test --}}
+<div>
+    {{#if showIcon}}<i class="icon"></i>{{/if}}
+    <span>{{#if label}}{{label}}{{else}}Default{{/if}}</span>
+</div>
+
 <script>
     const data = {
         id: {{id}},
@@ -1952,10 +1959,13 @@ WARN: Handlebars has syntax issues but was beautified. Deep formatting (Prettier
     {{/each}}
   </div>
 {{else}}
-  {{#unless isLoading}}
-    <div class="error"> Invalid State </div>
-  {{/unless}}
+  {{#unless isLoading}} <div class="error"> Invalid State </div> {{/unless}}
 {{/if}}
+{{!Inline block test}}
+<div>
+  {{#if showIcon}}<i class="icon"></i>{{/if}}
+  <span>{{#if label}}{{label}}{{else}}Default{{/if}}</span>
+</div>
 <script>
     const data = {
         id: {{id}},
@@ -2096,6 +2106,7 @@ Deep Output:
   <script>
     console.log('raw');
   </script>
+
 ✅ Deep Formatting Resilience verified.
 
 Results: 2 passed, 0 failed.
@@ -2336,7 +2347,7 @@ Running verify-json-deep.cjs...
   // Comment
   "key3": [1, 2, 3],
   "trailing": "comma",
-  "unquoted": true
+  "unquoted": true,
 }
 
 --- Deep Formatted (Strict JSON) ---
@@ -2355,18 +2366,23 @@ Running verify-json-deep.cjs...
   "a": 2,
   "list": [
     "b",
-    "a"
+    "a",
     // trailing comment in array
   ],
   "m": 3,
   "obj": {
     "x": 2,
-    "y": 1
+    "y": 1,
     // trailing comment in object
   },
-  "z": 1
+  "z": 1,
 }
 ✅ JSON Deep Formatting Verification Passed!
+Running verify-jsx-deep.cjs...
+Running JSX Deep Formatting Verification (verify-jsx-deep.cjs)...
+✅ JSX Basic Indentation PASSED
+✅ JSX Attributes & Self-Closing Tags PASSED
+✅ JSX Nested Expressions PASSED
 Running verify-kotlin-deep.cjs...
 Testing test.deep.kt...
 INFO: Kotlin formatted successfully!
@@ -5375,21 +5391,25 @@ Formatted Content:
   xsi:noNamespaceSchemaLocation="schema.xsd"
 >
   <!-- This is a comment -->
-  <element id="i1" name="item1" class="item" style="color: red;">
+  <element id="i1" class="item" name="item1" style="color: red;">
     Content 1
   </element>
   <element
     id="i2"
-    name="item2"
     class="item"
-    style="color: blue;"
+    name="item2"
     longAttribute1="very long value to force wrapping of attributes in the output"
     longAttribute2="another very long value to ensure that the line length exceeds the limit"
+    style="color: blue;"
   >
     <description><![CDATA[Some <b>bold</b> text inside CDATA]]></description>
   </element>
   <selfClosing id="s1" name="selfy" />
-  <nested> <child> <grandchild attr="val" /> </child> </nested>
+  <nested>
+    <child>
+      <grandchild attr="val" />
+    </child>
+  </nested>
   <café id="unicode" type="beverage">
     <description>Unicode tag name test</description>
   </café>

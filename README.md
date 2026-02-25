@@ -20,3 +20,4 @@
 - [x] JSX (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
 - [x] JSON (Deep Formatting Implemented)
+- [x] HTML (Deep Formatting Implemented)

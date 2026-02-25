@@ -1,4 +1,6 @@
 import { HTMLTokenizer, TokenType, Token } from './html_tokenizer';
+import { formatJSDeep } from './js_deep_formatter';
+import { formatCSSDeep } from './css_deep_formatter';
 
 interface HTMLFormattingOptions {
     tabSize?: number;
@@ -40,10 +42,10 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
         'rp': ['rt', 'rp'],
         'optgroup': ['optgroup'],
         'option': ['option', 'optgroup'],
-        'thead': ['colgroup', 'caption'], // actually thead doesn't close these, but encountering thead might close others?
+        'thead': ['colgroup', 'caption'],
         'tbody': ['thead', 'tbody', 'tfoot'],
         'tfoot': ['thead', 'tbody', 'tfoot'],
-        'tr': ['tr', 'thead', 'tbody', 'tfoot'], // tr closes tr?
+        'tr': ['tr', 'thead', 'tbody', 'tfoot'],
         'td': ['td', 'th'],
         'th': ['td', 'th']
     };
@@ -54,7 +56,7 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
     let formattedLines: string[] = [];
     let indentLevel = 0;
     let stack: string[] = [];
-    let inPre = false; // Inside <pre> or similar where whitespace matters
+    let inPre = false;
 
     const getIndent = (level: number) => indentString.repeat(Math.max(0, level));
 
@@ -62,23 +64,16 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
         const token = tokens[i];
 
         if (token.type === TokenType.TagOpen) {
-            const tagNameOriginal = token.text.substring(1).replace('/', ''); // <tag or </tag (wait TagOpen is just <tag)
+            const tagNameOriginal = token.text.substring(1).replace('/', '');
             const tagNameLower = tagNameOriginal.toLowerCase();
             const isVoid = voidTags.has(tagNameLower);
 
             // Check for implicit closing
-            // If we open a tag that implicitly closes previous tags
-            // e.g. <li> opens, and stack top is <li>, close it.
             if (stack.length > 0) {
                 const top = stack[stack.length - 1];
-                // Check if opening 'tagNameLower' closes 'top'
-                // This logic is complex in full HTML5 spec, simplified here:
-                // If tagNameLower is in optionalClose list, and top is in its list of "tags it closes"
                 if (optionalClose[tagNameLower] && optionalClose[tagNameLower].includes(top)) {
                     stack.pop();
                     indentLevel = Math.max(0, indentLevel - 1);
-                    // Also check recursively? Standard says yes for some.
-                    // For simplicity, just pop one level is usually enough for li/p/dd/dt/tr/td
                 }
             }
 
@@ -104,24 +99,12 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
                 } else if (t.type === TokenType.AttributeName) {
                     const name = t.text;
                     let value: string | undefined = undefined;
-                    let quote: string | undefined = undefined;
 
-                    if (j + 1 < tokens.length && tokens[j + 1].type === TokenType.AttributeValue) {
+                    if (j + 1 < tokens.length && (tokens[j + 1].type === TokenType.AttributeValue)) {
                         value = tokens[j + 1].text;
-                        // Determine quote style if any
-                        // Tokenizer returns raw text for value including quotes if they existed?
-                        // No, my new tokenizer strips quotes!
-                        // "text" property of AttributeValue token does NOT include quotes in my new implementation.
-                        // Wait, let me check tokenizer again.
-                        // `this.emit(TokenType.AttributeValue)` uses `buffer`.
-                        // `case State.ATTRIBUTE_VALUE_DOUBLE_QUOTED`: `buffer += char` (inside loop, excluding quotes).
-                        // So value is unquoted.
-
-                        // We should enforce double quotes for consistency
-                        quote = '"';
                         j++;
                     }
-                    attributes.push({ name, value, quote });
+                    attributes.push({ name, value });
                 }
                 j++;
             }
@@ -143,18 +126,19 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
 
             // Construct Tag String
             let tagStr = `<${tagNameOriginal}`;
-            let attrsStr = '';
 
+            // Check length to decide on wrapping
+            // Calculate length if single line
+            let singleLineAttrs = '';
             for (const attr of attributes) {
-                attrsStr += ` ${attr.name}`;
+                singleLineAttrs += ` ${attr.name}`;
                 if (attr.value !== undefined) {
                     const escaped = attr.value.replace(/"/g, '&quot;');
-                    attrsStr += `="${escaped}"`;
+                    singleLineAttrs += `="${escaped}"`;
                 }
             }
-
             const closeStr = (selfClosing || isVoid) ? ' />' : '>';
-            const fullTagSingleLine = tagStr + attrsStr + closeStr;
+            const fullTagSingleLine = tagStr + singleLineAttrs + closeStr;
             const currentIndent = getIndent(indentLevel);
 
             if (currentIndent.length + fullTagSingleLine.length > printWidth && attributes.length > 1) {
@@ -168,7 +152,7 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
                     }
                     formattedLines.push(getIndent(indentLevel + 1) + attrLine.trim());
                 }
-                formattedLines.push(currentIndent + closeStr.trim()); // > or />
+                formattedLines.push(currentIndent + closeStr.trim());
             } else {
                 formattedLines.push(currentIndent + fullTagSingleLine);
             }
@@ -177,6 +161,101 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
             if (!selfClosing && !isVoid) {
                 stack.push(tagNameLower);
                 indentLevel++;
+            }
+
+            // Embedded Content Handling (Script/Style)
+            if (tagNameLower === 'script' || tagNameLower === 'style') {
+                // Look ahead for content until </script> or </style>
+                let content = '';
+                let k = i + 1;
+                while (k < tokens.length) {
+                    const t = tokens[k];
+                    if (t.type === TokenType.TagClose || (t.type === TokenType.TagOpen && t.text.startsWith('</'))) {
+                        // Check if it closes current tag
+                        const closeTagName = t.text.replace('</', '').replace('>', '').trim().toLowerCase();
+                        // For TagOpen starting with </, we need to be careful (tokenizer might emit TagOpen for invalid tags)
+                        // But TagClose is emitted properly by tokenizer for matching tags?
+                        // Wait, my tokenizer emits TagClose token only if it matches? No.
+                        // Tokenizer emits TagClose for `</tag`.
+
+                        if (t.type === TokenType.TagClose) {
+                             // The text property is `</tag`?
+                             // Let's check tokenizer again.
+                             // `this.emit(TokenType.TagClose)` -> text is buffer `</tag`.
+                             // `this.state = State.BEFORE_ATTRIBUTE_NAME`.
+                             // Then it expects `>`.
+                             // So TagClose token is just `</tag`.
+
+                             // Wait, tokenizer logic:
+                             // `this.emit(TokenType.TagClose)`
+                             // `this.currentTag = ...`
+                             // So yes, `t.text` is `</script>` (or `</style>`)
+
+                             const closeName = t.text.replace('</', '').toLowerCase();
+                             if (closeName === tagNameLower) {
+                                 break;
+                             }
+                        }
+                    }
+
+                    if (t.type === TokenType.Text || t.type === TokenType.CDATA) {
+                        content += t.text;
+                    }
+                    // Also accumulate whitespace/comments?
+                    if (t.type === TokenType.Whitespace) {
+                        content += t.text;
+                    }
+                    if (t.type === TokenType.Comment) {
+                        content += '<!--' + t.text + '-->'; // Reconstruct comment? Tokenizer emits content only?
+                        // Tokenizer emits `<!--...-->` or just content?
+                        // `this.emit(TokenType.Comment)` buffer includes `<!--` and `-->`?
+                        // `case State.COMMENT_END`: `this.buffer += char` (>) -> emit.
+                        // So yes, full comment.
+                         content += t.text;
+                    }
+
+                    k++;
+                }
+
+                // Format Content
+                if (content.trim().length > 0) {
+                    let formattedContent = '';
+                    try {
+                        if (tagNameLower === 'script') {
+                            formattedContent = formatJSDeep(content, {
+                                tabSize,
+                                insertSpaces,
+                                printWidth: printWidth - (indentLevel * (insertSpaces ? tabSize : 4)) // Adjust print width
+                            });
+                        } else {
+                            formattedContent = formatCSSDeep(content, {
+                                tabSize,
+                                insertSpaces
+                            });
+                        }
+                    } catch (e) {
+                        // Fallback to original content if formatting fails
+                        formattedContent = content;
+                    }
+
+                    // Indent the formatted content
+                    const lines = formattedContent.split('\n');
+                    for (const line of lines) {
+                        if (line.trim().length > 0) {
+                            formattedLines.push(getIndent(indentLevel) + line); // Already indented relative to 0?
+                            // formatJSDeep returns indented relative to 0. We need to add base indent.
+                            // But wait, formatJSDeep indent is 0-based.
+                            // So we just prepend currentIndent?
+                            // Yes.
+                            // But wait, if formatJSDeep output already has indentation, we add MORE?
+                            // Yes, relative to script tag.
+                        }
+                    }
+                }
+
+                // Advance main loop to k-1 (since loop increments i)
+                i = k - 1;
+                // Next token will be TagClose of script/style
             }
 
         } else if (token.type === TokenType.TagClose) {
@@ -190,7 +269,6 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
                     i = j;
                     break;
                 }
-                // Skip whitespace/comments/attributes inside closing tag if any
                 if (tokens[j].type !== TokenType.Whitespace && tokens[j].type !== TokenType.Comment && tokens[j].type !== TokenType.AttributeName) {
                      break;
                 }
@@ -221,12 +299,10 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
                         formattedLines.push(getIndent(indentLevel) + `</${tagNameOriginal}>`);
                     } else {
                         // Stray closing tag (not in stack). Ignore or print as is?
-                        // Print as is, but don't change indent.
                         formattedLines.push(getIndent(indentLevel) + `</${tagNameOriginal}>`);
                     }
                 }
             } else {
-                // Stack empty, stray closing tag
                 formattedLines.push(getIndent(indentLevel) + `</${tagNameOriginal}>`);
             }
 
@@ -236,18 +312,13 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
             } else {
                 const trimmed = token.text.trim();
                 if (trimmed.length > 0) {
-                    // Indent text content
-                    // Handle multi-line text
+                    // Split by newline to preserve some structure?
+                    // Or collapse whitespace?
+                    // HTML collapses whitespace.
+                    // But we want to preserve text block structure if it was multiline.
+                    // Let's split by newline, trim each line, and indent.
+
                     const lines = token.text.split('\n');
-                    let first = true;
-                    // Filter empty lines if they are just whitespace, unless inPre (handled above)
-                    // But for robustness, if text token spans multiple lines, we preserve structure but indent
-
-                    // Actually, HTML text collapses whitespace.
-                    // So we can just print trimmed text indented.
-                    // But if it was multiple lines, maybe user wanted it that way.
-                    // Let's preserve newlines but fix indentation.
-
                     for (const line of lines) {
                         const lineTrimmed = line.trim();
                         if (lineTrimmed.length > 0) {
@@ -257,9 +328,9 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
                 }
             }
         } else if (token.type === TokenType.Comment || token.type === TokenType.CDATA || token.type === TokenType.Doctype || token.type === TokenType.PI) {
-            formattedLines.push(getIndent(indentLevel) + token.text);
+            formattedLines.push(getIndent(indentLevel) + token.text.trim());
         }
     }
 
-    return formattedLines.join('\n');
+    return formattedLines.join('\n') + '\n';
 }
