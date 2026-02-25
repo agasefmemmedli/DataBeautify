@@ -133,12 +133,20 @@ async function runTest() {
             const h1Line = lines.find(l => l.trim().startsWith('<h1>'));
             // Hello might be on same line or next line depending on implementation details of Text/Block
             // With latest implementation: block tag h1 -> newline -> indent -> text "Hello {{name}}" -> newline -> /h1
-            const helloLine = lines.find(l => l.trim().startsWith('Hello'));
+            let helloLine = lines.find(l => l.trim().startsWith('Hello'));
+            let helloIndent = -1;
+
+            if (!helloLine && h1Line && h1Line.includes('Hello')) {
+                // Inline case
+                helloLine = h1Line;
+                helloIndent = h1Line.indexOf('Hello');
+            } else if (helloLine) {
+                helloIndent = helloLine.indexOf('H');
+            }
 
             if (divLine && h1Line && helloLine) {
                  const divIndent = divLine.indexOf('<');
                  const h1Indent = h1Line.indexOf('<');
-                 const helloIndent = helloLine.indexOf('H');
 
                  console.log(`Div Indent: ${divIndent}`);
                  console.log(`H1 Indent: ${h1Indent}`);
