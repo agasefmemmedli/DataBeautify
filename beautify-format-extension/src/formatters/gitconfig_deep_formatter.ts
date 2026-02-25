@@ -151,7 +151,19 @@ export function formatGitConfigDeep(text: string): string {
                     let line = prefix + e.key;
                     if (e.value !== undefined) {
                         const padding = ' '.repeat(maxKeyLen - e.key.length);
-                        line += padding + ' = ' + e.value;
+
+                        // Normalize multiline values
+                        let finalValue = e.value;
+                        if (finalValue.includes('\n')) {
+                            const valueLines = finalValue.split('\n');
+                            for (let k = 1; k < valueLines.length; k++) {
+                                // Standard indentation for continuation lines: 2 tabs
+                                valueLines[k] = '\t\t' + valueLines[k].trimStart();
+                            }
+                            finalValue = valueLines.join('\n');
+                        }
+
+                        line += padding + ' = ' + finalValue;
                     } else if (e.hasEquals) {
                         const padding = ' '.repeat(maxKeyLen - e.key.length);
                         line += padding + ' =';

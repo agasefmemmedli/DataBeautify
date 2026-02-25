@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Git Config (Deep Formatting Implemented)
 - [x] MDX (Deep Formatting Implemented)
 - [x] Prisma (Deep Formatting Implemented)
 - [x] Jupyter Notebook (Deep Formatting Implemented)
