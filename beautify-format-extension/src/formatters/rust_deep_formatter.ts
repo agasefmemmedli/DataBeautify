@@ -31,6 +31,9 @@ export function formatRustDeep(text: string): string {
     // Buffer for sorting imports
     let importBuffer: string[] = [];
 
+    // Track state of previous generic closure
+    let prevWasGenericCloser = false;
+
     const delimiterStack: string[] = []; // Track { [ (
 
     const TAB = '    '; // 4 spaces
@@ -96,6 +99,8 @@ export function formatRustDeep(text: string): string {
         const prev = i > 0 ? tokens[i-1] : null;
         const next = i + 1 < tokens.length ? tokens[i+1] : null;
         const prevPrev = i > 1 ? tokens[i-2] : null;
+
+        let currentIsGenericCloser = false;
 
         // --- 0. Preserve Vertical Spacing ---
         if (prev) {
@@ -212,6 +217,9 @@ export function formatRustDeep(text: string): string {
                     spaceBefore = false;
                 } else if (prev.text === '(' || prev.text === '[') {
                     spaceBefore = false;
+                } else if (prev.text === '>') {
+                     if (prevWasGenericCloser) spaceBefore = false;
+                     else spaceBefore = true;
                 } else {
                     spaceBefore = true;
                 }
@@ -245,6 +253,7 @@ export function formatRustDeep(text: string): string {
                 if (inGenerics > 0) {
                     spaceBefore = false;
                     inGenerics--;
+                    currentIsGenericCloser = true;
                 } else {
                     spaceBefore = true;
                 }
@@ -360,6 +369,8 @@ export function formatRustDeep(text: string): string {
         else if (token.type === TokenType.Comment) {
             forceNewline();
         }
+
+        prevWasGenericCloser = currentIsGenericCloser;
     }
 
     // Flush any remaining imports
