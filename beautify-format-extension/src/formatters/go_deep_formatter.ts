@@ -10,7 +10,13 @@ export function formatGoDeep(text: string): string {
 
     for (const token of tokens) {
         if (token.type === TokenType.Newline) {
-            lines.push(currentLine);
+            if (currentLine.length > 0) {
+                lines.push(currentLine);
+            } else {
+                // Preserve empty lines, but we might want to collapse multiple empty lines?
+                // For now, keep them as empty arrays to signify empty lines
+                lines.push([]);
+            }
             currentLine = [];
         } else if (token.type === TokenType.Whitespace) {
             // Ignore existing whitespace
@@ -40,6 +46,7 @@ export function formatGoDeep(text: string): string {
         const line = lines[i];
 
         if (line.length === 0) {
+            // Empty line
             if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
                 outputLines.push('');
             }
@@ -48,37 +55,52 @@ export function formatGoDeep(text: string): string {
 
         // Calculate Indentation
         let lineDedent = 0;
+        let nextIndentLevel = indentLevel;
 
-        let firstContentIdx = 0;
-        while (firstContentIdx < line.length && line[firstContentIdx].type === TokenType.Whitespace) {
-            firstContentIdx++;
+        const first = line[0];
+
+        // Check for dedent triggers
+        if ((first.type as any) === TokenType.Punctuation && (first.text === '}' || first.text === ')')) {
+            // If the line starts with closing brace, it dedents THIS line and future lines
+            lineDedent = 1;
+            nextIndentLevel--;
         }
-        const first = line[firstContentIdx];
-
-        if (first) {
-            if (first.type === TokenType.Punctuation && (first.text === '}' || first.text === ')')) {
-                lineDedent = 1;
-            }
-            if (first.type === TokenType.Keyword && (first.text === 'case' || first.text === 'default')) {
-                lineDedent = 1;
-            }
+        else if ((first.type as any) === TokenType.Keyword && (first.text === 'case' || first.text === 'default')) {
+            // case/default are indented 1 level less than the switch block content
+            // Assuming switch block increased indent
+            lineDedent = 1;
         }
 
-        const level = Math.max(0, indentLevel - lineDedent);
-        let formattedLine = indentChar.repeat(level);
+        // Adjust indent for the current line
+        const currentLevel = Math.max(0, indentLevel - lineDedent);
+        let formattedLine = indentChar.repeat(currentLevel);
 
-        for (const token of line) {
-            formattedLine += token.text;
+        // Render tokens
+        for (let j = 0; j < line.length; j++) {
+            const token = line[j];
+
+            // If it's a whitespace token we inserted during alignment/spacing, use it as is
+            if (token.type === TokenType.Whitespace) {
+                formattedLine += token.text;
+            } else {
+                formattedLine += token.text;
+            }
         }
         outputLines.push(formattedLine);
 
-        // Update Indent
+        // Calculate next indent level based on braces in this line
+        // We need to be careful not to double count if we already adjusted nextIndentLevel
+        // But the previous logic was simple brace counting.
+
+        // Reset and recount for robustness
+        let balance = 0;
         for (const token of line) {
-            if (token.type === TokenType.Punctuation) {
-                if (token.text === '{' || token.text === '(') indentLevel++;
-                if (token.text === '}' || token.text === ')') indentLevel--;
+            if ((token.type as any) === TokenType.Punctuation) {
+                if (token.text === '{' || token.text === '(') balance++;
+                if (token.text === '}' || token.text === ')') balance--;
             }
         }
+        indentLevel += balance;
         if (indentLevel < 0) indentLevel = 0;
     }
 
@@ -110,13 +132,22 @@ function applySpacing(lines: Token[][]) {
             // 2. Keywords
             else if ((prev.type as any) === TokenType.Keyword) {
                 if (prev.text === 'func' && curr.text === '(') {
-                    // Space for method receivers (func at start of line), no space for anonymous functions
-                    if (prev === line[0]) needSpace = true;
-                    else needSpace = false;
+                    // func main() vs func (r Receiver)
+                    // If 'func' is first token, and followed by '(', it's likely a method receiver OR anonymous func?
+                    // func() {} -> anonymous. func (r) Name() -> method.
+                    // gofmt: func() {} (anon) - no space. func (r R) Name() (method) - space.
+                    // Check if func is at start of line
+                    if (prev === line[0]) {
+                        // Method receiver: func (s *Struct) ...
+                        needSpace = true;
+                    } else {
+                        // Anonymous function: x := func() ...
+                        needSpace = false;
+                    }
                 }
                 else if (prev.text === 'import' && curr.text === '(') needSpace = true;
                 else if (curr.type === TokenType.Punctuation && ':;,)'.includes(curr.text)) needSpace = false;
-                else if (curr.text === '(' || curr.text === '[') needSpace = true;
+                else if (curr.text === '(' || curr.text === '[') needSpace = true; // if ( ...
                 else needSpace = true;
             }
             else if ((curr.type as any) === TokenType.Keyword) {
@@ -127,14 +158,22 @@ function applySpacing(lines: Token[][]) {
             // 3. Operators
             else if ((curr.type as any) === TokenType.Operator) {
                 if ('.(['.includes(curr.text)) needSpace = false;
-                else if (curr.text === ':') needSpace = false;
+                else if (curr.text === ':') {
+                     // In struct literal: Key: Value (no space before)
+                     // In switch case: case 1: (no space before)
+                     needSpace = false;
+                }
                 else if (curr.text === '++' || curr.text === '--') needSpace = false;
                 else if (curr.text === '!') needSpace = false;
                 else if (curr.text === '*' || curr.text === '&' || curr.text === '<-') {
+                    // Unary vs Binary
+                    // *Int vs a * b
+                    // &Point vs a & b
                     if (isUnaryContext(prev)) needSpace = false;
                     else needSpace = true;
                 }
-                else needSpace = true;
+                else if (curr.text === '...') needSpace = false; // variadic
+                else needSpace = true; // + - / % etc
             }
             else if ((prev.type as any) === TokenType.Operator) {
                 if ('.(['.includes(prev.text)) needSpace = false;
@@ -143,23 +182,25 @@ function applySpacing(lines: Token[][]) {
                     if (isUnaryContextToken(line, j - 2)) needSpace = false;
                     else needSpace = true;
                 }
-                else if (prev.text === '<-') needSpace = false;
+                else if (prev.text === '<-') needSpace = true; // channel receive
                 else needSpace = true;
             }
 
             // 4. Brackets / Braces
             else if (curr.text === '{') {
-                if ((prev.type as any) === TokenType.Identifier) {
+                if (prev.type === TokenType.Identifier) {
+                    // Struct literal? Person{...}
+                    // Or Block? if x { ... }
                     if (isSpaceBeforeBlockLine(line)) needSpace = true;
                     else needSpace = false; // Person{
                 }
-                else if (prev.text === ')') needSpace = true;
-                else if ((prev.type as any) === TokenType.Keyword) needSpace = true;
-                else if (prev.text === ']') needSpace = false;
+                else if (prev.text === ')') needSpace = true; // func() {
+                else if (prev.type === TokenType.Keyword) needSpace = true;
+                else if (prev.text === ']') needSpace = false; // []int{
                 else needSpace = true;
             }
             else if (curr.text === '}') {
-                if (prev.text === '{') needSpace = false;
+                if (prev.text === '{') needSpace = false; // {}
             }
             else if (prev.text === '}') {
                 if (curr.text === 'else') needSpace = true;
@@ -168,12 +209,13 @@ function applySpacing(lines: Token[][]) {
             }
 
             else if (curr.text === '(' || curr.text === '[') {
-                if ((prev.type as any) === TokenType.Identifier) {
+                if (prev.type === TokenType.Identifier) {
+                     // funcCall() or Slice[
                     if (isSpaceBeforeParenLine(line)) needSpace = true; // if (
                     else needSpace = false; // func(
                 }
-                else if (prev.text === ']') needSpace = false;
-                else if ((prev.type as any) === TokenType.Keyword) {
+                else if (prev.text === ']') needSpace = false; // [][]int
+                else if (prev.type === TokenType.Keyword) {
                     if (['func', 'return', 'if', 'for', 'switch'].includes(prev.text)) needSpace = true;
                     else needSpace = true;
                 }
@@ -185,14 +227,15 @@ function applySpacing(lines: Token[][]) {
             }
 
             // 5. Identifiers / Literals
-            else if ((prev.type as any) === TokenType.Identifier || (prev.type as any) === TokenType.Number || (prev.type as any) === TokenType.String) {
-                 if ((curr.type as any) === TokenType.Identifier || (curr.type as any) === TokenType.Number || (curr.type as any) === TokenType.String) {
-                     needSpace = true;
-                 }
+            else if (((prev.type as any) === TokenType.Identifier || (prev.type as any) === TokenType.Number || (prev.type as any) === TokenType.String) &&
+                     ((curr.type as any) === TokenType.Identifier || (curr.type as any) === TokenType.Number || (curr.type as any) === TokenType.String)) {
+                 needSpace = true;
             }
 
-            // Comment
-            if (curr.type === TokenType.Comment) needSpace = true;
+            // 6. Comments
+            if (curr.type === TokenType.Comment) {
+                needSpace = true;
+            }
 
             // Apply
             if (needSpace) {
@@ -206,7 +249,7 @@ function applySpacing(lines: Token[][]) {
 
 function isUnaryContext(prev: Token): boolean {
     if (prev.type === TokenType.Operator) return true;
-    if (prev.type === TokenType.Keyword && ['return', 'if', 'for', 'switch', 'case', 'go', 'defer', 'range'].includes(prev.text)) return true;
+    if (prev.type === TokenType.Keyword && ['return', 'if', 'for', 'switch', 'case', 'go', 'defer', 'range', 'else', 'var', 'const', 'type'].includes(prev.text)) return true;
     if (prev.type === TokenType.Punctuation && '(:,{['.includes(prev.text)) return true;
     return false;
 }
@@ -225,7 +268,7 @@ function isSpaceBeforeBlockLine(line: Token[]): boolean {
 function isSpaceBeforeParenLine(line: Token[]): boolean {
     if (line.length === 0) return false;
     const first = line[0].text;
-    // Exclude 'func'
+    // Exclude 'func' (anon func call)
     return ['if', 'for', 'switch', 'select', 'case', 'default', 'else'].includes(first);
 }
 
@@ -234,307 +277,474 @@ function isSpaceBeforeParenLine(line: Token[]): boolean {
 function alignBlocks(lines: Token[][]) {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        if (line.length === 0) continue;
 
-        const relevant = line.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
-        if (relevant.length === 0) continue;
-        const last = relevant[relevant.length - 1];
+        // Check if we are inside a block that needs alignment
+        // We look for patterns like:
+        // type T struct { ... }
+        // const ( ... )
+        // var ( ... )
+        // import ( ... )
 
+        // Or simple assignments? x := 1; y := 2 (aligned?) gofmt aligns assignments only in var/const blocks or if they are contiguous?
+        // gofmt aligns consecutive assignments.
+
+        // Let's stick to the main ones: struct, interface, const/var blocks.
+
+        // If line ends with '{' or '('
+        const last = line[line.length - 1];
         if (last.text === '{' || last.text === '(') {
-            let isStruct = false;
-            let isInterface = false;
-            let isVarConst = false;
-            let isLiteral = false;
-            let isImport = false;
+             const isStruct = line.some(t => t.text === 'struct');
+             const isInterface = line.some(t => t.text === 'interface');
+             const isImport = line.length > 0 && line[0].text === 'import';
+             const isVar = line.length > 0 && line[0].text === 'var';
+             const isConst = line.length > 0 && line[0].text === 'const';
 
-            if (last.text === '{') {
-                if (relevant.some(t => t.text === 'struct')) isStruct = true;
-                else if (relevant.some(t => t.text === 'interface')) isInterface = true;
-                else {
-                    if (relevant.length >= 2) {
-                        const prev = relevant[relevant.length - 2];
-                        if (prev.type === TokenType.Identifier || prev.text === ']') isLiteral = true;
-                    }
-                }
-            } else if (last.text === '(') {
-                if (relevant.length >= 1) {
-                    const first = relevant[0].text;
-                    if (['const', 'var', 'type'].includes(first)) isVarConst = true;
-                    else if (first === 'import') isImport = true;
-                }
-            }
+             if (isStruct || isInterface || isImport || isVar || isConst) {
+                 const opener = last.text;
+                 const closer = opener === '{' ? '}' : ')';
 
-            if (isStruct || isInterface || isVarConst || isLiteral || isImport) {
-                const opener = last.text;
-                const closer = opener === '{' ? '}' : ')';
+                 // Find the end of the block
+                 let j = i + 1;
+                 let balance = 1;
+                 while (j < lines.length) {
+                     const l = lines[j];
+                     for (const t of l) {
+                         if (t.text === opener) balance++;
+                         if (t.text === closer) balance--;
+                     }
+                     if (balance === 0) break;
+                     j++;
+                 }
 
-                let j = i + 1;
-                let balance = 1;
-                while (j < lines.length) {
-                    const l = lines[j];
-                    for (const t of l) {
-                        if (t.text === opener) balance++;
-                        if (t.text === closer) balance--;
-                    }
-                    if (balance === 0) break;
-                    j++;
-                }
-
-                if (j < lines.length) {
-                    alignRegion(lines, i + 1, j, isStruct, isInterface, isVarConst, isLiteral, isImport);
-                    i = j;
-                }
-            }
+                 if (j < lines.length) {
+                     // Align the region from i+1 to j
+                     alignRegion(lines, i + 1, j, isStruct, isInterface, isVar, isConst, isImport);
+                     i = j; // Skip processed lines
+                 }
+             }
         }
     }
 }
 
-function alignRegion(lines: Token[][], start: number, end: number, isStruct: boolean, isInterface: boolean, isVarConst: boolean, isLiteral: boolean, isImport: boolean) {
+function alignRegion(lines: Token[][], start: number, end: number, isStruct: boolean, isInterface: boolean, isVar: boolean, isConst: boolean, isImport: boolean) {
     interface Row {
         lineIdx: number;
         cols: Token[][];
     }
     const rows: Row[] = [];
 
+    // 1. Identify Columns for each line
     for (let k = start; k < end; k++) {
         const line = lines[k];
-        const contentTokens = line.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
-        if (contentTokens.length === 0) continue;
+        if (line.length === 0) continue; // Skip empty lines
+
+        // Skip comments (lines starting with comment)
+        if ((line[0].type as any) === TokenType.Comment) {
+             // We can't align comments easily unless they are trailing.
+             // For now, treat full-line comments as breaks in alignment?
+             // gofmt preserves alignment across comments.
+             // So we should just add them as a row with empty cols?
+             // No, better to just skip them in width calculation but print them as is.
+             // But we need to preserve them in `lines`.
+             continue;
+        }
 
         const cols: Token[][] = [];
 
+        // Filter out whitespace we added previously (applySpacing) to get semantic tokens
+        // But wait, applySpacing added spaces for separation.
+        // We should split by semantic components.
+
+        const meaningfulTokens = line.filter(t => (t.type as any) !== TokenType.Whitespace);
+
         if (isImport) {
-            if (contentTokens.length >= 2) {
-                cols.push([contentTokens[0]]); // Alias
-                cols.push(contentTokens.slice(1)); // Path
-            } else if (contentTokens.length === 1) {
-                cols.push([]); // Empty alias
-                cols.push(contentTokens); // Path
-            }
+             // Alias Path Comment
+             // Alias is optional
+             // "path"
+             // alias "path"
+             // . "path"
+
+             let pathIdx = -1;
+             for(let m=0; m<meaningfulTokens.length; m++) {
+                 if ((meaningfulTokens[m].type as any) === TokenType.String) {
+                     pathIdx = m;
+                     break;
+                 }
+             }
+
+             if (pathIdx !== -1) {
+                 if (pathIdx > 0) {
+                     cols.push(meaningfulTokens.slice(0, pathIdx)); // Alias
+                 } else {
+                     cols.push([]); // Empty alias
+                 }
+                 cols.push([meaningfulTokens[pathIdx]]); // Path
+                 if (pathIdx + 1 < meaningfulTokens.length) {
+                     cols.push(meaningfulTokens.slice(pathIdx + 1)); // Trailing comment
+                 }
+             }
         }
         else if (isStruct) {
-            let tagToken: Token | null = null;
-            if (contentTokens.length > 0) {
-                const lastT = contentTokens[contentTokens.length - 1];
-                if (lastT.type === TokenType.String && lastT.text.startsWith('`')) {
-                    tagToken = lastT;
-                    contentTokens.pop();
-                }
-            }
-            if (contentTokens.length === 0 && tagToken) {
-                cols.push([]); cols.push([]);
-            } else if (contentTokens[0].text === '*' || contentTokens.length === 1) {
-                cols.push(contentTokens);
-                cols.push([]);
-            } else {
-                cols.push([contentTokens[0]]);
-                cols.push(contentTokens.slice(1));
-            }
-            if (tagToken) cols.push([tagToken]);
-        }
-        else if (isInterface) {
-            // Find )
-            // Name(Args) ... Return
-            // Identifier ... )
-            let parenEndIdx = -1;
-            let balance = 0;
-            for(let m=0; m<contentTokens.length; m++) {
-                if (contentTokens[m].text === '(') balance++;
-                if (contentTokens[m].text === ')') {
-                    balance--;
-                    if (balance === 0) {
-                        parenEndIdx = m;
-                        break;
-                    }
+            // Name Type Tag Comment
+            // Name is Identifier. Type can be complex. Tag is String (raw).
+            // Embedded field: Type Tag Comment (no Name)
+
+            // Heuristic: Last string is Tag?
+            let tagIdx = -1;
+            const last = meaningfulTokens[meaningfulTokens.length - 1];
+            if ((last.type as any) === TokenType.String && last.text.startsWith('`')) {
+                tagIdx = meaningfulTokens.length - 1;
+            } else if (meaningfulTokens.length >= 2 && (meaningfulTokens[meaningfulTokens.length-1].type as any) === TokenType.Comment) {
+                // Check if prev is tag
+                const prev = meaningfulTokens[meaningfulTokens.length - 2];
+                if ((prev.type as any) === TokenType.String && prev.text.startsWith('`')) {
+                    tagIdx = meaningfulTokens.length - 2;
                 }
             }
 
-            if (parenEndIdx !== -1) {
-                cols.push(contentTokens.slice(0, parenEndIdx + 1)); // Name(Args)
-                cols.push(contentTokens.slice(parenEndIdx + 1)); // Return
+            let nameTokens: Token[] = [];
+            let typeTokens: Token[] = [];
+            let tagTokens: Token[] = [];
+            let commentTokens: Token[] = [];
+
+            let remainder = meaningfulTokens;
+
+            // Extract Comment
+            if (remainder.length > 0 && (remainder[remainder.length-1].type as any) === TokenType.Comment) {
+                commentTokens = [remainder[remainder.length-1]];
+                remainder = remainder.slice(0, remainder.length-1);
+            }
+
+            // Extract Tag
+            if (tagIdx !== -1) {
+                // If comment exists, tag is last of remainder
+                tagTokens = [remainder[remainder.length-1]];
+                remainder = remainder.slice(0, remainder.length-1);
+            }
+
+            // Remainder is Name Type OR Type (Embedded)
+            if (remainder.length > 0) {
+                 // Check if it's embedded (Star? Identifier?)
+                 // If first is identifier, and there are more tokens, likely Name Type.
+                 // Unless it is just "Identifier" (Embedded).
+
+                 // Standard Field: Name Type
+                 // Embedded: Type
+                 // Embedded *Type
+
+                 if (remainder.length === 1) {
+                     // Embedded
+                     typeTokens = remainder;
+                 } else if (remainder[0].text === '*') {
+                     // Embedded pointer
+                     typeTokens = remainder;
+                 } else {
+                     // Likely Name Type
+                     // But could be "pkg.Type" (Embedded)
+                     // If 2nd token is '.', it's embedded pkg.Type
+                     if (remainder.length >= 2 && remainder[1].text === '.') {
+                         typeTokens = remainder;
+                     } else {
+                         nameTokens = [remainder[0]];
+                         typeTokens = remainder.slice(1);
+                     }
+                 }
+            }
+
+            cols.push(nameTokens);
+            cols.push(typeTokens);
+            cols.push(tagTokens);
+            cols.push(commentTokens);
+        }
+        else if (isInterface) {
+             // Name(Args) Ret Comment
+             // Or Interface (Embedded)
+
+             // Find Argument List (...)
+             // If first token is Identifier and followed by '(', it's a method.
+             let openParenIdx = -1;
+             for(let m=0; m<meaningfulTokens.length; m++) {
+                 if (meaningfulTokens[m].text === '(') {
+                     openParenIdx = m;
+                     break;
+                 }
+             }
+
+             if (openParenIdx !== -1 && openParenIdx > 0 && meaningfulTokens[0].type === TokenType.Identifier) {
+                 // Method: Name (Args) Ret
+                 const name = [meaningfulTokens[0]];
+
+                 // Find end of args
+                 let closeParenIdx = -1;
+                 let balance = 0;
+                 for(let m=openParenIdx; m<meaningfulTokens.length; m++) {
+                     if (meaningfulTokens[m].text === '(') balance++;
+                     if (meaningfulTokens[m].text === ')') {
+                         balance--;
+                         if (balance === 0) {
+                             closeParenIdx = m;
+                             break;
+                         }
+                     }
+                 }
+
+                 const args = meaningfulTokens.slice(1, closeParenIdx + 1); // include parens
+                 const ret = meaningfulTokens.slice(closeParenIdx + 1);
+
+                 // Combine Name and Args for the first column?
+                 // gofmt: Name(Args)   Ret
+                 // So Col 1: Name(Args), Col 2: Ret
+                 cols.push([...name, ...args]);
+                 cols.push(ret);
+             } else {
+                 // Embedded interface
+                 cols.push(meaningfulTokens);
+             }
+        }
+        else if (isVar || isConst) {
+            // Name Type = Value Comment
+            // Name = Value
+            // Name Type
+
+            // Find '='
+            let eqIdx = -1;
+            for(let m=0; m<meaningfulTokens.length; m++) {
+                if (meaningfulTokens[m].text === '=') {
+                    eqIdx = m;
+                    break;
+                }
+            }
+
+            if (eqIdx !== -1) {
+                // Has value
+                // Before = is Name [Type]
+                const left = meaningfulTokens.slice(0, eqIdx);
+                const right = meaningfulTokens.slice(eqIdx); // = Value...
+
+                // Try to split Name and Type in left
+                // Name is usually one identifier (comma separated?)
+                // var x, y int = ...
+                // This is hard to parse perfectly without AST.
+                // Simple heuristic: First token is Name(s). If more, Type.
+
+                // But typically in var blocks:
+                // x int = 1
+                // y     = 2
+
+                // If there is a type, it should be aligned.
+                // How to detect type?
+                // If left has > 1 token (excluding commas), maybe Type?
+                // For deep formatting, let's just split Left and Right (= ...)
+                // And maybe align Type if we can guess it.
+
+                // Let's assume Name Type = Value layout for max 3 columns.
+                // If no type, Col 2 is empty.
+
+                if (left.length > 1) {
+                     // Check if only identifiers and commas
+                     const onlyNames = left.every(t => t.type === TokenType.Identifier || t.text === ',');
+                     if (onlyNames) {
+                         cols.push(left); // Name
+                         cols.push([]); // Type
+                     } else {
+                         // Likely Name Type
+                         // Assume last part is type?
+                         // var x, y int
+                         // var x int
+                         // Split at last type-like sequence?
+                         // Too risky. Let's just create 2 columns: "Left" and "Right".
+                         // gofmt aligns the '='.
+                         cols.push(left);
+                         cols.push(right);
+                     }
+                } else {
+                    cols.push(left); // Name
+                    cols.push([]); // Type
+                    cols.push(right);
+                }
             } else {
-                // Fallback (Embedded interface?)
-                cols.push(contentTokens);
+                // No value. Name Type.
+                // var x int
+                if (meaningfulTokens.length > 1) {
+                    cols.push([meaningfulTokens[0]]);
+                    cols.push(meaningfulTokens.slice(1));
+                } else {
+                    cols.push(meaningfulTokens);
+                }
             }
-        }
-        else if (isLiteral) {
-            const colonIdx = contentTokens.findIndex(t => t.text === ':');
-            if (colonIdx !== -1) {
-                cols.push(contentTokens.slice(0, colonIdx + 1));
-                cols.push(contentTokens.slice(colonIdx + 1));
-            } else {
-                cols.push(contentTokens);
-            }
-        }
-        else if (isVarConst) {
-            if (contentTokens.length >= 1) {
-                cols.push([contentTokens[0]]);
-                cols.push(contentTokens.slice(1));
-            }
-        }
-        // Prune empty trailing columns
-        while (cols.length > 0 && cols[cols.length - 1].length === 0) {
-            cols.pop();
         }
 
         rows.push({ lineIdx: k, cols });
     }
 
-    rows.forEach(row => {
-        const line = lines[row.lineIdx];
-        const newCols: Token[][] = [];
-        let lastIdx = 0;
-
-        row.cols.forEach(colTokens => {
-            if (colTokens.length === 0) {
-                newCols.push([]);
-                return;
-            }
-            const firstT = colTokens[0];
-            let start = -1;
-            for (let m = lastIdx; m < line.length; m++) {
-                if (line[m] === firstT) {
-                    start = m;
-                    break;
-                }
-            }
-            if (start === -1) { newCols.push([]); return; }
-
-            const lastT = colTokens[colTokens.length - 1];
-            let end = -1;
-            for (let m = start; m < line.length; m++) {
-                if (line[m] === lastT) {
-                    end = m + 1;
-                    break;
-                }
-            }
-
-            newCols.push(line.slice(start, end));
-            lastIdx = end;
-        });
-        row.cols = newCols;
-    });
-
+    // 2. Calculate Widths
     const numCols = rows.reduce((max, r) => Math.max(max, r.cols.length), 0);
     const widths = new Array(numCols).fill(0);
 
     rows.forEach(r => {
         r.cols.forEach((col, i) => {
-            const w = col.reduce((sum, t) => sum + t.text.length, 0);
-            if (w > widths[i]) widths[i] = w;
+            if (col.length > 0) {
+                const len = col.reduce((sum, t) => sum + t.text.length, 0) + (col.length - 1); // approx length + spaces
+                // Actually we should reconstruct the string to be accurate about spacing we added
+                // Or just use the spacing we are about to add.
+                // Let's just sum text lengths and add 1 space per token gap
+                // But wait, applySpacing already added whitespace tokens?
+                // No, we filtered them out.
+                // We will re-join them with spaces.
+                if (len > widths[i]) widths[i] = len;
+            }
         });
     });
 
+    // 3. Reconstruct Lines
     rows.forEach(r => {
-        const line = lines[r.lineIdx];
+        if (r.cols.length === 0) return; // Empty or comment-only line handled implicitly
+
         let newLine: Token[] = [];
 
-        if (r.cols.length > 0) {
-            let firstNonEmptyIdx = -1;
-            for(let c=0; c<r.cols.length; c++) {
-                if (r.cols[c].length > 0) {
-                    firstNonEmptyIdx = c;
-                    break;
-                }
-            }
-            if (firstNonEmptyIdx !== -1) {
-                const firstT = r.cols[firstNonEmptyIdx][0];
-                const idx = line.indexOf(firstT);
-                newLine.push(...line.slice(0, idx));
-            } else {
-                newLine = line;
-            }
-        }
+        // Add existing indentation? No, formatGoDeep main loop handles main indentation.
+        // We just constructing content.
 
         r.cols.forEach((col, i) => {
-            newLine.push(...col);
+            // Add content
+            col.forEach((t, idx) => {
+                if (idx > 0) newLine.push({ type: TokenType.Whitespace, text: ' ', line: 0, col: 0 });
+                newLine.push(t);
+            });
 
+            // Add padding if not last column
             if (i < r.cols.length - 1) {
-                const w = col.reduce((sum, t) => sum + t.text.length, 0);
-                const pad = widths[i] - w;
+                const currentLen = col.reduce((sum, t) => sum + t.text.length, 0) + Math.max(0, col.length - 1);
+                const pad = widths[i] - currentLen;
 
-                if (pad > 0) {
-                    newLine.push({ type: TokenType.Whitespace, text: ' '.repeat(pad), line: 0, col: 0 });
-                }
+                // Add padding spaces
+                // Plus one extra space for column separation (unless empty column?)
+                // If column is empty, width is 0, pad is 0.
 
-                // Separator space (only if column width > 0, meaning column exists in block)
-                if (widths[i] > 0) {
-                    newLine.push({ type: TokenType.Whitespace, text: ' ', line: 0, col: 0 });
+                if (col.length > 0 || (col.length === 0 && widths[i] > 0)) {
+                    // If we have content, or if the column exists in other rows
+
+                    if (pad > 0) {
+                        newLine.push({ type: TokenType.Whitespace, text: ' '.repeat(pad), line: 0, col: 0 });
+                    }
+                    // Separator
+                    newLine.push({ type: TokenType.Whitespace, text: '\t', line: 0, col: 0 });
+                    // Wait, gofmt uses tabs for indentation, but SPACES for alignment!
+                    // ' \t' ??
+                    // No, struct fields are aligned with spaces usually?
+                    // "Name    string" -> spaces.
+                    // So separator should be spaces.
+                    // Ideally we tab-align? No, gofmt uses tabs for indent, spaces for alignment.
                 }
             }
         });
 
-        const lastCol = r.cols[r.cols.length - 1];
-        if (lastCol.length > 0) {
-            const lastT = lastCol[lastCol.length - 1];
-            const idx = line.indexOf(lastT);
-            if (idx !== -1 && idx < line.length - 1) {
-                newLine.push(...line.slice(idx + 1));
-            }
-        }
-
+        // Replace line in `lines`
+        // We need to preserve the trailing comment if it wasn't part of cols (it shouldn't happen with our logic)
         lines[r.lineIdx] = newLine;
+    });
+
+    // Fix separator to be spaces
+    // The loop above added '\t' as placeholder. Replace with ' ' or proper amount of spaces.
+    // Actually, let's just use ' '.
+    rows.forEach(r => {
+        const line = lines[r.lineIdx];
+        for(const t of line) {
+            if (t.text === '\t') t.text = ' ';
+            // Wait, standard separation is usually at least one space?
+            // "Name    string" -> 4 spaces gap?
+            // Gofmt aligns to tab stops?
+            // "gofmt uses tabs for indentation and blanks for alignment."
+            // So just use spaces for padding.
+        }
     });
 }
 
+// --- Import Sorting ---
+
 function sortImports(lines: Token[][]) {
+    // Find import blocks
+    // Single import: import "..."
+    // Block import: import ( ... )
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (line.length > 0 && line[0].text === 'import') {
-            let hasParen = false;
-            for (const t of line) if (t.text === '(') hasParen = true;
-
+            const hasParen = line.some(t => t.text === '(');
             if (hasParen) {
+                // Found import (
                 let j = i + 1;
                 while (j < lines.length) {
                     const l = lines[j];
-                    const content = l.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
-                    if (content.length > 0 && content[0].text === ')') break;
+                    if (l.some(t => t.text === ')')) break;
                     j++;
                 }
 
                 if (j < lines.length) {
-                    const importContent = lines.slice(i + 1, j);
-                    const groups: Token[][][] = [];
-                    let currentGroup: Token[][] = [];
+                    // Block content is lines i+1 to j-1
+                    const contentLines = lines.slice(i + 1, j);
 
-                    for (const impLine of importContent) {
-                        const hasContent = impLine.some(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Comment);
-                        if (!hasContent) {
-                            if (currentGroup.length > 0) groups.push(currentGroup);
-                            currentGroup = [];
+                    const imports: { lines: Token[][], path: string, isStd: boolean }[] = [];
+                    let currentPrefix: Token[][] = [];
+
+                    for (const l of contentLines) {
+                        const pathToken = l.find(t => (t.type as any) === TokenType.String);
+                        if (pathToken) {
+                             // Found import
+                             const path = pathToken.text.replace(/^"|"$/g, '');
+                             const firstSegment = path.split('/')[0];
+                             const isStd = !firstSegment.includes('.');
+
+                             imports.push({
+                                 lines: [...currentPrefix, l],
+                                 path,
+                                 isStd
+                             });
+                             currentPrefix = [];
                         } else {
-                            currentGroup.push(impLine);
+                             // Comment or empty line
+                             currentPrefix.push(l);
                         }
-                    }
-                    if (currentGroup.length > 0) groups.push(currentGroup);
-
-                    for (const group of groups) {
-                        group.sort((a, b) => {
-                            const pathA = getImportPath(a);
-                            const pathB = getImportPath(b);
-                            return pathA.localeCompare(pathB);
-                        });
                     }
 
-                    let writeIdx = i + 1;
-                    for (let g = 0; g < groups.length; g++) {
-                        const group = groups[g];
-                        for (const l of group) {
-                            lines[writeIdx++] = l;
-                        }
-                        if (g < groups.length - 1) {
-                            lines[writeIdx++] = [];
-                        }
+                    const trailingLines = currentPrefix;
+
+                    // Sort
+                    imports.sort((a, b) => {
+                        if (a.isStd && !b.isStd) return -1;
+                        if (!a.isStd && b.isStd) return 1;
+                        return a.path.localeCompare(b.path);
+                    });
+
+                    // Reconstruct block with separation
+                    const newBlock: Token[][] = [];
+                    let lastWasStd = true; // Assume start with std
+                    if (imports.length > 0) lastWasStd = imports[0].isStd;
+
+                    for (let k = 0; k < imports.length; k++) {
+                         const imp = imports[k];
+                         if (lastWasStd && !imp.isStd) {
+                             newBlock.push([]); // Group separator
+                         }
+                         newBlock.push(...imp.lines); // Includes prefix comments/blanks
+                         lastWasStd = imp.isStd;
                     }
+
+                    newBlock.push(...trailingLines);
+
+                    // Replace lines in original array
+                    // Removing i+1 ... j-1
+                    // Inserting newBlock
+                    const deleteCount = j - (i + 1);
+                    lines.splice(i + 1, deleteCount, ...newBlock);
+
+                    // Adjust loop index because array length changed
+                    // new j is i + 1 + newBlock.length
+                    j = i + 1 + newBlock.length;
+                    i = j; // Continue after import block
                 }
             }
         }
     }
-}
-
-function getImportPath(line: Token[]): string {
-    for (const t of line) {
-        if (t.type === TokenType.String) return t.text;
-    }
-    return '';
 }
