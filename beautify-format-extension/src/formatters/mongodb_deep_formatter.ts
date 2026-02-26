@@ -7,52 +7,72 @@ interface DeepFormatterOptions {
     printWidth?: number;
 }
 
-export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = { tabSize: 2, insertSpaces: true, printWidth: 120 }): string {
-    // --- Pre-processing: Sort Imports (require/import) ---
-    // We carefully sort only consecutive blocks of `import ...` or `const ... = require(...)`
-    // We do NOT sort `load()` or `use` as order matters significantly in scripts.
-    const lines = text.split('\n');
-    const sortedLines: string[] = [];
-    let importBlock: string[] = [];
-    let isImportBlock = false;
+export async function formatMongoDBDeep(text: string, options: DeepFormatterOptions = { tabSize: 2, insertSpaces: true, printWidth: 120 }): Promise<string> {
+    try {
+        // --- 1. Attempt Prettier Formatting with Masking ---
+        const prettier = await import('prettier');
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
+        // Mask lines that start with MongoDB Shell commands (use, show, it, cls, exit, quit)
+        // These are not valid JS, so we comment them out for Prettier.
+        const lines = text.split('\n');
+        const maskedLines: string[] = [];
+        const maskedIndices: number[] = [];
 
-        // Check for import/require
-        const isImport = /^import\s/.test(trimmed) || /^(const|let|var)\s+.*=\s*require\(/.test(trimmed);
-
-        if (isImport) {
-            importBlock.push(line);
-            isImportBlock = true;
-        } else {
-            if (isImportBlock) {
-                // End of block, sort and push
-                // Sort by clean content (ignoring variable names for now, simple string sort)
-                // Ideally we parse, but line-based sort is standard for "Optimize Imports"
-                importBlock.sort();
-                sortedLines.push(...importBlock);
-                importBlock = [];
-                isImportBlock = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            // Check for shell commands at start of line
+            if (/^(use|show|it|cls|exit|quit)(\s|$)/.test(trimmed)) {
+                maskedLines.push(`// SHELL_CMD_MASK_${i}: ${line}`);
+                maskedIndices.push(i);
+            } else {
+                maskedLines.push(line);
             }
-            // If empty line between imports, maybe keep accumulating?
-            // Standard behavior usually breaks block on empty line or comment.
-            // We'll break on non-empty non-import.
-            if (trimmed === '' && isImportBlock) {
-                 // allow gaps? No, simpler to flush.
-            }
-            sortedLines.push(line);
         }
-    }
-    if (isImportBlock) {
-        importBlock.sort();
-        sortedLines.push(...importBlock);
-    }
 
-    text = sortedLines.join('\n');
+        const maskedText = maskedLines.join('\n');
 
-    // --- Tokenization ---
+        // Format with Prettier (parser: 'babel' handles modern JS/TS features used in MongoDB Shell)
+        const formattedMasked = await prettier.format(maskedText, {
+            parser: 'babel',
+            tabWidth: options.tabSize,
+            useTabs: !options.insertSpaces,
+            printWidth: options.printWidth,
+            semi: false, // MongoDB Shell usually omits semis
+            singleQuote: false, // MongoDB usually uses double quotes
+            trailingComma: 'none', // Strict JSON style often preferred
+            bracketSpacing: true, // { foo: bar }
+            arrowParens: 'avoid',
+        });
+
+        // Restore masked lines
+        // The formatter might have moved comments or changed indentation.
+        // We look for the marker pattern.
+        const restoredLines = formattedMasked.split('\n').map(line => {
+            const match = line.match(/\/\/ SHELL_CMD_MASK_(\d+): (.*)$/);
+            if (match) {
+                // Restore original content, but keep indentation if possible?
+                // Actually, for shell commands, we usually want them at indentation level 0 or current level.
+                // Since they are top-level commands usually, let's just restore the content.
+                // But wait, if they were indented (e.g. inside a block? No, usually top level).
+                // If they were indented, Prettier might have indented the comment.
+                // Let's preserve the indentation of the comment.
+                const indent = line.substring(0, line.indexOf('//'));
+                return indent + match[2].trim();
+            }
+            return line;
+        });
+
+        return restoredLines.join('\n');
+
+    } catch (error) {
+        // Fallback to resilient token-based formatting
+        // console.warn('Prettier formatting failed, falling back to custom deep formatter:', error);
+        return formatMongoDBDeepFallback(text, options);
+    }
+}
+
+function formatMongoDBDeepFallback(text: string, options: DeepFormatterOptions): string {
     const tokens = tokenize(text);
     if (tokens.length === 0) return '';
 
@@ -71,7 +91,7 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
 
     // Stack of block types
     interface BlockState {
-        type: 'object' | 'array' | 'function' | 'other';
+        type: 'object' | 'array' | 'function' | 'paren' | 'other';
         inline: boolean;
     }
     const blockStack: BlockState[] = [];
@@ -83,9 +103,14 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
     // Helper to look ahead for closing brace on same line
     const isShortBlock = (startIndex: number) => {
         let length = 0;
+        let depth = 1;
         for (let i = startIndex + 1; i < tokens.length; i++) {
             const t = tokens[i];
-            if (t.value === '}' || t.value === ']') return length < 50;
+            if (t.value === '{' || t.value === '[') depth++;
+            if (t.value === '}' || t.value === ']') depth--;
+
+            if (depth === 0) return length < 50;
+
             if (t.value.includes('\n')) return false;
             length += t.value.length;
             if (length > 50) return false;
@@ -102,7 +127,10 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
             const newlines = (token.value.match(/\n/g) || []).length;
             if (newlines > 1) newlinePending = Math.max(newlinePending, 2);
             else if (newlines === 1) newlinePending = Math.max(newlinePending, 1);
-            else if (token.value.includes(' ') || token.value.includes('\t')) spacePending = true;
+            else if (token.value.includes(' ') || token.value.includes('\t')) {
+                 // Only add space if not already pending and not at start of line
+                 if (!newlinePending) spacePending = true;
+            }
             continue;
         }
 
@@ -112,18 +140,18 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
             } else {
                 newlinePending = Math.max(newlinePending, 1);
             }
+
             if (newlinePending > 0) {
                 formatted = formatted.trimEnd();
                 formatted += '\n'.repeat(newlinePending) + getIndent(indentLevel);
-                currentLineLength = indentLevel * indentSize;
                 newlinePending = 0;
                 spacePending = false;
             } else if (spacePending) {
-                 if (formatted.length > 0 && !formatted.endsWith(' ')) { formatted += ' '; currentLineLength++; }
+                 if (formatted.length > 0 && !formatted.endsWith(' ')) formatted += ' ';
                 spacePending = false;
             }
+
             formatted += token.value;
-            currentLineLength += token.value.length;
             newlinePending = 1;
             lastToken = token;
             continue;
@@ -133,15 +161,13 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
              if (newlinePending > 0) {
                 formatted = formatted.trimEnd();
                 formatted += '\n'.repeat(newlinePending) + getIndent(indentLevel);
-                currentLineLength = indentLevel * indentSize;
                 newlinePending = 0;
                 spacePending = false;
             } else if (spacePending) {
-                 if (formatted.length > 0 && !formatted.endsWith(' ')) { formatted += ' '; currentLineLength++; }
+                 if (formatted.length > 0 && !formatted.endsWith(' ')) formatted += ' ';
                 spacePending = false;
             }
             formatted += token.value;
-            currentLineLength += token.value.length;
             spacePending = true;
             lastToken = token;
             continue;
@@ -150,16 +176,26 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
         // --- Core Formatting Logic ---
 
         // 1. Dedent before closing brace/bracket
-        if (token.value === '}' || token.value === ']') {
+        if (token.value === '}' || token.value === ']' || token.value === ')') {
             const currentBlock = blockStack.pop();
             const isInline = currentBlock ? currentBlock.inline : false;
 
-            indentLevel = Math.max(0, indentLevel - 1);
+            if (token.value !== ')') {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
 
-            if (!isInline) {
+            if (!isInline && token.value !== ')') {
                  newlinePending = 1;
             } else {
-                spacePending = true;
+                if (token.value === '}') {
+                    spacePending = true; // space before closing brace in inline object
+                } else {
+                    spacePending = false; // no space before closing bracket/paren
+                }
+
+                if (token.value === ')') {
+                    spacePending = false;
+                }
                 newlinePending = 0;
             }
         }
@@ -168,36 +204,12 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
         if (token.type === 'Keyword' && ['use', 'show', 'exit', 'quit', 'cls'].includes(token.value)) {
             if (lastToken && lastToken.value !== ';') {
                 newlinePending = Math.max(newlinePending, 1);
-            } else {
-                newlinePending = Math.max(newlinePending, 1);
             }
         }
 
         // 3. Prevent space before certain punctuation
         if ([':', '.', ')', ']', ';', ','].includes(token.value)) {
             spacePending = false;
-        }
-
-        // 4. Line Wrapping (Basic)
-        // If adding this token would exceed printWidth, force a newline
-        // Only if we are not already pending newline
-        // And if token is not punctuation that should stay attached (like , or ;) - actually usually we break AFTER , or ;
-        // We break BEFORE operators or long strings
-        if (newlinePending === 0 && currentLineLength + (spacePending ? 1 : 0) + token.value.length > printWidth) {
-            // Check if we can break here
-            // Good break points: Before Operator, After Comma (handled by comma logic), Before Keyword
-            // We avoid breaking inside strings or short identifiers if possible, but hard limit enforcement requires it.
-            // For now, let's break if it's safe-ish.
-            if (token.type !== 'Punctuation' || token.value === '{' || token.value === '[') {
-                 // Indent + 1 for wrapped line?
-                 // Simple strategy: newline + indent + 1 level?
-                 // For deep formatter, we usually respect indentation.
-                 // Let's just force newlinePending=1.
-                 newlinePending = 1;
-                 // Maybe bump indent for continuation?
-                 // Handling continuation indent is tricky without AST.
-                 // We will skip explicit continuation indent for now to rely on block structure.
-            }
         }
 
         // Apply Newline/Indentation
@@ -219,21 +231,28 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
         formatted += token.value;
         currentLineLength += token.value.length;
 
-        // 5. Post-Token Logic
+        // 4. Post-Token Logic
 
         // Indent after open brace/bracket
         if (token.value === '{' || token.value === '[') {
             const isShort = isShortBlock(i);
 
             if (isShort) {
-                spacePending = true;
-                indentLevel++;
+                if (token.value === '{') spacePending = true; // space after open brace
+                else spacePending = false; // no space after open bracket
+
                 blockStack.push({ type: token.value === '{' ? 'object' : 'array', inline: true });
+                // Indent level doesn't change for inline
             } else {
                 newlinePending = 1;
                 blockStack.push({ type: token.value === '{' ? 'object' : 'array', inline: false });
                 indentLevel++;
             }
+        }
+
+        if (token.value === '(') {
+            blockStack.push({ type: 'paren', inline: true }); // Treat parens as inline mostly, unless manual break
+            spacePending = false;
         }
 
         // Space after colon
@@ -254,14 +273,27 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
 
         // Space after keywords
         if (token.type === 'Keyword') {
-             if (['if', 'for', 'while', 'switch', 'catch', 'async', 'use', 'show', 'return', 'throw', 'case'].includes(token.value)) {
+             if (['if', 'for', 'while', 'switch', 'catch', 'async', 'use', 'show', 'return', 'throw', 'case', 'function'].includes(token.value)) {
                  spacePending = true;
              }
         }
 
         // Space around operators
         if (token.type === 'Operator') {
-             if (!['!', '++', '--', '~', '?.', '.', '(', ')', '[', ']'].includes(token.value)) {
+             // Handle Unary Minus: if previous token was operator, keyword, or block start, then it's unary
+             let isUnary = false;
+             if (token.value === '-' || token.value === '+' || token.value === '!') {
+                 if (!lastToken ||
+                     lastToken.type === 'Operator' ||
+                     lastToken.type === 'Keyword' ||
+                     ['(', '[', '{', ',', ';', ':'].includes(lastToken.value)) {
+                     isUnary = true;
+                 }
+             }
+
+             if (isUnary) {
+                 spacePending = false;
+             } else if (!['++', '--', '~', '?.', '.', '(', ')', '[', ']'].includes(token.value)) {
                  spacePending = true;
              }
         }
@@ -281,14 +313,25 @@ export function formatMongoDBDeep(text: string, options: DeepFormatterOptions = 
              if (nextToken.value === '{') spacePending = true;
 
              if (token.value === 'it' && token.type === 'Keyword') {
-                 if (nextToken.value === '(') {
-                 } else {
+                 if (nextToken.value !== '(') {
                      newlinePending = 1;
                  }
              }
 
-             if (nextToken.type === 'Operator' && !['!', '++', '--', '~', '?.', '.', '(', ')', '[', ']', ';', ','].includes(nextToken.value)) {
-                 spacePending = true;
+             if (nextToken.type === 'Operator') {
+                 // Check if next is unary
+                 let nextIsUnary = false;
+                 if (nextToken.value === '-' || nextToken.value === '+' || nextToken.value === '!') {
+                      // current token is token.value.
+                      // if current is operator/keyword/punctuation, then next is unary.
+                      if (token.type === 'Operator' || token.type === 'Keyword' || ['(', '[', '{', ',', ';', ':'].includes(token.value)) {
+                          nextIsUnary = true;
+                      }
+                 }
+
+                 if (!nextIsUnary && !['!', '++', '--', '~', '?.', '.', '(', ')', '[', ']', ';', ','].includes(nextToken.value)) {
+                     spacePending = true;
+                 }
              }
         }
 

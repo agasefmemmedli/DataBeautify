@@ -467,7 +467,7 @@ export async function handleMongoDB(editor: vscode.TextEditor, text: string) {
 
     // Deep Formatting (Resilient + MongoDB specific)
     try {
-        formatted = formatMongoDBDeep(text);
+        formatted = await formatMongoDBDeep(text);
     } catch (deepError: any) {
         console.warn('Deep MongoDB formatter failed, falling back to js-beautify:', deepError);
 
