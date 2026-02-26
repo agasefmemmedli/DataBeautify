@@ -6,30 +6,39 @@ function sortIncludes(text: string): string {
     const result: string[] = [];
     let includeBlock: string[] = [];
 
+    const flushIncludes = () => {
+        if (includeBlock.length === 0) return;
+        const systemIncludes: string[] = [];
+        const userIncludes: string[] = [];
+
+        for (const inc of includeBlock) {
+            if (inc.trim().match(/^#include\s*<.*>/)) systemIncludes.push(inc);
+            else userIncludes.push(inc);
+        }
+
+        systemIncludes.sort();
+        userIncludes.sort();
+
+        result.push(...systemIncludes);
+        result.push(...userIncludes);
+        includeBlock = [];
+    };
+
     for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith('#include')) {
             includeBlock.push(line);
         } else {
-            if (includeBlock.length > 0) {
-                includeBlock.sort();
-                result.push(...includeBlock);
-                includeBlock = [];
-            }
+            flushIncludes();
             result.push(line);
         }
     }
-    if (includeBlock.length > 0) {
-        includeBlock.sort();
-        result.push(...includeBlock);
-    }
+    flushIncludes();
     return result.join('\n');
 }
 
 function alignBlocks(text: string): string {
     const lines = text.split('\n');
-    const outputLines: string[] = [];
-
     const KEYWORDS = new Set([
         'alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool', 'break',
         'case', 'catch', 'char', 'char8_t', 'char16_t', 'char32_t', 'class', 'compl', 'concept', 'const',
@@ -48,37 +57,11 @@ function alignBlocks(text: string): string {
         'default', 'else', 'do', 'try', 'catch', 'finally'
     ]);
 
-    // Helper to process assignment blocks
-    // Declaration Block: Type Name (= Val)?;
-    // Assignment Block: Var = Val;
-
-    // We treat declarations and assignments separately.
-    // Heuristic: Declaration has Type Name. Assignment has Var = Val.
-
     let block: { lineIdx: number, type: string, name: string, rest: string, indent: string, isDecl: boolean, lhs: string, operator: string }[] = [];
 
     const processBlock = () => {
         if (block.length === 0) return;
 
-        // Check if block is declarations or assignments
-        // A mixed block breaks alignment usually, or we align them if they look compatible?
-        // Let's strictly separate. But our loop logic below groups them if they are contiguous.
-        // We should break block if type changes from Decl to Assign.
-
-        // Actually, let's just align Declarations for now.
-        // Assignments: x = 1; y = 2; -> Align =.
-        // Declarations: int x = 1; double y = 2; -> Align Names, then Align =.
-
-        // Filter sub-blocks?
-        // No, we process the contiguous block. If it contains mixed types, we might need to split.
-        // But let's assume valid blocks don't mix "x = 1" and "int y = 2" too often in a way that needs alignment together.
-        // Usually:
-        // int x = 1;
-        // int y = 2;
-        // z = 3;
-        // We can break on `isDecl` change.
-
-        // Sub-group by `isDecl`
         let subGroups: typeof block[] = [];
         let currentGroup: typeof block = [];
         let lastDecl = block[0].isDecl;
@@ -97,14 +80,11 @@ function alignBlocks(text: string): string {
             if (group.length <= 1) continue;
 
             if (group[0].isDecl) {
-                // Align Declarations
-                // Max Type Length
                 let maxTypeLen = 0;
                 for (const item of group) {
                     if (item.type.length > maxTypeLen) maxTypeLen = item.type.length;
                 }
 
-                // Max Name Length (if assignments exist)
                 let maxNameLen = 0;
                 let hasAssignment = false;
                 for (const item of group) {
@@ -113,35 +93,26 @@ function alignBlocks(text: string): string {
                 }
 
                 for (const item of group) {
-                    const spaces = ' '.repeat(maxTypeLen - item.type.length + 1); // +1 for space between Type and Name
+                    const spaces = ' '.repeat(maxTypeLen - item.type.length + 1);
                     let newLine = `${item.indent}${item.type}${spaces}${item.name}`;
 
                     if (hasAssignment) {
                         const nameSpaces = ' '.repeat(maxNameLen - item.name.length);
                         if (item.rest) {
-                            newLine += `${nameSpaces} ${item.rest}`; // rest includes =
+                            newLine += `${nameSpaces} ${item.rest}`;
                         } else {
-                            // No assignment, just ;
                             newLine += ';';
                         }
                     } else {
-                         // If no assignments in block, just append ; (rest is empty but we stripped ;)
-                         // item.rest includes ';'. If empty, it shouldn't happen based on parsing.
                          if (item.rest) {
                              if (item.rest.startsWith(';')) newLine += item.rest;
                              else newLine += ` ${item.rest}`;
                          }
                          else newLine += ';';
                     }
-
-                    // Restore comment if any?
-                    // My heuristic didn't capture comment separately properly in regex below.
-                    // We need to be careful.
                     lines[item.lineIdx] = newLine;
                 }
             } else {
-                // Align Assignments
-                // Max LHS Length
                 let maxLhsLen = 0;
                 for (const item of group) {
                     if (item.lhs.length > maxLhsLen) maxLhsLen = item.lhs.length;
@@ -149,12 +120,10 @@ function alignBlocks(text: string): string {
 
                 for (const item of group) {
                     const spaces = ' '.repeat(maxLhsLen - item.lhs.length);
-                    // item.rest includes '= val;'
                     lines[item.lineIdx] = `${item.indent}${item.lhs}${spaces} ${item.rest}`;
                 }
             }
         }
-
         block = [];
     };
 
@@ -167,28 +136,18 @@ function alignBlocks(text: string): string {
             continue;
         }
 
-        // Parse line safely using masking
-        // 1. Declaration: Indent Type Name (= Val)?;
-        // 2. Assignment: Indent LHS = RHS;
-
         const indentMatch = line.match(/^(\s*)/);
         const indent = indentMatch ? indentMatch[1] : '';
 
-        // Create a masked version of the line to safely find comments and operators
         let maskedLine = line;
-        // Mask strings
         maskedLine = maskedLine.replace(/"(?:[^"\\]|\\.)*"/g, match => ' '.repeat(match.length));
-        // Mask chars
         maskedLine = maskedLine.replace(/'(?:[^'\\]|\\.)*'/g, match => ' '.repeat(match.length));
-        // Mask block comments (inline)
         maskedLine = maskedLine.replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length));
 
-        // Find comment start
         const commentIdx = maskedLine.indexOf('//');
         let comment = '';
         let cleanLine = trimmed;
-        let maskedCleanLine = maskedLine.trim(); // maskedLine corresponds to line, trimmed matches trimmed line structure if we are careful.
-        // Actually, working with indices on original line is safer.
+        let maskedCleanLine = maskedLine.trim();
 
         if (commentIdx !== -1) {
              comment = line.substring(commentIdx);
@@ -199,63 +158,29 @@ function alignBlocks(text: string): string {
              maskedCleanLine = maskedLine.trim();
         }
 
-        // Check for semicolon at end of cleanLine
         if (!cleanLine.endsWith(';')) {
             processBlock();
             continue;
         }
 
-        cleanLine = cleanLine.substring(0, cleanLine.length - 1).trim(); // Remove ;
-        maskedCleanLine = maskedCleanLine.substring(0, maskedCleanLine.length - 1).trim(); // Remove ; from masked too to keep alignment (approx)
-        // Wait, removing ; from maskedCleanLine might be slightly off if ; was preceded by spaces which trim removed differently?
-        // But we only use maskedCleanLine for finding =.
+        cleanLine = cleanLine.substring(0, cleanLine.length - 1).trim();
+        maskedCleanLine = maskedCleanLine.substring(0, maskedCleanLine.length - 1).trim();
 
-        // Check if assignment exists using masked line
         const eqIdx = maskedCleanLine.indexOf('=');
         let preEq = cleanLine;
-        let postEq = ''; // Includes =
+        let postEq = '';
 
         if (eqIdx !== -1) {
-            // eqIdx is index in maskedCleanLine.
-            // maskedCleanLine is trimmed.
-            // cleanLine is trimmed.
-            // They should correspond character by character?
-            // Yes, masking replaced chars with spaces.
             preEq = cleanLine.substring(0, eqIdx).trim();
-            postEq = cleanLine.substring(eqIdx).trim(); // = ...
+            postEq = cleanLine.substring(eqIdx).trim();
         }
 
-        // Analyze preEq
         const lastSpace = preEq.lastIndexOf(' ');
         if (lastSpace !== -1) {
-            // Might be declaration: Type Name
             const typeCandidate = preEq.substring(0, lastSpace).trim();
             const nameCandidate = preEq.substring(lastSpace + 1).trim();
 
-            // Check if nameCandidate is valid identifier
-            // And NOT a keyword
             if (/^[a-zA-Z_]\w*$/.test(nameCandidate) && !KEYWORDS.has(nameCandidate)) {
-                // It looks like a declaration.
-                // Verify typeCandidate is not a control flow keyword.
-                // Also verify typeCandidate is not empty or weird.
-
-                // If typeCandidate is a control flow keyword (e.g. return x), reject.
-                // We check splitting by space: "return x". Type="return". Name="x".
-                // "return" is in CONTROL_FLOW.
-                // But "unsigned int x". Type="unsigned int". Not in CONTROL_FLOW.
-                // "std::string x". Type="std::string". Not in CONTROL_FLOW.
-
-                // Also check last word of typeCandidate against CONTROL_FLOW?
-                // "else if" -> type "else", name "if".
-                // But we check nameCandidate against KEYWORDS. "if" is keyword. So reject.
-
-                // So checking nameCandidate vs KEYWORDS handles most control flow (if, while, for).
-                // But "return x". "x" is not keyword. So we need to check typeCandidate "return".
-
-                // We check if typeCandidate *is* or *ends with* a control flow keyword?
-                // "return" -> yes.
-                // "long return" -> invalid C++.
-
                 const typeWords = typeCandidate.split(/\s+/);
                 const lastTypeWord = typeWords[typeWords.length - 1];
 
@@ -275,12 +200,8 @@ function alignBlocks(text: string): string {
             }
         }
 
-        // Not a declaration, maybe Assignment?
         if (eqIdx !== -1) {
-            // LHS = RHS
-            const lhs = preEq; // already trimmed
-            // Check if LHS is valid (identifiers, dots, arrows, array access)
-            // But we already determined it's not "Type Name".
+            const lhs = preEq;
             block.push({
                 lineIdx: i,
                 type: '',
@@ -294,12 +215,9 @@ function alignBlocks(text: string): string {
             continue;
         }
 
-        // Neither
         processBlock();
     }
-
-    processBlock(); // Flush last block
-
+    processBlock();
     return lines.join('\n');
 }
 
@@ -326,8 +244,8 @@ export function formatCppDeep(text: string): string {
     let ternaryDepth = 0;
     let inInitializerList = false;
 
-    // Stack to track brace types (NAMESPACE or BLOCK or CLASS)
-    let braceStack: ('NAMESPACE' | 'BLOCK' | 'CLASS')[] = [];
+    // Stack to track brace types
+    let braceStack: ('NAMESPACE' | 'BLOCK' | 'CLASS' | 'CASE')[] = [];
 
     const getIndent = (level: number) => {
         return INDENT_STRING.repeat(Math.max(0, level));
@@ -344,7 +262,6 @@ export function formatCppDeep(text: string): string {
 
     const append = (str: string, indentOffset: number = 0, extraSpaces: number = 0) => {
         if (currentLine === '') {
-            // Apply indent
             let indentStr = getIndent(indentLevel + indentOffset);
             if (extraSpaces > 0) indentStr += ' '.repeat(extraSpaces);
             currentLine = indentStr + str;
@@ -371,8 +288,13 @@ export function formatCppDeep(text: string): string {
 
         // Indent Adjustments
         if (token.text === '}') {
+            // Check if we are in a CASE block that needs closing
+            if (braceStack.length > 0 && braceStack[braceStack.length - 1] === 'CASE') {
+                braceStack.pop();
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+
             const type = braceStack.length > 0 ? braceStack[braceStack.length - 1] : 'BLOCK'; // Peek
-            // We pop later, but we need to know type for indent calc
             if (type === 'BLOCK' || type === 'CLASS') {
                 indentLevel = Math.max(0, indentLevel - 1);
             }
@@ -388,6 +310,10 @@ export function formatCppDeep(text: string): string {
         }
 
         if (token.text === 'case' || token.text === 'default') {
+             if (braceStack.length > 0 && braceStack[braceStack.length - 1] === 'CASE') {
+                 braceStack.pop();
+                 indentLevel = Math.max(0, indentLevel - 1);
+             }
              inCase = true;
              ternaryDepth = 0;
              if (currentLine.trim() !== '') pushLine();
@@ -454,6 +380,16 @@ export function formatCppDeep(text: string): string {
                 else if (token.text === ':') {
                      if (inCase && ternaryDepth === 0) {
                          spaceBefore = false;
+
+                         // Check if next token is brace
+                         let nextIsBrace = false;
+                         if (next && next.text === '{') nextIsBrace = true;
+
+                         if (!nextIsBrace) {
+                             braceStack.push('CASE');
+                             indentLevel++;
+                         }
+
                          inCase = false;
                          wasCaseColon = true;
                      }
@@ -556,36 +492,26 @@ export function formatCppDeep(text: string): string {
             }
         }
 
-        // if (token.text === '<' && prev && prev.text === 'template') spaceBefore = false; // Removed to enforce 'template <...>'
-
-        // Fixes applied after all logic
         if (token.text === ']' && prev && prev.text === '=') spaceBefore = false; // [=]
 
         let indentOffset = 0;
         let extraSpaces = 0;
 
         if (token.text === 'public' || token.text === 'private' || token.text === 'protected') {
-            // Google style: 1 space indent relative to class (which is indentLevel)
-            // indentLevel is currently 1 inside class.
-            // 2 spaces per level. Level 1 = 2 spaces.
-            // We want 1 space total.
-            // So indentOffset = -1 (back to 0), extraSpaces = 1.
             indentOffset = -1;
             extraSpaces = 1;
         }
 
-        // Constructor Initializer List
         if (inInitializerList) {
              if (token.text === ':') {
-                 // Break before colon if it's the start of init list
                  if (currentLine.trim() !== '') pushLine();
-                 indentOffset = 2; // Double indent (4 spaces) relative to indentation level
+                 indentOffset = 2;
                  extraSpaces = 0;
              } else if (token.text === ',') {
-                 // New line after comma handled later
+                 // handled
              } else {
                  if (currentLine === '') {
-                     indentOffset = 2; // Continuation indent (4 spaces)
+                     indentOffset = 2;
                  }
              }
         }
@@ -596,8 +522,6 @@ export function formatCppDeep(text: string): string {
             continue;
         }
 
-        // Debugging removed
-
         if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) {
              append(' ');
         } else if (!spaceBefore && currentLine.endsWith(' ')) {
@@ -606,26 +530,20 @@ export function formatCppDeep(text: string): string {
 
         append(token.text, indentOffset, extraSpaces);
 
-        // Line Breaks and Brace Logic
         if (token.type === TokenType.Comment) {
             pushLine();
         }
         else if (token.text === '{') {
-            // Check for namespace
             let isNamespace = false;
             let isClass = false;
             let k = i - 1;
-            // Scan backwards to find context
             while (k >= 0) {
                 const t = meaningfulTokens[k];
-                // Skip comments
                 if (t.type === TokenType.Comment || t.type === TokenType.Preprocessor) {
                     k--;
                     continue;
                 }
-
                 if (t.text === 'namespace') {
-                    // check if 'using' precedes it
                     let m = k - 1;
                     while (m >= 0) {
                         if (meaningfulTokens[m].type === TokenType.Comment || meaningfulTokens[m].type === TokenType.Whitespace || meaningfulTokens[m].type === TokenType.Newline) {
@@ -645,14 +563,8 @@ export function formatCppDeep(text: string): string {
                     isClass = true;
                     break;
                 }
-                if (t.text === ')' || t.text === ']') {
-                    // Could be function or lambda or if
-                    break;
-                }
-                if (t.text === '=') {
-                    // initialization?
-                    break;
-                }
+                if (t.text === ')' || t.text === ']') break;
+                if (t.text === '=') break;
                 if (t.text === ';') break;
                 k--;
             }
@@ -680,8 +592,6 @@ export function formatCppDeep(text: string): string {
         }
         else if (token.text === '}') {
              const type = braceStack.pop();
-             // Indent level was already decremented at start of loop if BLOCK/CLASS
-             // Just push line
              if (next && next.text === ';') {
                  // };
              } else {
