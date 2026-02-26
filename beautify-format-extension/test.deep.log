@@ -12,3 +12,4 @@ System.Exception: Something went wrong
    at System.IO.FileStream.Init(String path)
    at App.Program.Main()
 2023-10-27T10:00:07.123Z INFO ISO8601 timestamp example
+2023-10-27 10:00:08 INFO XML payload: <request><user>bob</user><action>delete</action></request>
