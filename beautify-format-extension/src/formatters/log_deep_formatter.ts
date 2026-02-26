@@ -3,10 +3,19 @@
  * Deep Formatting for Log Files
  * - Vertically aligns timestamps and log levels
  * - Detects and pretty-prints embedded JSON
+ * - Detects and pretty-prints embedded XML
  * - Standardizes indentation for stack traces and continuation lines
  */
 
 export function formatLogDeep(text: string): string {
+    // Lazy load xml-formatter
+    let xmlFormatter: any;
+    try {
+        xmlFormatter = require('xml-formatter');
+    } catch (e) {
+        // Ignore if not available
+    }
+
     const lines = text.split('\n');
 
     // Data structure to hold parsed lines
@@ -109,7 +118,7 @@ export function formatLogDeep(text: string): string {
         }
     });
 
-    // 3. Formatting & JSON Processing
+    // 3. Formatting & JSON/XML Processing
     const formattedLines: string[] = [];
 
     // Calculate standard indent for continuations
@@ -150,20 +159,18 @@ export function formatLogDeep(text: string): string {
             // Separator
             if (maxLevelWidth > 0) lineStr += ' ';
 
-            // Message & JSON
+            // Message & Structured Content
             let message = l.message || '';
             const fullPrefix = lineStr;
 
-            // JSON Detection and Formatting
-            // Attempt to find a JSON object/array at the end of the message
-            let jsonCandidate = '';
-            let prefixBeforeJson = '';
-            let isJson = false;
+            let structuredCandidate = '';
+            let prefixBeforeStructured = '';
+            let isStructured = false;
 
             const trimmedMessage = message.trim();
+
+            // JSON Detection
             if (trimmedMessage.endsWith('}') || trimmedMessage.endsWith(']')) {
-                // Find the first { or [ that *might* be the start
-                // We iterate to find a start that makes valid JSON
                 const possibleStarts = [];
                 for (let k = 0; k < message.length; k++) {
                     if (message[k] === '{' || message[k] === '[') {
@@ -171,19 +178,15 @@ export function formatLogDeep(text: string): string {
                     }
                 }
 
-                // Try parsing from each start position (from last to first? or first to last?)
-                // Usually logs are: "Message: {"json":...}" so first valid is best.
                 for (const startIdx of possibleStarts) {
                     const candidate = message.substring(startIdx);
-                    // Basic check: start/end match
                     if ((candidate.startsWith('{') && candidate.trim().endsWith('}')) ||
                         (candidate.startsWith('[') && candidate.trim().endsWith(']'))) {
                         try {
                             const parsed = JSON.parse(candidate);
-                            // It's valid JSON!
-                            jsonCandidate = JSON.stringify(parsed, null, 2);
-                            prefixBeforeJson = message.substring(0, startIdx);
-                            isJson = true;
+                            structuredCandidate = JSON.stringify(parsed, null, 2);
+                            prefixBeforeStructured = message.substring(0, startIdx);
+                            isStructured = true;
                             break;
                         } catch (e) {
                             // Continue trying other start positions
@@ -192,29 +195,58 @@ export function formatLogDeep(text: string): string {
                 }
             }
 
-            if (isJson) {
-                const jsonLines = jsonCandidate.split('\n');
-
-                // First line: Log Prefix + Message Prefix + JSON start
-                formattedLines.push((fullPrefix + prefixBeforeJson + jsonLines[0]).trimEnd());
-
-                // Subsequent lines of JSON: Indent to align with JSON start
-                // The prefix length is fullPrefix.length + prefixBeforeJson.length
-                const alignmentPadding = ' '.repeat(fullPrefix.length + prefixBeforeJson.length);
-
-                for (let j = 1; j < jsonLines.length; j++) {
-                     formattedLines.push(alignmentPadding + jsonLines[j]);
+            // XML Detection (if not JSON)
+            if (!isStructured && trimmedMessage.endsWith('>')) {
+                const possibleStarts = [];
+                for (let k = 0; k < message.length; k++) {
+                    if (message[k] === '<') {
+                        possibleStarts.push(k);
+                    }
                 }
-                continue; // Skip standard push
+
+                for (const startIdx of possibleStarts) {
+                    const candidate = message.substring(startIdx);
+                    // Check for end tag or self-closing
+                    if (candidate.startsWith('<') && (candidate.trim().endsWith('>') || candidate.trim().endsWith('/>'))) {
+                        try {
+                            if (xmlFormatter) {
+                                const formattedXML = xmlFormatter(candidate, {
+                                    indentation: '  ',
+                                    collapseContent: true,
+                                    lineSeparator: '\n',
+                                    whiteSpaceAtEndOfSelfclosingTag: true
+                                });
+                                structuredCandidate = formattedXML;
+                                prefixBeforeStructured = message.substring(0, startIdx);
+                                isStructured = true;
+                                break;
+                            }
+                        } catch (e) {
+                            // Continue
+                        }
+                    }
+                }
+            }
+
+            if (isStructured) {
+                const lines = structuredCandidate.split('\n');
+
+                // First line: Log Prefix + Message Prefix + JSON/XML start
+                formattedLines.push((fullPrefix + prefixBeforeStructured + lines[0]).trimEnd());
+
+                // Subsequent lines: Indent to align with start
+                const alignmentPadding = ' '.repeat(fullPrefix.length + prefixBeforeStructured.length);
+
+                for (let j = 1; j < lines.length; j++) {
+                     formattedLines.push(alignmentPadding + lines[j]);
+                }
+                continue;
             }
 
             formattedLines.push((fullPrefix + message).trimEnd());
 
         } else {
             // Continuation
-            // Indent relative to previous line's message start?
-            // "Deep Formatting" => Align stack traces with the message column.
-
             const trimmedContent = l.message || '';
             formattedLines.push(indentString + trimmedContent);
         }
