@@ -33,7 +33,7 @@ export function formatCppDeep(text: string): string {
 
     if (tokens.length === 0) return '';
 
-    const INDENT_SIZE = 4;
+    const INDENT_SIZE = 2; // Google Style: 2 spaces
     const INDENT_STRING = ' '.repeat(INDENT_SIZE);
 
     const meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Newline);
@@ -47,9 +47,10 @@ export function formatCppDeep(text: string): string {
     let templateDepth = 0;
     let inCase = false;
     let ternaryDepth = 0;
+    let inInitializerList = false;
 
-    // Stack to track brace types (NAMESPACE or BLOCK)
-    let braceStack: ('NAMESPACE' | 'BLOCK')[] = [];
+    // Stack to track brace types (NAMESPACE or BLOCK or CLASS)
+    let braceStack: ('NAMESPACE' | 'BLOCK' | 'CLASS')[] = [];
 
     const getIndent = (level: number) => {
         return INDENT_STRING.repeat(Math.max(0, level));
@@ -64,9 +65,12 @@ export function formatCppDeep(text: string): string {
         currentLine = '';
     };
 
-    const append = (str: string, indentOffset: number = 0) => {
+    const append = (str: string, indentOffset: number = 0, extraSpaces: number = 0) => {
         if (currentLine === '') {
-            currentLine = getIndent(indentLevel + indentOffset) + str;
+            // Apply indent
+            let indentStr = getIndent(indentLevel + indentOffset);
+            if (extraSpaces > 0) indentStr += ' '.repeat(extraSpaces);
+            currentLine = indentStr + str;
         } else {
             currentLine += str;
         }
@@ -74,10 +78,10 @@ export function formatCppDeep(text: string): string {
 
     const isType = (t: Token) => {
         if (t.type === TokenType.Keyword) {
-            return ['int', 'char', 'bool', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed', 'auto', 'const', 'typename', 'class', 'struct', 'enum', 'union', 'virtual', 'explicit', 'friend', 'constexpr', 'volatile'].includes(t.text);
+            return ['int', 'char', 'bool', 'void', 'float', 'double', 'long', 'short', 'unsigned', 'signed', 'auto', 'const', 'typename', 'class', 'struct', 'enum', 'union', 'virtual', 'explicit', 'friend', 'constexpr', 'volatile', 'decltype', 'static'].includes(t.text);
         }
         if (t.type === TokenType.Identifier) {
-            return /^[A-Z]/.test(t.text) || t.text.endsWith('_t') || ['string', 'vector', 'map', 'set', 'list', 'deque', 'queue', 'stack', 'pair', 'tuple', 'unique_ptr', 'shared_ptr', 'weak_ptr', 'size_t', 'uint8_t', 'int32_t', 'int64_t', 'uint32_t', 'uint64_t'].includes(t.text);
+            return /^[A-Z]/.test(t.text) || t.text.endsWith('_t') || ['string', 'vector', 'map', 'set', 'list', 'deque', 'queue', 'stack', 'pair', 'tuple', 'unique_ptr', 'shared_ptr', 'weak_ptr', 'size_t', 'uint8_t', 'int32_t', 'int64_t', 'uint32_t', 'uint64_t', 'u16', 'u32', 'u64', 'i16', 'i32', 'i64'].includes(t.text);
         }
         return false;
     };
@@ -92,7 +96,7 @@ export function formatCppDeep(text: string): string {
         if (token.text === '}') {
             const type = braceStack.length > 0 ? braceStack[braceStack.length - 1] : 'BLOCK'; // Peek
             // We pop later, but we need to know type for indent calc
-            if (type === 'BLOCK') {
+            if (type === 'BLOCK' || type === 'CLASS') {
                 indentLevel = Math.max(0, indentLevel - 1);
             }
             braceDepth = Math.max(0, braceDepth - 1);
@@ -130,7 +134,7 @@ export function formatCppDeep(text: string): string {
             if (token.type === TokenType.Operator) {
                 if (token.text === '*' || token.text === '&') {
                     if (prev && (isType(prev) || prev.text === '>')) {
-                        spaceBefore = false;
+                        spaceBefore = false; // Type*
                     } else if (prev && (prev.type === TokenType.Operator || prev.type === TokenType.Punctuation)) {
                         if (prev.text === ')' || prev.text === ']') spaceBefore = true;
                         else spaceBefore = false;
@@ -139,8 +143,11 @@ export function formatCppDeep(text: string): string {
                     }
                 }
                 else if (token.text === '<') {
-                    if (prev && (prev.text === 'template' || prev.text === 'cast' || prev.text.endsWith('_cast') || isType(prev))) {
-                        spaceBefore = false;
+                    if (prev && prev.text === 'template') {
+                        spaceBefore = true; // template <typename T>
+                        templateDepth++;
+                    } else if (prev && (prev.text === 'cast' || prev.text.endsWith('_cast') || isType(prev))) {
+                        spaceBefore = false; // vector<T> or static_cast<T>
                         templateDepth++;
                     } else {
                         spaceBefore = true;
@@ -150,7 +157,7 @@ export function formatCppDeep(text: string): string {
                     if (templateDepth > 0) {
                         spaceBefore = false;
                         templateDepth--;
-                        if (prev && prev.text === '>') spaceBefore = false;
+                        if (prev && prev.text === '>') spaceBefore = false; // >>
                     } else {
                         spaceBefore = true;
                     }
@@ -174,12 +181,19 @@ export function formatCppDeep(text: string): string {
                          wasCaseColon = true;
                      }
                      else if (prev && (['public', 'private', 'protected'].includes(prev.text))) spaceBefore = false;
-                     else if (prev && prev.text === ')') spaceBefore = true; // Constructor init list
+                     else if (prev && prev.text === ')') {
+                         spaceBefore = true; // Constructor init list
+                         inInitializerList = true;
+                     }
                      else spaceBefore = true;
                 }
                 else if (token.text === '?') {
                     spaceBefore = true;
                     if (inCase) ternaryDepth++;
+                }
+                else if (token.text === '=') {
+                    if (prev && prev.text === '[') spaceBefore = false; // Lambda capture [=]
+                    else spaceBefore = true;
                 }
                 else {
                     spaceBefore = true;
@@ -202,6 +216,7 @@ export function formatCppDeep(text: string): string {
                 }
                 else if (token.text === '{') {
                     spaceBefore = true;
+                    if (prev && prev.text === '::') spaceBefore = false; // Namespace::
                 }
                 else if (token.text === ')' || token.text === ']' || token.text === ';' || token.text === ',') {
                     spaceBefore = false;
@@ -228,9 +243,9 @@ export function formatCppDeep(text: string): string {
                             spaceBefore = true;
                         } else {
                             if (prev2 && (isType(prev2) || prev2.text === '>')) {
-                                spaceBefore = true;
+                                spaceBefore = true; // Type* var -> space before var
                             } else {
-                                spaceBefore = false;
+                                spaceBefore = false; // *ptr
                             }
                         }
                     }
@@ -247,11 +262,11 @@ export function formatCppDeep(text: string): string {
                 }
                 else if (prev.type === TokenType.Punctuation) {
                     if (prev.text === ',' || prev.text === ';') spaceBefore = true;
-                    if (prev.text === ')' && token.text !== ';') spaceBefore = true;
-                    if (prev.text === '}') spaceBefore = true;
+                    if (prev.text === ')' && token.text !== ';' && token.text !== ',') spaceBefore = true;
+                    if (prev.text === '}' && token.text !== ';') spaceBefore = true;
                 }
                 else if (prev.type === TokenType.Keyword) {
-                    if (['return', 'throw', 'case', 'goto', 'new', 'delete', 'using', 'namespace'].includes(prev.text)) {
+                    if (['return', 'throw', 'case', 'goto', 'new', 'delete', 'using', 'namespace', 'template'].includes(prev.text)) {
                         spaceBefore = true;
                     }
                 }
@@ -266,9 +281,37 @@ export function formatCppDeep(text: string): string {
 
         if (token.text === '<' && prev && prev.text === 'template') spaceBefore = false;
 
+        // Fixes applied after all logic
+        if (token.text === ']' && prev && prev.text === '=') spaceBefore = false; // [=]
+
         let indentOffset = 0;
-        if (token.text === 'public' || token.text === 'private' || token.text === 'protected') indentOffset = -1;
-        // case/default indent offset removed (so it indents)
+        let extraSpaces = 0;
+
+        if (token.text === 'public' || token.text === 'private' || token.text === 'protected') {
+            // Google style: 1 space indent relative to class (which is indentLevel)
+            // indentLevel is currently 1 inside class.
+            // 2 spaces per level. Level 1 = 2 spaces.
+            // We want 1 space total.
+            // So indentOffset = -1 (back to 0), extraSpaces = 1.
+            indentOffset = -1;
+            extraSpaces = 1;
+        }
+
+        // Constructor Initializer List
+        if (inInitializerList) {
+             if (token.text === ':') {
+                 // Break before colon if it's the start of init list
+                 if (currentLine.trim() !== '') pushLine();
+                 indentOffset = 1; // Double indent (4 spaces)
+                 extraSpaces = 0;
+             } else if (token.text === ',') {
+                 // New line after comma handled later
+             } else {
+                 if (currentLine === '') {
+                     indentOffset = 1; // Continuation indent
+                 }
+             }
+        }
 
         if (token.type === TokenType.Preprocessor) {
             currentLine = token.text;
@@ -276,13 +319,15 @@ export function formatCppDeep(text: string): string {
             continue;
         }
 
+        // Debugging removed
+
         if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) {
              append(' ');
         } else if (!spaceBefore && currentLine.endsWith(' ')) {
              currentLine = currentLine.trimEnd();
         }
 
-        append(token.text, indentOffset);
+        append(token.text, indentOffset, extraSpaces);
 
         // Line Breaks and Brace Logic
         if (token.type === TokenType.Comment) {
@@ -291,6 +336,7 @@ export function formatCppDeep(text: string): string {
         else if (token.text === '{') {
             // Check for namespace
             let isNamespace = false;
+            let isClass = false;
             let k = i - 1;
             // Scan backwards to find context
             while (k >= 0) {
@@ -318,16 +364,31 @@ export function formatCppDeep(text: string): string {
                     }
                     break;
                 }
-                if (t.type === TokenType.Identifier || t.text === '::' || t.text === 'inline') {
-                    k--;
-                    continue;
+                if (t.text === 'class' || t.text === 'struct' || t.text === 'enum' || t.text === 'union') {
+                    isClass = true;
+                    break;
                 }
-                // Stop at other tokens
-                break;
+                if (t.text === ')' || t.text === ']') {
+                    // Could be function or lambda or if
+                    break;
+                }
+                if (t.text === '=') {
+                    // initialization?
+                    break;
+                }
+                if (t.text === ';') break;
+                k--;
+            }
+
+            if (inInitializerList) {
+                inInitializerList = false;
             }
 
             if (isNamespace) {
                 braceStack.push('NAMESPACE');
+            } else if (isClass) {
+                braceStack.push('CLASS');
+                indentLevel++;
             } else {
                 braceStack.push('BLOCK');
                 indentLevel++;
@@ -335,15 +396,17 @@ export function formatCppDeep(text: string): string {
             braceDepth++;
 
             if (next && next.text === '}') {
+                // Empty block
             } else {
                 pushLine();
             }
         }
         else if (token.text === '}') {
              const type = braceStack.pop();
-             // Indent level was already decremented at start of loop if BLOCK
+             // Indent level was already decremented at start of loop if BLOCK/CLASS
              // Just push line
              if (next && next.text === ';') {
+                 // };
              } else {
                  pushLine();
              }
@@ -351,6 +414,11 @@ export function formatCppDeep(text: string): string {
         else if (token.text === ';') {
             if (parenDepth === 0) {
                  pushLine();
+            }
+        }
+        else if (token.text === ',') {
+            if (inInitializerList && parenDepth === 0) {
+                pushLine();
             }
         }
         else if (token.text === ':') {
