@@ -1184,171 +1184,413 @@ async function handleRust(editor: vscode.TextEditor, text: string) {
     // Validate Rust using custom resilient validator
     validationMessage = validateRust(text);
 
-    // Resilient formatting logic
     try {
-        const lines = text.split('\n');
-        const formattedLines: string[] = [];
-        let indentLevel = 0;
-        let inRawString = false;
-        let rawStringHashes = 0;
-        let inString = false;
-        let inChar = false;
-        let blockCommentLevel = 0;
+        // --- Tokenizer ---
+        type Token = { type: 'Whitespace' | 'Comment' | 'String' | 'Char' | 'Lifetime' | 'Identifier' | 'Number' | 'Operator' | 'Punctuation' | 'Unknown', value: string };
+        const tokens: Token[] = [];
+        let i = 0;
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+        while (i < text.length) {
+            const char = text[i];
 
-            if (trimmed === '' && !inRawString && blockCommentLevel === 0) {
-                formattedLines.push('');
+            // Whitespace
+            if (/\s/.test(char)) {
+                let value = '';
+                while (i < text.length && /\s/.test(text[i])) {
+                    value += text[i];
+                    i++;
+                }
+                tokens.push({ type: 'Whitespace', value });
                 continue;
             }
 
-            // Handle Rust raw strings r"..." or r#..."#
-            if (inRawString) {
-                formattedLines.push(line);
-                const endMatch = line.match(new RegExp('"' + '#'.repeat(rawStringHashes)));
-                if (endMatch) {
-                    inRawString = false;
+            // Comments
+            if (char === '/' && text[i+1] === '/') {
+                let value = '';
+                while (i < text.length && text[i] !== '\n') {
+                    value += text[i];
+                    i++;
+                }
+                tokens.push({ type: 'Comment', value });
+                continue;
+            }
+            if (char === '/' && text[i+1] === '*') {
+                let value = '/*';
+                let level = 1;
+                i += 2;
+                while (i < text.length && level > 0) {
+                    if (text[i] === '/' && text[i+1] === '*') {
+                        level++;
+                        value += '/*';
+                        i += 2;
+                    } else if (text[i] === '*' && text[i+1] === '/') {
+                        level--;
+                        value += '*/';
+                        i += 2;
+                    } else {
+                        value += text[i];
+                        i++;
+                    }
+                }
+                tokens.push({ type: 'Comment', value });
+                continue;
+            }
+
+            // Raw String r"..." or r#..."#
+            if (char === 'r' && (text[i+1] === '"' || text[i+1] === '#')) {
+                let start = i;
+                let hashes = 0;
+                i++; // 'r'
+                while (i < text.length && text[i] === '#') {
+                    hashes++;
+                    i++;
+                }
+                if (text[i] === '"') {
+                    i++; // '"'
+                    while (i < text.length) {
+                        if (text[i] === '"') {
+                            let endHashes = 0;
+                            let j = i + 1;
+                            while (j < text.length && text[j] === '#' && endHashes < hashes) {
+                                endHashes++;
+                                j++;
+                            }
+                            if (endHashes === hashes) {
+                                i = j;
+                                break;
+                            }
+                        }
+                        i++;
+                    }
+                    const value = text.substring(start, i);
+                    tokens.push({ type: 'String', value });
+                    continue;
+                } else {
+                    i = start; // Backtrack
+                }
+            }
+
+            // Byte String b"..."
+            if (char === 'b' && text[i+1] === '"') {
+                let start = i;
+                i += 2;
+                while (i < text.length) {
+                    if (text[i] === '\\') { i += 2; continue; }
+                    if (text[i] === '"') { i++; break; }
+                    i++;
+                }
+                tokens.push({ type: 'String', value: text.substring(start, i) });
+                continue;
+            }
+
+            // String "..."
+            if (char === '"') {
+                let start = i;
+                i++;
+                while (i < text.length) {
+                    if (text[i] === '\\') { i += 2; continue; }
+                    if (text[i] === '"') { i++; break; }
+                    i++;
+                }
+                tokens.push({ type: 'String', value: text.substring(start, i) });
+                continue;
+            }
+
+            // Char '...' or Lifetime 'a
+            if (char === "'") {
+                let start = i;
+                i++;
+                while (i < text.length) {
+                    if (text[i] === '\\') { i += 2; continue; }
+                    if (text[i] === "'") { i++; break; }
+                    if (!/[a-zA-Z0-9_]/.test(text[i])) break;
+                    i++;
+                }
+                const value = text.substring(start, i);
+                if (value.endsWith("'") && value.length > 1) {
+                    tokens.push({ type: 'Char', value });
+                } else {
+                     tokens.push({ type: 'Lifetime', value });
                 }
                 continue;
             }
 
-            // Indentation adjustment for closing braces at the START of the line
-            let leadingClosingCount = 0;
-            if (blockCommentLevel === 0 && !inString && !inChar) {
-                let j = 0;
-                while (j < trimmed.length && (trimmed[j] === '}' || trimmed[j] === ')' || trimmed[j] === ']')) {
-                    leadingClosingCount++;
-                    j++;
+            // Identifier
+            if (/[a-zA-Z_]/.test(char)) {
+                let value = '';
+                while (i < text.length && /[a-zA-Z0-9_]/.test(text[i])) {
+                    value += text[i];
+                    i++;
                 }
+                tokens.push({ type: 'Identifier', value });
+                continue;
             }
 
-            if (leadingClosingCount > 0) {
-                indentLevel = Math.max(0, indentLevel - leadingClosingCount);
+            // Number
+            if (/[0-9]/.test(char)) {
+                let value = '';
+                if (char === '0' && (text[i+1] === 'x' || text[i+1] === 'o' || text[i+1] === 'b')) {
+                    value += char + text[i+1];
+                    i += 2;
+                    while (i < text.length && /[0-9a-fA-F_]/.test(text[i])) {
+                        value += text[i];
+                        i++;
+                    }
+                } else {
+                    while (i < text.length && /[0-9_.]/.test(text[i])) {
+                        if (text[i] === '.') {
+                            if (text[i+1] === '.' || /[a-zA-Z_]/.test(text[i+1])) break;
+                        }
+                        value += text[i];
+                        i++;
+                    }
+                    if (text[i] === 'e' || text[i] === 'E') {
+                        value += text[i];
+                        i++;
+                        if (text[i] === '+' || text[i] === '-') {
+                            value += text[i];
+                            i++;
+                        }
+                        while (i < text.length && /[0-9_]/.test(text[i])) {
+                            value += text[i];
+                            i++;
+                        }
+                    }
+                }
+                while (i < text.length && /[a-zA-Z0-9_]/.test(text[i])) {
+                    value += text[i];
+                    i++;
+                }
+                tokens.push({ type: 'Number', value });
+                continue;
             }
 
-            // Apply indentation
-            let currentLine = (blockCommentLevel > 0 || inString || inChar) ? line : '    '.repeat(Math.max(0, indentLevel)) + trimmed;
-
-            // Normalize => and -> operators (only if not in string/comment/rawstring)
-            if (blockCommentLevel === 0 && !inString && !inChar && !inRawString) {
-                // This is still a bit naive but better than global replace on the whole line if we were tracking state within the line.
-                // To be truly robust we should do this character by character.
+            // Punctuation
+            if ("(){}[],;:".includes(char)) {
+                if (char === ':' && text[i+1] === ':') {
+                    tokens.push({ type: 'Operator', value: '::' });
+                    i += 2;
+                    continue;
+                }
+                tokens.push({ type: 'Punctuation', value: char });
+                i++;
+                continue;
             }
 
-            formattedLines.push(currentLine);
-
-            // Calculate net brace change for NEXT line and track state
-            let netChange = 0;
-            const startIdx = (blockCommentLevel > 0 || inString || inChar) ? 0 : leadingClosingCount;
-            const textToProcess = (blockCommentLevel > 0 || inString || inChar) ? line : trimmed.substring(leadingClosingCount);
-
-            for (let k = 0; k < textToProcess.length; k++) {
-                const char = textToProcess[k];
-                const nextChar = textToProcess[k + 1];
-
-                if (inRawString) {
-                    const remaining = textToProcess.substring(k);
-                    const endMatch = remaining.match(new RegExp('^"' + '#'.repeat(rawStringHashes)));
-                    if (endMatch) {
-                        inRawString = false;
-                        k += endMatch[0].length - 1;
-                    }
-                    continue;
-                }
-
-                if (blockCommentLevel > 0) {
-                    if (char === '*' && nextChar === '/') {
-                        blockCommentLevel--;
-                        k++;
-                    } else if (char === '/' && nextChar === '*') {
-                        blockCommentLevel++;
-                        k++;
-                    }
-                    continue;
-                }
-
-                if (inString) {
-                    if (char === '\\') {
-                        k++;
-                    } else if (char === '"') {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (inChar) {
-                    if (char === '\\') {
-                        k++;
-                    } else if (char === "'") {
-                        inChar = false;
-                    }
-                    continue;
-                }
-
-                // Start of comment
-                if (char === '/' && nextChar === '/') {
-                    break; // Line comment, rest of line is ignored
-                }
-                if (char === '/' && nextChar === '*') {
-                    blockCommentLevel++;
-                    k++;
-                    continue;
-                }
-
-                // Start of raw string
-                if (char === 'r' && (nextChar === '"' || nextChar === '#')) {
-                    let hashes = 0;
-                    let m = k + 1;
-                    while (m < textToProcess.length && textToProcess[m] === '#') {
-                        hashes++;
-                        m++;
-                    }
-                    if (m < textToProcess.length && textToProcess[m] === '"') {
-                        inRawString = true;
-                        rawStringHashes = hashes;
-                        k = m;
-                        continue;
-                    }
-                }
-
-                if (char === '"') {
-                    inString = true;
-                    continue;
-                }
-
-                if (char === "'") {
-                    const remaining = textToProcess.substring(k + 1);
-                    if (/^([^'\\]|\\.)'/.test(remaining)) {
-                        inChar = true;
-                    }
-                    continue;
-                }
-
-                if (char === '{' || char === '(' || char === '[') {
-                    netChange++;
-                }
-                if (char === '}' || char === ')' || char === ']') {
-                    netChange--;
+            // Operators
+            const ops = ["<<=", ">>=", "...", "..=", "&&", "||", "==", "!=", "<=", ">=", "<<", ">>", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "->", "=>", "..", "::"];
+            let matched = false;
+            for (const op of ops) {
+                if (text.startsWith(op, i)) {
+                    tokens.push({ type: 'Operator', value: op });
+                    i += op.length;
+                    matched = true;
+                    break;
                 }
             }
+            if (matched) continue;
 
-            indentLevel = Math.max(0, indentLevel + netChange);
+            if ("+-*/%^&|!<>=?".includes(char)) {
+                tokens.push({ type: 'Operator', value: char });
+                i++;
+                continue;
+            }
+
+            tokens.push({ type: 'Unknown', value: char });
+            i++;
         }
-        formatted = formattedLines.join('\n');
 
-        // Post-process to normalize operators outside of strings/comments
-        // (A bit complex to do perfectly without a full parser, but let's keep it simple for now as per "resilient" goal)
-        // Actually, the previous version was simpler. Let's stick to a slightly better version.
-        formatted = formatted.split('\n').map(l => {
-            // Only normalize if the line doesn't seem to be a multiline string/comment middle
-            if (l.trim().startsWith('*') || l.trim().startsWith('"')) {
-                return l;
+        // --- Import Sorting ---
+        const processedTokens: Token[] = [];
+        let importGroup: { pre: Token[], tokens: Token[], text: string }[] = [];
+        let pendingPre: Token[] = [];
+
+        for (let j = 0; j < tokens.length; j++) {
+            const t = tokens[j];
+
+            // Check for 'use' statement start
+            if (t.type === 'Identifier' && t.value === 'use') {
+                // Look ahead to capture the full statement until ';'
+                let k = j;
+                let stmtTokens: Token[] = [];
+                let stmtText = "";
+                let foundSemi = false;
+                while (k < tokens.length) {
+                     stmtTokens.push(tokens[k]);
+                     stmtText += tokens[k].value;
+                     if (tokens[k].value === ';') {
+                         foundSemi = true;
+                         break;
+                     }
+                     k++;
+                }
+
+                if (foundSemi) {
+                    // Filter whitespace from pre, as reconstruction handles newlines
+                    importGroup.push({
+                        pre: pendingPre.filter(t => t.type !== 'Whitespace'),
+                        tokens: stmtTokens,
+                        text: stmtText
+                    });
+                    pendingPre = [];
+                    j = k; // Skip processed
+                    continue;
+                }
             }
-            return l.replace(/([^ ])=>/g, '$1 =>').replace(/=>([^ ])/g, '=> $1')
-                    .replace(/([^ ])->/g, '$1 ->').replace(/->([^ ])/g, '-> $1');
-        }).join('\n');
+
+            if (t.type === 'Whitespace' || t.type === 'Comment') {
+                pendingPre.push(t);
+                // Check if this separator breaks the group (e.g. blank line)
+                const isBlankLine = t.type === 'Whitespace' && (t.value.match(/\n/g) || []).length >= 2;
+                if (isBlankLine && importGroup.length > 0) {
+                    // Flush current group sorted
+                    importGroup.sort((a, b) => a.text.localeCompare(b.text));
+                    importGroup.forEach(item => {
+                        processedTokens.push(...item.pre);
+                        processedTokens.push(...item.tokens);
+                    });
+                    importGroup = [];
+                }
+            } else {
+                // Non-use, non-separator. Flush everything.
+                if (importGroup.length > 0) {
+                    importGroup.sort((a, b) => a.text.localeCompare(b.text));
+                    importGroup.forEach(item => {
+                        processedTokens.push(...item.pre);
+                        processedTokens.push(...item.tokens);
+                    });
+                    importGroup = [];
+                }
+                processedTokens.push(...pendingPre);
+                pendingPre = [];
+                processedTokens.push(t);
+            }
+        }
+        // Flush remaining
+        if (importGroup.length > 0) {
+            importGroup.sort((a, b) => a.text.localeCompare(b.text));
+            importGroup.forEach(item => {
+                processedTokens.push(...item.pre);
+                processedTokens.push(...item.tokens);
+            });
+        }
+        processedTokens.push(...pendingPre);
+
+        // --- Reconstruction ---
+        formatted = "";
+        let indent = 0;
+        let lastToken: Token | null = null;
+        let tokenBeforeLast: Token | null = null; // For > ( generic detection
+        let justForcedNewline = false;
+
+        for (let j = 0; j < processedTokens.length; j++) {
+            const t = processedTokens[j];
+
+            if (t.type === 'Whitespace') {
+                // If we just forced a newline, we might want to ignore the first newline in this token
+                let newlines = (t.value.match(/\n/g) || []).length;
+                if (justForcedNewline && newlines > 0) {
+                    newlines--;
+                    justForcedNewline = false;
+                }
+
+                if (newlines > 0) {
+                    const toAdd = Math.min(newlines, 2);
+                    formatted += '\n'.repeat(toAdd);
+                }
+                continue;
+            }
+
+            justForcedNewline = false;
+
+            if (t.value === '}') indent = Math.max(0, indent - 1);
+
+            // Check newline
+            if (formatted.endsWith('\n') || formatted === '') {
+                if (t.type === 'Comment' && t.value.startsWith('/*') && !t.value.includes('\n')) {
+                     formatted += '    '.repeat(indent);
+                } else {
+                     formatted += '    '.repeat(indent);
+                }
+            } else {
+                // Spacing
+                if (lastToken) {
+                    let space = false;
+                    const prev = lastToken;
+                    const curr = t;
+
+                    // Always space around bin ops
+                    if (prev.type === 'Operator' || curr.type === 'Operator') {
+                        space = true;
+                        if (prev.value === '::' || curr.value === '::') space = false;
+                        else if (prev.value === '.' || curr.value === '.') space = false;
+                        else if (prev.value === '..' || curr.value === '..') space = false;
+                        else if (prev.value === '..=' || curr.value === '..=') space = false;
+                        else if (prev.value === '!' && (curr.value === '(' || curr.value === '[' || curr.value === '{')) space = false;
+                        else if (curr.type === 'Operator' && ['!', '&', '*', '-'].includes(curr.value)) {
+                            // Unary check
+                            const prevIsPunct = prev.type === 'Punctuation' && ![')', ']', '}'].includes(prev.value);
+                            const prevIsOp = prev.type === 'Operator';
+                            const prevIsKey = prev.type === 'Identifier' && ['return', 'match', 'if', 'else', 'while', 'for', 'in', 'box', 'yield'].includes(prev.value);
+                            if (prevIsPunct || prevIsOp || prevIsKey) space = false;
+                        }
+
+                        // Generics < >
+                        if ((curr.value === '<' || curr.value === '>') && prev.type === 'Identifier') space = false;
+                        if (prev.value === '<' && (curr.type === 'Identifier' || curr.type === 'Lifetime')) space = false;
+                        // Fix > ( generic end
+                        if (prev.value === '>' && curr.value === '(') {
+                             if (tokenBeforeLast && tokenBeforeLast.type === 'Lifetime') space = false;
+                        }
+                    }
+
+                    // Punctuation
+                    if (prev.value === ',' || prev.value === ';') space = true;
+                    if (curr.value === ',' || curr.value === ';' || curr.value === ':') space = false;
+                    if (prev.value === ':' && curr.value !== ':') space = true; // Type annotation
+
+                    // Delimiters
+                    if (prev.value === '(' || prev.value === '[' || prev.value === '{') space = false;
+                    if (curr.value === ')' || curr.value === ']' || curr.value === '}') space = false;
+
+                    // Keywords
+                    const keywords = ['fn', 'struct', 'enum', 'impl', 'trait', 'mod', 'pub', 'let', 'const', 'static', 'if', 'else', 'match', 'while', 'for', 'loop', 'return', 'break', 'continue', 'use', 'type', 'crate'];
+                    if (keywords.includes(prev.value)) space = true;
+                    if (prev.value === 'fn' && curr.value === '(') space = false;
+
+                    // Func call
+                    if (prev.type === 'Identifier' && curr.value === '(') {
+                        if (['if', 'while', 'for', 'match'].includes(prev.value)) space = true;
+                        else space = false;
+                    }
+
+                    if (space) formatted += ' ';
+                }
+            }
+
+            formatted += t.value;
+
+            if (t.value === '{') {
+                indent++;
+                formatted += '\n';
+                justForcedNewline = true;
+            }
+            if (t.value === ';') {
+                formatted += '\n';
+                justForcedNewline = true;
+            }
+            if (t.value === '}') {
+                 formatted += '\n';
+                 justForcedNewline = true;
+            }
+            if (t.type === 'Comment' && t.value.startsWith('//')) {
+                formatted += '\n';
+                justForcedNewline = true;
+            }
+
+            if (lastToken) tokenBeforeLast = lastToken;
+            lastToken = t;
+        }
 
     } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to format Rust: ${error.message}`);

@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Rust (Deep Formatting Implemented)
 - [x] EditorConfig (Deep Formatting Implemented)
 - [x] Go (Deep Formatting Implemented)
 - [x] Shell Script (Deep Formatting Implemented)
