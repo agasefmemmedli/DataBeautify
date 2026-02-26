@@ -3,27 +3,43 @@ import { JavaTokenizer, Token, TokenType } from './java_tokenizer';
 
 function sortImports(text: string): string {
     const lines = text.split('\n');
-    const imports: string[] = [];
+    const staticImports: string[] = [];
+    const regularImports: string[] = [];
     const newLines: string[] = [];
     let firstImportIndex = -1;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const trimmed = line.trim();
-        if (trimmed.startsWith('import ') && trimmed.endsWith(';')) {
+        // Check if line looks like an import (ignoring trailing comments)
+        // Heuristic: starts with import, contains semicolon
+        if (trimmed.startsWith('import ') && trimmed.includes(';')) {
             if (firstImportIndex === -1) firstImportIndex = newLines.length;
-            imports.push(line);
+
+            if (trimmed.startsWith('import static ')) {
+                staticImports.push(line);
+            } else {
+                regularImports.push(line);
+            }
         } else {
             newLines.push(line);
         }
     }
 
-    if (imports.length === 0) return text;
+    if (staticImports.length === 0 && regularImports.length === 0) return text;
 
-    imports.sort((a, b) => a.trim().localeCompare(b.trim()));
+    staticImports.sort((a, b) => a.trim().localeCompare(b.trim()));
+    regularImports.sort((a, b) => a.trim().localeCompare(b.trim()));
+
+    const combinedImports: string[] = [];
+    if (staticImports.length > 0) {
+        combinedImports.push(...staticImports);
+        if (regularImports.length > 0) combinedImports.push('');
+    }
+    combinedImports.push(...regularImports);
 
     if (firstImportIndex !== -1) {
-        newLines.splice(firstImportIndex, 0, ...imports);
+        newLines.splice(firstImportIndex, 0, ...combinedImports);
     } else {
         return text;
     }
@@ -327,5 +343,160 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
 
     if (currentLine.trim() !== '') pushLine();
 
+    // Post-Processing: Alignment
+    console.log('Running alignDeclarations...');
+    alignDeclarations(outputLines);
+
     return outputLines.join('\n');
+}
+
+function alignDeclarations(lines: string[]) {
+    let i = 0;
+    while (i < lines.length) {
+        let blockStart = -1;
+        let blockEnd = -1;
+
+        // Collect block of declarations
+        for (let j = i; j < lines.length; j++) {
+            const line = lines[j];
+            const trimmed = line.trim();
+            // Handle comments inside the block or trailing comments
+            // For now, if line is PURELY comment, we break block
+            // If line is code + comment, we can process it
+            if (trimmed === '' || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('@')) {
+                if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+                continue;
+            }
+
+            // Check if line is a declaration
+            // Must contain ;
+            if (!line.includes(';')) {
+                if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+                continue;
+            }
+
+            // Exclude lines with "return", "throw", "package", "import"
+            if (/^\s*(return|throw|package|import)\b/.test(line)) {
+                 if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+                continue;
+            }
+
+            // Parse: Indent + Content + ; + (Comment)
+            const eqIndex = line.indexOf('=');
+            const semiIndex = line.indexOf(';');
+
+            // Should split before = or before ;
+            const endDeclIndex = (eqIndex !== -1 && eqIndex < semiIndex) ? eqIndex : semiIndex;
+
+            const declPart = line.substring(0, endDeclIndex).trimEnd();
+
+            // Safety Check
+            if (declPart.includes('(') || declPart.includes(')') || declPart.includes('"') || declPart.includes("'")) {
+                 if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+                continue;
+            }
+
+            const lastSpaceIndex = declPart.lastIndexOf(' ');
+            if (lastSpaceIndex !== -1) {
+                if (blockStart === -1) blockStart = j;
+            } else {
+                if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+            }
+        }
+
+        if (blockStart !== -1) {
+            if (blockEnd === -1) blockEnd = lines.length;
+
+            // Process block
+            const block = lines.slice(blockStart, blockEnd);
+            const parsedItems = [];
+
+            let maxTypeLen = 0;
+
+            for (let k = 0; k < block.length; k++) {
+                const line = block[k];
+                const trimmed = line.trim();
+
+                if (trimmed === '' || trimmed.startsWith('/') || trimmed.startsWith('*') || trimmed.startsWith('@')) {
+                    parsedItems.push(null);
+                    continue;
+                }
+
+                const indentMatch = line.match(/^(\s*)/);
+                const indent = indentMatch ? indentMatch[1] : '';
+
+                const eqIndex = line.indexOf('=');
+                const semiIndex = line.indexOf(';');
+                // Safety: check if semiIndex is valid
+                if (semiIndex === -1) { parsedItems.push(null); continue; }
+
+                const endDeclIndex = (eqIndex !== -1 && eqIndex < semiIndex) ? eqIndex : semiIndex;
+
+                const declPart = line.substring(0, endDeclIndex).trimEnd(); // "    private int x"
+                const restPart = line.substring(endDeclIndex); // "= 1;" or "; // comment"
+
+                // Safety Re-check
+                if (declPart.includes('(') || declPart.includes(')') || declPart.includes('"') || declPart.includes("'")) {
+                    parsedItems.push(null);
+                    continue;
+                }
+
+                // Remove indent from declPart
+                const trimmedDecl = declPart.trim(); // "private int x"
+                const lastSpace = trimmedDecl.lastIndexOf(' ');
+
+                if (lastSpace !== -1) {
+                    const typePart = trimmedDecl.substring(0, lastSpace); // "private int"
+                    const namePart = trimmedDecl.substring(lastSpace + 1); // "x"
+
+                    // Extra safety: name should be identifier
+                    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*(\[\])*$/.test(namePart)) {
+                        parsedItems.push(null);
+                        continue;
+                    }
+
+                    if (typePart.length > maxTypeLen) maxTypeLen = typePart.length;
+
+                    parsedItems.push({
+                        indent,
+                        type: typePart,
+                        name: namePart,
+                        rest: restPart
+                    });
+                } else {
+                    parsedItems.push(null);
+                }
+            }
+
+            // Apply alignment
+            if (parsedItems.filter(x => x !== null).length > 1) {
+                for (let k = 0; k < block.length; k++) {
+                    const item = parsedItems[k];
+                    if (item) {
+                        const padding = ' '.repeat(maxTypeLen - item.type.length);
+                        lines[blockStart + k] = `${item.indent}${item.type}${padding} ${item.name}${item.rest}`;
+                    }
+                }
+            }
+
+            i = blockEnd;
+        } else {
+            i++;
+        }
+    }
 }

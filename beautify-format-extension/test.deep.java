@@ -1,7 +1,9 @@
 package com.example.deep;
 
 import java.util.List;
+import static java.lang.Math.PI;
 import java.util.stream.Collectors;
+import static java.lang.Math.abs;
 import java.util.stream.Stream;
 
 /**
@@ -22,6 +24,13 @@ public record Point(int x, int y) {}
 public class DeepJavaTest<T> {
 
     private final List<T> items;
+    protected int count;
+    public String name;
+
+    // Unaligned variables
+    private int x = 1;
+    public double y = 2.0;
+    protected String z = "test";
 
     public DeepJavaTest(List<T> items) {
         this.items = items;
