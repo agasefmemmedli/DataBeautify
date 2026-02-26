@@ -324,12 +324,6 @@ export class JavaTokenizer {
                     k--;
                 }
 
-                if (backslashes % 2 !== 0) {
-                    // Escaped quote?
-                    // In text block, a single " doesn't need escape.
-                    // But if we encounter """, we check if the first " is escaped.
-                }
-
                 if (currentPos + 2 < this.code.length && this.code[currentPos+1] === '"' && this.code[currentPos+2] === '"') {
                     // Found """
                     // Check if escaped
