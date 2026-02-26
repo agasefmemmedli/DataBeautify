@@ -141,6 +141,20 @@ div > span {
   color: var(--primary-color);
 }
 `
+        },
+        {
+            file: 'test.features.css',
+            expected: `div[ type = "text" ] {
+  color: #abc;
+  background: #000;
+  content: "foo";
+  font-family: "Arial", "Helvetica";
+}
+
+span + div > p {
+  margin: 0;
+}
+`
         }
     ];
     let passed = 0;
@@ -225,4 +239,3 @@ runTests().catch(err => {
     console.error(err);
     process.exit(1);
 });
-//# sourceMappingURL=verify-css-deep.js.map
