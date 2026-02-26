@@ -22,83 +22,191 @@ export function formatNginxDeep(text: string): string {
         tokens.push({ ...t, precededByWhitespace });
     }
 
-    let formatted = '';
+    let formattedLines: string[] = [];
+    let currentLine = '';
     let indentLevel = 0;
-    const indentString = '    '; // 4 spaces
+    const INDENT_SIZE = 4;
+    const indentString = ' '.repeat(INDENT_SIZE);
+
+    const pushLine = (forceEmpty: boolean = false) => {
+        if (currentLine.trim() !== '') {
+            formattedLines.push(currentLine);
+            currentLine = '';
+        } else if (forceEmpty) {
+             if (formattedLines.length > 0 && formattedLines[formattedLines.length-1] !== '') {
+                 formattedLines.push('');
+             }
+        }
+    };
+
+    const getIndent = (level: number) => {
+        return indentString.repeat(Math.max(0, level));
+    };
+
+    const append = (str: string, indentOffset: number = 0) => {
+        if (currentLine === '') {
+            currentLine = getIndent(indentLevel + indentOffset) + str;
+        } else {
+            currentLine += str;
+        }
+    };
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const nextToken = i + 1 < tokens.length ? tokens[i + 1] : null;
         const prevToken = i > 0 ? tokens[i - 1] : null;
 
-        // Check current state of formatted string
-        const prevChar = formatted.length > 0 ? formatted[formatted.length - 1] : '';
-        const isNewLine = prevChar === '\n' || formatted === '';
-
-        // Handle Closing Brace '}'
+        // Dedent on '}'
         if (token.type === TokenType.Punctuation && token.text === '}') {
             indentLevel = Math.max(0, indentLevel - 1);
-            if (!isNewLine) {
-                 formatted += '\n';
-            }
-            // Check for blank lines preservation
-            // If original code had blank lines before }, preserve?
-            // Usually we compact inside blocks, but let's stick to standard indent.
-            formatted += indentString.repeat(indentLevel) + '}';
-            formatted += '\n';
+            pushLine();
+        }
 
-            if (indentLevel === 0 && nextToken && nextToken.text !== '}') {
-                 if (!formatted.endsWith('\n\n')) {
-                     formatted += '\n';
+        // Handle blank lines from source
+        if (i > 0 && prevToken) {
+             const newlines = token.line - prevToken.endLine;
+             if (newlines > 1) {
+                 pushLine(true); // Force empty line
+             } else if (newlines === 1 && currentLine !== '') {
+                 // Wrap line if not already pushed (unlikely for Nginx usually unless multi-line directive)
+                 pushLine();
+             }
+        }
+
+        // Spacing Logic
+        let spaceBefore = false;
+
+        if (currentLine !== '') {
+            const lastChar = currentLine[currentLine.length - 1];
+
+            if (token.type === TokenType.Punctuation && token.text === ';') {
+                spaceBefore = false;
+            } else if (token.type === TokenType.Punctuation && token.text === '{') {
+                spaceBefore = true;
+            } else if (token.type === TokenType.LuaBlock) {
+                 spaceBefore = true;
+            } else {
+                 // Words, Variables, Strings
+                 if (token.precededByWhitespace && lastChar !== ' ') {
+                     spaceBefore = true;
                  }
+            }
+        }
+
+        if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) {
+             append(' ');
+        }
+
+        append(token.text);
+
+        // Indent on '{'
+        if (token.type === TokenType.Punctuation && token.text === '{') {
+            indentLevel++;
+            pushLine();
+        }
+        else if (token.type === TokenType.Punctuation && token.text === ';') {
+            // If next token is comment on same line, append space
+            if (nextToken && nextToken.type === TokenType.Comment && nextToken.line === token.endLine) {
+                 append(' ');
+            } else {
+                pushLine();
+            }
+        }
+        else if (token.type === TokenType.LuaBlock) {
+             pushLine();
+        }
+        else if (token.type === TokenType.Comment) {
+             pushLine();
+        }
+    }
+
+    if (currentLine.trim() !== '') pushLine();
+
+    // Alignment Post-Processing
+    return alignDirectives(formattedLines.join('\n'));
+}
+
+function alignDirectives(text: string): string {
+    const lines = text.split('\n');
+    let blockStart = -1;
+    let blockEnd = -1;
+
+    // Directives to align
+    const alignableDirectives = new Set([
+        'listen', 'server_name', 'root', 'index', 'try_files', 'error_page',
+        'access_log', 'error_log', 'include', 'proxy_pass', 'fastcgi_pass',
+        'fastcgi_param', 'proxy_set_header', 'add_header', 'ssl_certificate',
+        'ssl_certificate_key', 'ssl_protocols', 'ssl_ciphers', 'gzip',
+        'gzip_types', 'location', 'upstream'
+    ]);
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed === '' || trimmed.startsWith('#') || trimmed.endsWith('{') || trimmed === '}') {
+            if (blockStart !== -1) {
+                // Process block
+                processAlignmentBlock(lines, blockStart, i);
+                blockStart = -1;
             }
             continue;
         }
 
-        // Handle Indentation for new lines
-        if (isNewLine) {
-            if (prevToken && token.line > prevToken.endLine + 1) {
-                if (!formatted.endsWith('\n\n')) {
-                    formatted += '\n';
-                }
-            }
-            formatted += indentString.repeat(indentLevel);
+        // Check if it's an alignable directive
+        const parts = trimmed.split(/\s+/);
+        if (parts.length > 1 && alignableDirectives.has(parts[0])) {
+            if (blockStart === -1) blockStart = i;
         } else {
-            // Handle spacing between tokens on same line
-            const currentPrevChar = formatted.length > 0 ? formatted[formatted.length - 1] : '';
-
-            if (token.type === TokenType.Punctuation && token.text === ';') {
-                // No space before semicolon
-            } else if ((token.type === TokenType.Punctuation && token.text === '{') || token.type === TokenType.LuaBlock) {
-                // Space before opening brace/block ALWAYS
-                if (currentPrevChar !== ' ') formatted += ' ';
-            } else if (token.type === TokenType.Variable || token.type === TokenType.Word || token.type === TokenType.String || token.type === TokenType.Unknown) {
-                // Use whitespace tracking
-                if (token.precededByWhitespace && currentPrevChar !== ' ') {
-                    formatted += ' ';
-                }
+            if (blockStart !== -1) {
+                processAlignmentBlock(lines, blockStart, i);
+                blockStart = -1;
             }
-        }
-
-        // Append Token Text
-        formatted += token.text;
-
-        // Post-Token Handling (Newlines)
-        if (token.type === TokenType.LuaBlock) {
-             formatted += '\n';
-        } else if (token.type === TokenType.Punctuation && token.text === '{') {
-            indentLevel++;
-            formatted += '\n';
-        } else if (token.type === TokenType.Punctuation && token.text === ';') {
-            if (nextToken && nextToken.type === TokenType.Comment && nextToken.line === token.endLine) {
-                 formatted += ' ';
-            } else {
-                formatted += '\n';
-            }
-        } else if (token.type === TokenType.Comment) {
-            formatted += '\n';
         }
     }
 
-    return formatted.replace(/\n\n\n+/g, '\n\n').trim() + '\n';
+    if (blockStart !== -1) {
+        processAlignmentBlock(lines, blockStart, lines.length);
+    }
+
+    return lines.join('\n');
+}
+
+function processAlignmentBlock(lines: string[], start: number, end: number) {
+    if (end - start < 2) return; // Need at least 2 lines to align
+
+    // Analyze block to see if indentation is consistent
+    const firstIndent = lines[start].match(/^(\s*)/)![1];
+    for (let i = start + 1; i < end; i++) {
+        const indentMatch = lines[i].match(/^(\s*)/);
+        const indent = indentMatch ? indentMatch[1] : '';
+        if (indent !== firstIndent) return; // Don't align if different indentation levels mixed
+    }
+
+    // Find max directive length
+    let maxDirectiveLen = 0;
+    const parsedLines: {directive: string, args: string}[] = [];
+
+    for (let i = start; i < end; i++) {
+        const trimmed = lines[i].trim();
+        const firstSpace = trimmed.indexOf(' ');
+        if (firstSpace === -1) {
+             parsedLines.push({ directive: trimmed, args: '' });
+             continue;
+        }
+        const directive = trimmed.substring(0, firstSpace);
+        const args = trimmed.substring(firstSpace + 1);
+
+        if (directive.length > maxDirectiveLen) maxDirectiveLen = directive.length;
+        parsedLines.push({ directive, args });
+    }
+
+    // Apply alignment
+    for (let i = 0; i < parsedLines.length; i++) {
+        const item = parsedLines[i];
+        if (item.args) {
+            const padding = ' '.repeat(maxDirectiveLen - item.directive.length);
+            lines[start + i] = `${firstIndent}${item.directive}${padding} ${item.args}`;
+        }
+    }
 }
