@@ -17,3 +17,4 @@
 - [x] SCSS (Deep Formatting Implemented)
 - [x] PowerShell (Deep Formatting Implemented)
 - [x] Go (Deep Formatting Implemented)
+- [x] Rust (Deep Formatting Implemented)
