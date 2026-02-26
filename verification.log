@@ -627,109 +627,111 @@ template<typename T>
 class MyContainer;
 // Enumeration
 enum class Color {
-    Red, Green, Blue
-} ;
+  Red, Green, Blue
+};
 // Struct with attributes
 struct [[nodiscard]] Point {
-    int x;
-    int y;
-} ;
+  int x;
+  int y;
+};
 // Class with inheritance and templates
 template<typename T, typename U = std::string>
 class MyClass : public std::vector<T> {
-public:
-    using value_type = T;
-    // Constructor with initializer list
-    MyClass(int size) : std::vector<T> (size) , m_name("default") {
-        if (size > 100) {
-            this->reserve(size * 2);
-        }
+ public:
+  using value_type = T;
+  // Constructor with initializer list
+  MyClass(int size)
+    : std::vector<T> (size),
+    m_name("default") {
+    if (size > 100) {
+      this->reserve(size * 2);
     }
-    // Function with trailing return type and noexcept
-    auto getName() const noexcept->const std::string& {
-        return m_name;
+  }
+  // Function with trailing return type and noexcept
+  auto getName() const noexcept->const std::string& {
+    return m_name;
+  }
+  // Template member function
+  template<typename V>
+  void process(V && value) {
+    // Lambda expression
+    auto lambda = [this, &value](int x) ->bool {
+      return x > 0 && value != T {
+      };
+    };
+    if (lambda(1) ) {
+      m_data.push_back(std::forward < V > (value) );
     }
-    // Template member function
-    template<typename V>
-    void process(V && value) {
-        // Lambda expression
-        auto lambda = [this, &value](int x) ->bool {
-            return x > 0 && value != T {
-            } ;
-        } ;
-        if (lambda(1) ) {
-            m_data.push_back(std::forward < V > (value) );
-        }
-    }
-protected:
-    std::vector<U> m_data;
-private:
-    std::string m_name;
-    int* m_ptr = nullptr;
-    // Pointer syntax
-    int& m_ref = *m_ptr;
-    // Reference syntax
-} ;
+  }
+ protected:
+  std::vector<U> m_data;
+ private:
+  std::string m_name;
+  int* m_ptr = nullptr;
+  // Pointer syntax
+  int& m_ref = *m_ptr;
+  // Reference syntax
+};
 // Concept (C++20)
 template<typename T> concept Addable = requires(T a, T b) {
-    {
-        a + b
-    }
-    ->std::convertible_to < T > ;
-} ;
+  {
+    a + b
+  }
+  ->std::convertible_to < T > ;
+};
 // Function using concept
 void add(Addable auto a, Addable auto b) {
-    // Switch case
-    switch (a) {
-        case 0:
-        {
-            std::cout << "Zero";
-            break;
-        }
-        case 1:
-        std::cout << "One";
-        [[fallthrough]] ;
-        default:
-        std::cout << "Many";
-        break;
+  // Switch case
+  switch (a) {
+    case 0:
+    {
+      std::cout << "Zero";
+      break;
     }
+    case 1:
+    std::cout << "One";
+    [[fallthrough]] ;
+    default:
+    std::cout << "Many";
+    break;
+  }
 }
 // Global variable with complex type
 std::map<std::string, std::vector<int>> g_map = {
-    {
-        "one", {
-            1
-        }
+  {
+    "one", {
+      1
     }
-    , {
-        "two", {
-            1, 2
-        }
+  }
+  , {
+    "two", {
+      1, 2
     }
-} ;
+  }
+};
 int main() {
-    MyClass<int> obj(10);
-    obj.process(42);
-    // Initializer list logic
-    std::vector<int> vec = {
-        1, 2, 3, 4, 5
-    } ;
-    // Complex expression
-    int result = (1 + 2) * (3 - 4) / 5 % 6;
-    bool check = (result > 0) && (result < 10) || !(result == 5);
-    // Raw string literal
-    const char* raw = R"(
+  MyClass<int> obj(10);
+  obj.process(42);
+  // Initializer list logic
+  std::vector<int> vec = {
+    1, 2, 3, 4, 5
+  };
+  // Complex expression
+  int result = (1 + 2) * (3 - 4) / 5 % 6;
+  bool check = (result > 0) && (result < 10) || !(result == 5);
+  // Raw string literal
+  const char* raw = R"(
         This is a raw string
         spanning multiple lines.
     )";
-    // Nested templates
-    std::vector<std::vector<int>> matrix;
-    // Pointer alignment check
-    int* p1;
-    // Should be int* p1
-    int* p2;
-    int* p3;
-    return 0;
+  // Nested templates
+  std::vector<std::vector<int>> matrix;
+  // Pointer alignment check
+  int* p1;
+  // Should be int* p1
+  int* p2;
+  int* p3;
+  return 0;
 }
 -----------------
 ✅ test.deep.cpp changed.
@@ -1019,7 +1021,11 @@ Testing test.complex.css...
 INFO: CSS formatted successfully!
 ✅ test.complex.css passed.
 
-Results: 3 passed, 0 failed.
+Testing test.features.css...
+WARN: CSS has syntax issues but was beautified. First error: missing '}' at line 9, col 1
+✅ test.features.css passed.
+
+Results: 4 passed, 0 failed.
 Running verify-csv-deep.cjs...
 Testing test.deep.csv...
 INFO: CSV formatted successfully!
@@ -2076,8 +2082,7 @@ resource "foo" "bar" {
 
 --- Formatted ---
 resource "foo" "bar" {
-  tags = merge(
-    {
+  tags = merge({
       Name = "test"
     },
     var.extra_tags
@@ -2904,6 +2909,7 @@ System.Exception: Something went wrong
    at System.IO.FileStream.Init(String path)
    at App.Program.Main()
 2023-10-27T10:00:07.123Z INFO ISO8601 timestamp example
+2023-10-27 10:00:08 INFO XML payload: <request><user>bob</user><action>delete</action></request>
 
 --- Formatted ---
 2023-10-27 10:00:00            [INFO] Starting service...
@@ -2931,6 +2937,10 @@ Oct 27 10:00:03          ERROR failed to process request: {
                                at System.IO.FileStream.Init(String path)
                                at App.Program.Main()
 2023-10-27T10:00:07.123Z INFO  ISO8601 timestamp example
+2023-10-27 10:00:08      INFO  XML payload: <request>
+                                              <user>bob</user>
+                                              <action>delete</action>
+                                            </request>
 
 -----------------
 ✅ test.deep.log beautified successfully.
@@ -3476,70 +3486,72 @@ Running verify-mongodb-deep.cjs...
 Testing test.deep.mongodb...
 INFO: MongoDB Shell script formatted successfully!
 --- Original ---
-// Valid MongoDB Shell Script
-use myDatabase
-db.myCollection.drop()
+// MongoDB Shell Test
 
+use myDatabase
 show collections
 
-db.myCollection.insertOne({
+db.users.find({
     name: "Deep Formatting",
-    date: new Date(),
-    val: 123,
-    tags: ["a", "b", "c"]
-})
-
-// Complex query
-db.myCollection.find({
     $or: [
-        { name: "Deep Formatting" },
-        { val: { $gt: 100 } }
+        { "address.city": { $in: ["New York", "London"] } },
+        { age: { $gt: 25 } }
     ]
-}).sort({ val: -1 }).limit(10).forEach(function(doc) {
-    print("Found: " + doc.name);
-})
+}).sort({ name: 1 }).limit(10)
+
+db.orders.aggregate([
+    { $match: { status: "completed" } },
+    { $group: { _id: "$custId", total: { $sum: "$amount" } } },
+    { $sort: { total: -1 } }
+])
 
 // Function definition
-function myHelper(id) {
-    return db.myCollection.findOne({ _id: id });
+function updateUsers() {
+    const cursor = db.users.find();
+    while (cursor.hasNext()) {
+        const user = cursor.next();
+        printjson(user);
+    }
 }
 
-// Shell helpers
-it
-cls
+// Shell commands mixed with JS
+show dbs
+updateUsers()
+exit
 
 --- Formatted ---
-// Valid MongoDB Shell Script
-use myDatabase
-db.myCollection.drop()
+// MongoDB Shell Test
 
+use myDatabase
 show collections
 
-db.myCollection.insertOne( {
-  name: "Deep Formatting",
-  date: new Date(),
-  val: 123,
-  tags: [ "a", "b", "c"]
-})
+db.users
+  .find({
+    name: "Deep Formatting",
+    $or: [{ "address.city": { $in: ["New York", "London"] } }, { age: { $gt: 25 } }]
+  })
+  .sort({ name: 1 })
+  .limit(10)
 
-// Complex query
-db.myCollection.find( {
-  $or: [
-    { name: "Deep Formatting" },
-    { val: { $gt: 100 } }
-  ]
-}).sort( { val: - 1 }).limit(10).forEach(function(doc) {
-  print("Found: " + doc.name);
-})
+db.orders.aggregate([
+  { $match: { status: "completed" } },
+  { $group: { _id: "$custId", total: { $sum: "$amount" } } },
+  { $sort: { total: -1 } }
+])
 
 // Function definition
-function myHelper(id) {
-  return db.myCollection.findOne( { _id: id });
+function updateUsers() {
+  const cursor = db.users.find()
+  while (cursor.hasNext()) {
+    const user = cursor.next()
+    printjson(user)
+  }
 }
 
-// Shell helpers
-it
-cls
+// Shell commands mixed with JS
+show dbs
+updateUsers()
+exit
 
 -----------------
 ✅ test.deep.mongodb beautified successfully.
@@ -3785,9 +3797,9 @@ with multiple lines
 --- Formatted ---
 function Get-DeepTest {
     [CmdletBinding()]
-    param(
-        [string] $Name,
-        [int] $Count = 1
+    param (
+        [string]$Name,
+        [int]$Count = 1
     )
 
     # Process items
@@ -3799,13 +3811,16 @@ function Get-DeepTest {
 
     # Loop
     foreach ($i in 1..$Count) {
-        $result = Get-Process
-        Where-Object {
-            $_.Id -gt 1000
-        }
-        Select-Object Name, Id
+        $result = Get-Process |
+            Where-Object {
+                $_.Id -gt 1000
+        } |
+            Select-Object Name, Id
 
-        $hash = @{ Key1 = 'Value1'; Key2 = 'Value2' }
+        $hash = @{
+            Key1 = 'Value1'
+            Key2 = 'Value2'
+        }
     }
 
     $hereString = @"
@@ -3815,7 +3830,8 @@ with multiple lines
 }
 
 -----------------
-✅ test/test.deep.ps1 beautified successfully.
+✅ test/test.deep.ps1 processed.
+✅ Pipeline indentation verified (12 spaces).
 Running verify-prisma-deep.cjs...
 Testing test.deep.prisma...
 INFO: Prisma schema formatted successfully!
