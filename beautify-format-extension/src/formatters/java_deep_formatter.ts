@@ -59,7 +59,8 @@ export function formatJavaDeep(text: string): string {
     const INDENT_SIZE = 4;
     const INDENT_STRING = ' '.repeat(INDENT_SIZE);
 
-    // Filter meaningful tokens
+    // Filter meaningful tokens but keep newlines for context if needed?
+    // Actually we re-construct lines, so we filter whitespace but keep comments
     const meaningfulTokens = tokens.filter(t => t.type !== TokenType.Whitespace && t.type !== TokenType.Newline);
 
     // Helper to get indent
@@ -74,11 +75,19 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
     let indentLevel = 0;
 
     // Stack to track block types
-    const blockStack: ('BLOCK' | 'SWITCH' | 'CASE_CONTENT' | 'ARRAY_INIT' | 'LAMBDA_BLOCK' | 'SWITCH_RULE')[] = [];
+    // SWITCH: Standard switch (case :)
+    // SWITCH_EXPR: Switch expression (case ->)
+    // BLOCK: Normal block
+    // ARRAY_INIT: Array initializer
+    // LAMBDA_BLOCK: Block inside lambda
+    // RECORD_BODY: Body of a record declaration
+    // ANNOTATION: Inside annotation arguments
+    const blockStack: ('BLOCK' | 'SWITCH' | 'SWITCH_EXPR' | 'CASE_CONTENT' | 'ARRAY_INIT' | 'LAMBDA_BLOCK' | 'SWITCH_RULE' | 'RECORD_BODY' | 'ANNOTATION')[] = [];
 
     let parenDepth = 0;
     let angleDepth = 0;
     let inCaseLabel = false; // true if we are between `case` and `:` or `->`
+    let inAnnotation = false;
 
     const pushLine = () => {
         if (currentLine.trim() !== '') {
@@ -101,14 +110,12 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         const token = tokens[i];
         const next = i + 1 < tokens.length ? tokens[i+1] : null;
         const prev = i > 0 ? tokens[i-1] : null;
-        const prev2 = i > 1 ? tokens[i-2] : null;
-
-        const prevEndLine = prev ? prev.line + (prev.text.match(/\n/g) || []).length : 0;
 
         // --- Indent / Stack Management (Pre-Token) ---
 
         if (token.text === '}') {
             // Closing a block.
+            // Check if we need to dedent CASE_CONTENT or SWITCH_RULE first
             if (blockStack.length > 0 && (blockStack[blockStack.length - 1] === 'CASE_CONTENT' || blockStack[blockStack.length - 1] === 'SWITCH_RULE')) {
                 blockStack.pop();
                 indentLevel--;
@@ -129,20 +136,27 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         }
 
         // --- Blank Line Logic ---
-        // Insert blank line if source had > 1 empty lines between tokens
-        // token.line is start line. prevEndLine is end line of prev.
-        // If token.line > prevEndLine + 1, there was at least one blank line.
-        if (prev && token.line > prevEndLine + 1) {
-            if (currentLine.trim() !== '') pushLine();
-            if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
-                outputLines.push('');
-            }
+        if (prev) {
+             const prevEndLine = prev.line + (prev.text.match(/\n/g) || []).length;
+             if (token.line > prevEndLine + 1) {
+                 if (currentLine.trim() !== '') pushLine();
+                 if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
+                     outputLines.push('');
+                 }
+             }
         }
 
         // --- Newline Preservation for Method Chains ---
         // If '.' is on a new line in source, force newline in output
-        if (token.text === '.' && prev && token.line > prevEndLine) {
-             if (currentLine.trim() !== '') pushLine();
+        if (token.text === '.' && prev) {
+             const prevEndLine = prev.line + (prev.text.match(/\n/g) || []).length;
+             if (token.line > prevEndLine) {
+                 if (currentLine.trim() !== '') pushLine();
+                 // Add extra indent for continuation
+                 // But wait, append() uses current indentLevel.
+                 // We might want to temporarily bump indent?
+                 // For now, let's just append. Ideally we should have continuation indent logic.
+             }
         }
 
         // --- Spacing Logic ---
@@ -156,7 +170,8 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
 
             if (token.type === TokenType.Operator) {
                 if (token.text === '->') spaceBefore = true;
-                else if (['.', '::', ',', ';'].includes(token.text)) spaceBefore = false;
+                else if (['.', '::', ';'].includes(token.text)) spaceBefore = false;
+                else if (token.text === ',') spaceBefore = false;
                 else if (token.text === '...') spaceBefore = true;
                 else if (token.text === ':') {
                      if (inCaseLabel) spaceBefore = false;
@@ -203,12 +218,17 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
 
             if (token.type === TokenType.Punctuation) {
                  if (token.text === '(') {
-                     if (prev && ['if', 'for', 'while', 'switch', 'catch', 'synchronized', 'try'].includes(prev.text)) spaceBefore = true;
+                     if (prev && ['if', 'for', 'while', 'switch', 'catch', 'synchronized', 'try', 'record'].includes(prev.text)) spaceBefore = true;
                      else spaceBefore = false;
                  }
                  else if (token.text === '{') spaceBefore = true;
                  else if (['}', ')', ']'].includes(token.text)) spaceBefore = false;
                  else if (token.text === '[') spaceBefore = false;
+            }
+
+            if (token.type === TokenType.Keyword) {
+                if (token.text === 'yield') spaceBefore = true;
+                else spaceBefore = true;
             }
 
             if (prev) {
@@ -221,10 +241,32 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                     else spaceBefore = true;
                 }
 
-                if (prev.text === '(' || prev.text === '[') spaceBefore = false;
+                if (prev.text === '(') spaceBefore = false;
+                if (prev.text === '[') spaceBefore = false; // String[] args (no space) -> Actually String[]args vs String[] args.
+                                                            // Standard: String[] args.
+                                                            // prev is [
+                                                            // token is args
+                                                            // spaceBefore = false because prev is [ ?
+                                                            // Wait, String[ is false.
+                                                            // ]args is ?
+
+                if (prev.text === ']') {
+                    // String[] args -> spaceBefore = true
+                    // args[i] -> spaceBefore = false (token is [)
+                    if (token.text === '[' || token.text === '(' || token.text === '.') spaceBefore = false;
+                    else spaceBefore = true;
+                }
+
                 if (prev.text === '::' || prev.text === '.') spaceBefore = false;
                 if (prev.text === '@') spaceBefore = false;
                 if (prev.text === '<' && angleDepth > 0) spaceBefore = false;
+
+                if (prev.text === ',') spaceBefore = true;
+                if (prev.text === ';') spaceBefore = true;
+
+                if (prev.type === TokenType.Keyword) {
+                    if (prev.text === 'yield') spaceBefore = true;
+                }
             }
         }
 
@@ -235,7 +277,23 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         }
 
         // --- Append Token ---
-        append(token.text);
+        // Handle Text Blocks specially to preserve indentation
+        if (token.type === TokenType.String && token.text.startsWith('"""')) {
+             // It's a text block.
+             // We should preserve its internal formatting, but align the start?
+             // The token text includes """ ... """
+             // If we append it, it might break if currentLine is indented.
+             // Java Text Blocks strip incidental indentation.
+             // So we can just append it as is?
+             // However, if we put it on a new line (which is common), we should ensure proper indent.
+             // If token.text has newlines, we might want to ensure subsequent lines are not double indented?
+             // But the tokenizer gives us the raw text.
+             // Let's just append it.
+             append(token.text);
+        } else {
+             append(token.text);
+        }
+
 
         // --- Post-Token Logic ---
 
@@ -244,6 +302,8 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
             let foundSwitch = false;
             let foundArrayInit = false;
             let foundLambda = false;
+            let foundRecord = false;
+            let foundAnnotation = false;
 
             let balance = 0;
             let p = i - 1;
@@ -255,6 +315,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                     if (balance < 0) {
                         let q = p - 1;
                         if (q >= 0 && tokens[q].text === 'switch') foundSwitch = true;
+                        if (q >= 0 && tokens[q].text === 'record') foundRecord = true;
                         break;
                     }
                 }
@@ -271,6 +332,11 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                      foundLambda = true;
                      break;
                 }
+                else if (t.type === TokenType.Preprocessor) { // Annotation
+                     foundAnnotation = true; // Wait, annotation definition? @interface Foo { }
+                     // Or annotation usage? @Foo(bar={...})
+                     // Usage usually inside parens or assignments
+                }
                 p--;
             }
 
@@ -280,6 +346,8 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                  blockStack.push('ARRAY_INIT');
             } else if (foundLambda) {
                  blockStack.push('LAMBDA_BLOCK');
+            } else if (foundRecord) {
+                 blockStack.push('RECORD_BODY');
             } else {
                 blockStack.push('BLOCK');
             }
@@ -306,7 +374,18 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         else if (token.text === '->') {
             if (inCaseLabel) {
                 inCaseLabel = false;
-                if (next && next.text !== '{') {
+                if (next && next.text === '{') {
+                     // case ... -> { ... }
+                     // The { will push a BLOCK, so we don't need to push SWITCH_RULE here explicitly to manage indent?
+                     // But we want to ensure we don't double indent?
+                     // If we push SWITCH_RULE, we indent. Then { indents again.
+                     // Standard style:
+                     // case x -> {
+                     //     ...
+                     // }
+                     // This is fine.
+                } else {
+                     // case ... -> expression;
                      blockStack.push('SWITCH_RULE');
                      indentLevel++;
                 }
@@ -322,12 +401,30 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              else append(' ');
         }
         else if (token.type === TokenType.Preprocessor) {
-             if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void', 'static', 'final'].includes(next.text)) {
+             // Annotation
+             // If followed by '(', we might have args.
+             // If annotation is on method/class, we want newline after it (unless it's a type annotation like @NotNull String)
+             // Heuristic: If next token is Keyword (public, private, class, void, etc), force newline.
+             if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void', 'static', 'final', 'abstract', 'native', 'strictfp', 'synchronized', 'transient', 'volatile', '@'].includes(next.text)) {
                  pushLine();
              } else if (next && next.type === TokenType.Identifier && parenDepth === 0) {
-                 pushLine();
+                 // @Deprecated Foo
+                 // Could be type annotation.
+                 // But @Deprecated\nclass Foo is better?
+                 // Let's assume top-level annotations get newline.
+                 // Type annotations usually inline.
+                 // Check previous token?
+                 // If at start of line, force newline after.
+                 if (currentLine.trim() === token.text) {
+                     // But wait, if it has parens? @Foo(...)
+                     // We handle that in ')' logic?
+                     if (next.text !== '(') pushLine();
+                 } else {
+                     append(' ');
+                 }
              } else {
-                 append(' ');
+                 // Inside parens or inline
+                 if (next && next.text !== '(') append(' ');
              }
         }
         else if (token.text === ',') {
@@ -338,13 +435,24 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         }
 
         if (token.text === '(') parenDepth++;
-        else if (token.text === ')') parenDepth = Math.max(0, parenDepth - 1);
+        else if (token.text === ')') {
+             parenDepth = Math.max(0, parenDepth - 1);
+             // If we just closed an annotation arg list
+             if (prev && prev.type !== TokenType.Preprocessor) { // Not @Annotation() (empty)
+                  // Check if this paren closed an annotation
+                  // Heuristic: look back for @
+             }
+
+             // If we closed annotation and it's followed by definition keyword, newline
+             if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void'].includes(next.text)) {
+                 pushLine();
+             }
+        }
     }
 
     if (currentLine.trim() !== '') pushLine();
 
     // Post-Processing: Alignment
-    console.log('Running alignDeclarations...');
     alignDeclarations(outputLines);
 
     return outputLines.join('\n');
@@ -360,9 +468,7 @@ function alignDeclarations(lines: string[]) {
         for (let j = i; j < lines.length; j++) {
             const line = lines[j];
             const trimmed = line.trim();
-            // Handle comments inside the block or trailing comments
-            // For now, if line is PURELY comment, we break block
-            // If line is code + comment, we can process it
+
             if (trimmed === '' || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('@')) {
                 if (blockStart !== -1) {
                     blockEnd = j;
