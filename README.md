@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Go (Deep Formatting Implemented)
 - [x] Shell Script (Deep Formatting Implemented)
 - [x] C++ (Deep Formatting Implemented)
 - [x] Terraform/HCL (Deep Formatting Implemented)

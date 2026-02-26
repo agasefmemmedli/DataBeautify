@@ -943,12 +943,23 @@ export async function handleGo(editor: vscode.TextEditor, text: string) {
     // Validate Go using custom resilient validator
     validationMessage = validateGo(text);
 
-    // Resilient formatting logic
+    // Try Standard Go Formatting (gofmt)
     try {
-        formatted = formatGoDeep(text);
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Failed to format Go: ${error.message}`);
-        return;
+        formatted = await formatWithGofmt(text);
+    } catch (gofmtError: any) {
+        console.warn('gofmt failed, falling back to custom formatter', gofmtError);
+
+        // Fallback to Resilient Deep Formatting
+        try {
+            formatted = formatGoDeep(text);
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to format Go: ${error.message}`);
+            return;
+        }
+
+        if (!validationMessage) {
+             validationMessage = "Standard formatting (gofmt) failed. Applied resilient deep formatting.";
+        }
     }
 
     await applyEdit(editor, formatted);
@@ -958,6 +969,39 @@ export async function handleGo(editor: vscode.TextEditor, text: string) {
     } else {
         vscode.window.showInformationMessage('Go formatted successfully!');
     }
+}
+
+function formatWithGofmt(text: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const cp = require('child_process');
+        const process = cp.spawn('gofmt', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+        let stdout = '';
+        let stderr = '';
+
+        process.stdout.on('data', (data: any) => {
+            stdout += data.toString();
+        });
+
+        process.stderr.on('data', (data: any) => {
+            stderr += data.toString();
+        });
+
+        process.on('close', (code: number) => {
+            if (code === 0) {
+                resolve(stdout);
+            } else {
+                reject(new Error(stderr || 'gofmt failed'));
+            }
+        });
+
+        process.on('error', (err: any) => {
+             reject(err);
+        });
+
+        process.stdin.write(text);
+        process.stdin.end();
+    });
 }
 
 /**
