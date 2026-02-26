@@ -13,10 +13,8 @@ export function formatCDeep(text: string): string {
 
     if (tokens.length === 0) return '';
 
-    // Configuration (could be options later)
     const INDENT_SIZE = 4;
     const INDENT_STRING = ' '.repeat(INDENT_SIZE);
-    const PRINT_WIDTH = 120; // Used for inline heuristic
 
     let outputLines: string[] = [];
     let currentLine = '';
@@ -27,13 +25,12 @@ export function formatCDeep(text: string): string {
     let braceStack: BraceContext[] = [];
     let newlineCount = 0;
     let justBrokeLine = false;
+    let inPreprocessor = false;
 
-    // Helper to get current indent string
     const getIndent = (offset: number = 0) => {
         return INDENT_STRING.repeat(Math.max(0, indentLevel + offset));
     };
 
-    // Helper to push line
     const pushLine = (force: boolean = false) => {
         if (currentLine.trim() !== '') {
             outputLines.push(currentLine);
@@ -47,20 +44,11 @@ export function formatCDeep(text: string): string {
         }
     };
 
-    // Helper to append text
-    const append = (str: string) => {
+    const append = (str: string, offset: number = 0) => {
         justBrokeLine = false;
         newlineCount = 0;
 
         if (currentLine === '') {
-            let offset = 0;
-            const trimmedStr = str.trim();
-
-            if (trimmedStr.startsWith('#')) {
-                currentLine = str;
-                return;
-            }
-
             currentLine = getIndent(offset) + str;
         } else {
             currentLine += str;
@@ -77,7 +65,6 @@ export function formatCDeep(text: string): string {
          return false;
     };
 
-    // Helper to check if a block can be inline
     const canBeInline = (startIndex: number): boolean => {
         let length = 0;
         let index = startIndex + 1;
@@ -85,10 +72,10 @@ export function formatCDeep(text: string): string {
 
         while (index < tokens.length) {
             const t = tokens[index];
-            if (t.type === TokenType.Newline || t.type === TokenType.Comment) return false; // No newlines/comments in inline
+            if (t.type === TokenType.Newline || t.type === TokenType.Comment) return false;
 
             length += t.text.length;
-            if (length > 60) return false; // Too long (heuristic)
+            if (length > 60) return false;
 
             if (t.text === '{') depth++;
             else if (t.text === '}') {
@@ -102,9 +89,6 @@ export function formatCDeep(text: string): string {
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
-
-        // Peek
-        const next = i + 1 < tokens.length ? tokens[i+1] : null;
         let k = i - 1;
         while (k >= 0 && (tokens[k].type === TokenType.Whitespace || tokens[k].type === TokenType.Newline)) {
             k--;
@@ -113,17 +97,19 @@ export function formatCDeep(text: string): string {
 
         if (token.type === TokenType.Whitespace) continue;
 
-        // Handling Newlines
         if (token.type === TokenType.Newline) {
-            // Check if we are in an inline block
+            if (effectivePrev && effectivePrev.text === '\\') {
+                pushLine();
+                justBrokeLine = true;
+                continue;
+            }
+
+            if (inPreprocessor) {
+                inPreprocessor = false;
+            }
+
             const currentContext = braceStack.length > 0 ? braceStack[braceStack.length - 1] : null;
             if (currentContext && currentContext.isInline) {
-                // If we are forcing inline, we ignore source newlines?
-                // Or maybe we treat them as spaces?
-                // Ideally, deep formatting reconstructs lines.
-                // But preserving user intent for newlines is sometimes good.
-                // However, "Deep Formatting" usually enforces style.
-                // Let's replace newline with space if inline.
                 if (currentLine !== '' && !currentLine.endsWith(' ')) currentLine += ' ';
                 continue;
             }
@@ -140,7 +126,10 @@ export function formatCDeep(text: string): string {
             continue;
         }
 
-        // Handle Closing Brace Indentation
+        if (token.type === TokenType.Preprocessor) {
+            inPreprocessor = true;
+        }
+
         if (token.text === '}') {
             if (braceStack.length > 0) {
                 const ctx = braceStack[braceStack.length - 1];
@@ -150,14 +139,13 @@ export function formatCDeep(text: string): string {
                 }
                 if (!ctx.isInline) {
                      indentLevel = Math.max(0, indentLevel - 1);
-                     if (currentLine.trim() !== '') pushLine(); // Force new line for closing brace if not inline
+                     if (currentLine.trim() !== '') pushLine();
                 }
             } else {
                  indentLevel = Math.max(0, indentLevel - 1);
             }
         }
 
-        // Handle Case/Default Indentation (Dedent before checking logic)
         if ((token.text === 'case' || token.text === 'default') && braceStack.length > 0) {
             const ctx = braceStack[braceStack.length - 1];
             if (ctx.type === 'switch') {
@@ -169,7 +157,13 @@ export function formatCDeep(text: string): string {
             }
         }
 
-        // Spacing Logic
+        if (token.text === '{' && outputLines.length > 0 && currentLine.trim() === '') {
+             if (!justBrokeLine && newlineCount === 0) {
+                  currentLine = outputLines.pop() as string;
+                  if (!currentLine.endsWith(' ')) currentLine += ' ';
+             }
+        }
+
         let spaceBefore = false;
 
         if (currentLine !== '') {
@@ -179,69 +173,45 @@ export function formatCDeep(text: string): string {
 
             if (prevWord && currWord) spaceBefore = true;
 
-            // Context-aware spacing
             if (effectivePrev) {
                  if (effectivePrev.type === TokenType.Operator) {
                      const op = effectivePrev.text;
                      if (['.', '->', '!', '~', '++', '--', '(', '['].includes(op)) {
                          spaceBefore = false;
                      } else if (op === '*' || op === '&') {
-                         // Pointer/Address logic vs Multiplication/BitwiseAnd
-                         // Heuristic: If prev is Type, or prev is Operator, it's likely unary/pointer
                          let m = k - 1;
                          while (m >= 0 && (tokens[m].type === TokenType.Whitespace || tokens[m].type === TokenType.Newline)) m--;
                          let prevPrevTok = (m >= 0) ? tokens[m] : null;
 
-                         if (prevPrevTok && (isTypeLike(prevPrevTok) || prevPrevTok.type === TokenType.Operator || ['(', '[', '{', ',', 'case', 'return', '='].includes(prevPrevTok.text))) {
-                              // Unary/Pointer context: e.g. int *p, or *p, or &x
-                              // Style: int *p (Space before *, no space after)
-                              // But wait, "int *p" -> "int" is Type. So effectivePrev is "*".
-                              // If current is "p". effectivePrev is "*".
-                              // We are deciding space before "p".
-                              // If effectivePrev was "*", spaceBefore depends on *'s context.
+                         let isUnary = false;
+                         if (prevPrevTok && (isTypeLike(prevPrevTok) || prevPrevTok.type === TokenType.Operator || ['(', '[', '{', ',', 'case', 'return', '=', 'else', ':'].includes(prevPrevTok.text))) {
+                              isUnary = true;
+                         } else if (!prevPrevTok) {
+                             isUnary = true;
+                         }
 
-                              // Let's handle this when processing "*".
-                              // Here we process token "p". effectivePrev is "*".
-                              // If effectivePrev was pointer-*, we usually want NO space before p.
-                              // How do we know?
-                              // Re-evaluate * context:
-                              if (prevPrevTok && (isTypeLike(prevPrevTok) || prevPrevTok.type === TokenType.Operator || ['(', '[', '{', ',', 'case', 'return', '='].includes(prevPrevTok.text))) {
-                                  // Likely pointer/unary
-                                  // Special case: "int * const p" -> space before const? Yes.
-                                  if (token.type === TokenType.Keyword && ['const', 'restrict', 'volatile', '__restrict', '__restrict__'].includes(token.text)) {
-                                      spaceBefore = true;
-                                  } else {
-                                      spaceBefore = false; // int *p
-                                  }
-                              } else {
-                                  spaceBefore = true; // Binary mult: x * y
-                              }
+                         if (isUnary) {
+                             spaceBefore = false;
                          } else {
-                              spaceBefore = true; // Binary mult
+                             spaceBefore = true;
                          }
                      } else {
-                         spaceBefore = true; // Binary ops
+                         spaceBefore = true;
                      }
                  } else if (effectivePrev.type === TokenType.Punctuation) {
                      if ([';', ',', '}'].includes(effectivePrev.text)) spaceBefore = true;
                      if (effectivePrev.text === ')') {
-                         // ) { -> space
-                         // ) var -> space
-                         // ) -> -> no space
-                         // ) . -> no space
                          spaceBefore = true;
                      }
                      if (effectivePrev.text === '(' || effectivePrev.text === '[') spaceBefore = false;
-                     // Special: { .x
                      if (effectivePrev.text === '{') {
-                         spaceBefore = true; // Padding inside braces
-                         // If empty {} -> no space? Handled by } logic checking {
+                         spaceBefore = true;
                      }
                  } else if (effectivePrev.type === TokenType.Keyword) {
                      if (['if', 'for', 'while', 'switch', 'return', 'case', 'goto', 'else'].includes(effectivePrev.text)) {
                          spaceBefore = true;
                      } else if (['sizeof', 'alignof'].includes(effectivePrev.text)) {
-                         spaceBefore = false; // sizeof(x)
+                         spaceBefore = false;
                      }
                  }
             }
@@ -254,38 +224,38 @@ export function formatCDeep(text: string): string {
                      else spaceBefore = true;
                 }
                 else if (text === '*' || text === '&') {
-                    // Check if Unary/Pointer
                     if (effectivePrev && (
                         isTypeLike(effectivePrev) ||
-                        (effectivePrev.type === TokenType.Operator && ['!', '~', '++', '--', '*', '&', '(', '[', '{', '=', ',', ';'].includes(effectivePrev.text)) ||
-                        ['(', '[', '{', ',', 'return', 'case', '='].includes(effectivePrev.text)
+                        (effectivePrev.type === TokenType.Operator && ['!', '~', '++', '--', '*', '&', '(', '[', '{', '=', ',', ';', ':'].includes(effectivePrev.text)) ||
+                        ['(', '[', '{', ',', 'return', 'case', '=', 'else', ':'].includes(effectivePrev.text)
                     )) {
-                        // Pointer or Unary
-                        spaceBefore = true; // int *p (Space before *)
-                        // Except if prev is ( or [ or { or * (ptr to ptr)
-                        if (effectivePrev.text === '(' || effectivePrev.text === '[' || effectivePrev.text === '{') spaceBefore = false; // (*p)
-                        if (effectivePrev.text === '*') spaceBefore = false; // int **p
+                        spaceBefore = true;
+
+                        if (effectivePrev.text === '(' || effectivePrev.text === '[' || effectivePrev.text === '{') spaceBefore = false;
+                        if (effectivePrev.text === '*') spaceBefore = false;
                     } else {
-                        spaceBefore = true; // Binary
+                        spaceBefore = true;
                     }
                 }
                 else if (['=', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<=', '>=', '&&', '||', '+', '-', '/', '%', '^', '|', '&', '?', ':', '<<', '>>', '<<=', '>>=', '&=', '|=', '^='].includes(text)) {
                      spaceBefore = true;
                      if (text === ':' && (braceStack.length > 0 && braceStack[braceStack.length-1].type === 'switch')) {
-                         spaceBefore = false; // case 1:
+                         spaceBefore = false;
                      }
                 }
                 else if (['!', '~'].includes(text)) {
                     spaceBefore = true;
                     if (['(', '[', '{', '!', '~'].includes(lastChar)) spaceBefore = false;
                 }
+                else if (text === '\\') {
+                    spaceBefore = true;
+                }
 
-                // Designated Initializer: .x = 1
                 if (text === '.') {
                     if (effectivePrev && (effectivePrev.text === '{' || effectivePrev.text === ',')) {
-                        spaceBefore = true; // { .x, .y
+                        spaceBefore = true;
                     } else {
-                        spaceBefore = false; // struct.member
+                        spaceBefore = false;
                     }
                 }
             }
@@ -297,40 +267,36 @@ export function formatCDeep(text: string): string {
             if (token.text === '(') {
                  if (currentLine.trim().match(/\b(if|for|while|switch|return)$/)) spaceBefore = true;
                  else if (effectivePrev && effectivePrev.type === TokenType.Operator && !['.', '->', '!', '~', '++', '--'].includes(effectivePrev.text)) spaceBefore = true;
-                 else spaceBefore = false; // function()
+                 else if (effectivePrev && effectivePrev.text === ')') spaceBefore = true;
+                 else spaceBefore = false;
             }
             if (token.text === '[') {
-                 if (currentLine.trim().match(/\b\w+$/)) spaceBefore = false; // arr[i]
-                 else spaceBefore = true; // [10] = ... (Designated initializer start?) No, usually x = [10]... wait C doesn't allow x = [10]. int a[] = {[0]=1};
-                 // designated initializer: [0] = 1. Preceded by { or ,
+                 if (currentLine.trim().match(/\b\w+$/)) spaceBefore = false;
+                 else spaceBefore = true;
                  if (effectivePrev && (effectivePrev.text === '{' || effectivePrev.text === ',')) spaceBefore = true;
             }
             if (token.text === ':') {
-                 // Bitfields? int x : 1; -> space before
-                 // Switch case? case 1: -> no space before
-                 // Label? label: -> no space before
-                 // Ternary? ? a : b -> space before
-                 // We can check braceStack or look for ?
                  if (currentLine.trim().startsWith('case ') || currentLine.trim() === 'default') spaceBefore = false;
             }
             if (token.text === '{') spaceBefore = true;
         }
 
-        if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) append(' ');
-        append(token.text);
+        let extraIndent = 0;
+        if (inPreprocessor && token.type !== TokenType.Preprocessor) {
+             extraIndent = 1;
+        }
 
-        // --- Post-Append Logic ---
+        if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) append(' ', extraIndent);
+        append(token.text, extraIndent);
 
         if (token.text === '{') {
-            // Determine context
             let context = 'block';
             let isInline = false;
 
             if (canBeInline(i)) {
                 isInline = true;
-                context = 'initializer'; // Treat inline as initializer usually
+                context = 'initializer';
             } else {
-                // Check context by scanning backward (handling newlines/Allman style)
                 let k = i - 1;
                 while (k >= 0 && (tokens[k].type === TokenType.Whitespace || tokens[k].type === TokenType.Newline)) {
                     k--;
@@ -344,7 +310,6 @@ export function formatCDeep(text: string): string {
                     else if (effectivePrev.text === 'enum') context = 'enum';
                     else if (effectivePrev.text === 'switch') context = 'switch';
                     else if (effectivePrev.text === ')') {
-                         // Backtrack to find matching (
                          let m = k;
                          let pDepth = 0;
                          while (m >= 0) {
@@ -352,12 +317,11 @@ export function formatCDeep(text: string): string {
                              else if (tokens[m].text === '(') {
                                  pDepth--;
                                  if (pDepth === 0) {
-                                     // Found matching (. Look before it.
                                      let n = m - 1;
                                      while (n >= 0 && (tokens[n].type === TokenType.Whitespace || tokens[n].type === TokenType.Newline)) n--;
                                      if (n >= 0) {
                                          if (tokens[n].text === 'switch') context = 'switch';
-                                         else if (tokens[n].text === 'enum') context = 'enum'; // typedef enum (...)
+                                         else if (tokens[n].text === 'enum') context = 'enum';
                                          else if (tokens[n].text === 'struct') context = 'struct';
                                      }
                                      break;
@@ -378,17 +342,13 @@ export function formatCDeep(text: string): string {
             }
         }
         else if (token.text === '}') {
-            const ctx = braceStack.pop(); // Pop handled brace
-
-            // Check next token
+            const ctx = braceStack.pop();
             let k = i + 1;
-            while (k < tokens.length && (tokens[k].type === TokenType.Whitespace)) k++; // Skip space, not newline
+            while (k < tokens.length && (tokens[k].type === TokenType.Whitespace)) k++;
             const effectiveNext = (k < tokens.length) ? tokens[k] : null;
 
             if (ctx && ctx.isInline) {
-                // Do nothing special, we are inline
                 if (effectiveNext && (effectiveNext.text === ';' || effectiveNext.text === ',')) {
-                    // It will be appended next loop
                 } else {
                     if (effectiveNext && effectiveNext.text === 'else') {
                          append(' ');
@@ -399,9 +359,8 @@ export function formatCDeep(text: string): string {
                 }
             } else {
                 if (effectiveNext && (effectiveNext.text === ';' || effectiveNext.text === ',')) {
-                    // Stay on same line for ; or ,
                 } else if (effectiveNext && effectiveNext.type === TokenType.Identifier) {
-                    append(' '); // typedef struct { ... } Name;
+                    append(' ');
                 } else if (effectiveNext && effectiveNext.text === 'else') {
                     append(' ');
                 } else {
@@ -412,14 +371,9 @@ export function formatCDeep(text: string): string {
         }
         else if (token.text === ';') {
             if (parenDepth === 0) {
-                // If we are in an inline block, we generally do NOT break line?
-                // But ; usually ends a statement.
-                // In for loop (parenDepth > 0) we don't break.
-                // In inline struct initializer? e.g. { .x = 1; .y = 2; } ? No, use comma.
-                // If inline function? { return 1; }
                 const currentCtx = braceStack.length > 0 ? braceStack[braceStack.length-1] : null;
                 if (currentCtx && currentCtx.isInline) {
-                    append(' '); // Space after ;
+                    append(' ');
                 } else {
                     pushLine();
                     justBrokeLine = true;
@@ -447,8 +401,6 @@ export function formatCDeep(text: string): string {
                  if (currentCtx && currentCtx.isInline) {
                      append(' ');
                  } else {
-                     // In initializer list (not inline), comma breaks line?
-                     // e.g. enum { A, B, C } -> if not inline, yes.
                      if (currentCtx && (currentCtx.type === 'enum' || currentCtx.type === 'initializer' || currentCtx.type === 'array' || currentCtx.type === 'struct')) {
                          pushLine();
                          justBrokeLine = true;
@@ -463,5 +415,102 @@ export function formatCDeep(text: string): string {
 
     if (currentLine.trim() !== '') pushLine();
 
+    // Post-Processing: Include Sorting & Alignment
+    processIncludes(outputLines);
+    alignDeclarations(outputLines);
+
     return outputLines.join('\n');
+}
+
+function processIncludes(lines: string[]) {
+    let i = 0;
+    while (i < lines.length) {
+        if (lines[i].trim().startsWith('#include')) {
+            let start = i;
+            let end = i;
+            while (end < lines.length && lines[end].trim().startsWith('#include')) {
+                end++;
+            }
+
+            const includes = lines.slice(start, end);
+            includes.sort((a, b) => {
+                const aTrim = a.trim();
+                const bTrim = b.trim();
+                const aIsStd = aTrim.includes('<');
+                const bIsStd = bTrim.includes('<');
+                if (aIsStd && !bIsStd) return -1;
+                if (!aIsStd && bIsStd) return 1;
+                return aTrim.localeCompare(bTrim);
+            });
+
+            for (let k = 0; k < includes.length; k++) {
+                lines[start + k] = includes[k];
+            }
+
+            i = end;
+        } else {
+            i++;
+        }
+    }
+}
+
+function alignDeclarations(lines: string[]) {
+    const declRegex = /^(\s*)((?:[a-zA-Z_]\w*\s+|\*\s*)+)([a-zA-Z_]\w*)(.*);$/;
+
+    let i = 0;
+    while (i < lines.length) {
+        let blockStart = -1;
+        let blockEnd = -1;
+
+        for (let j = i; j < lines.length; j++) {
+            const line = lines[j];
+            if (line.trim() === '' || line.trim().startsWith('//') || line.trim().startsWith('#')) {
+                if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+                continue;
+            }
+
+            if (line.match(declRegex) && !line.includes('(')) {
+                if (blockStart === -1) blockStart = j;
+            } else {
+                if (blockStart !== -1) {
+                    blockEnd = j;
+                    break;
+                }
+            }
+        }
+
+        if (blockStart !== -1) {
+            if (blockEnd === -1) blockEnd = lines.length;
+
+            const block = lines.slice(blockStart, blockEnd);
+            const matches = block.map(l => l.match(declRegex));
+            const validIndices = matches.map((m, idx) => m ? idx : -1).filter(idx => idx !== -1);
+
+            if (validIndices.length > 1) {
+                let maxTypeLen = 0;
+                validIndices.forEach(idx => {
+                     const m = matches[idx]!;
+                     if (m[2].length > maxTypeLen) maxTypeLen = m[2].length;
+                });
+
+                validIndices.forEach(idx => {
+                    const m = matches[idx]!;
+                    const indent = m[1];
+                    const type = m[2];
+                    const variable = m[3];
+                    const rest = m[4];
+
+                    const paddedType = type + ' '.repeat(maxTypeLen - type.length);
+                    lines[blockStart + idx] = `${indent}${paddedType}${variable}${rest};`;
+                });
+            }
+
+            i = blockEnd;
+        } else {
+            i++;
+        }
+    }
 }
