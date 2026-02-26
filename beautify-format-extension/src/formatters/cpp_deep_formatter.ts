@@ -245,7 +245,7 @@ export function formatCppDeep(text: string): string {
     let inInitializerList = false;
 
     // Stack to track brace types
-    let braceStack: ('NAMESPACE' | 'BLOCK' | 'CLASS' | 'CASE')[] = [];
+    let braceStack: ('NAMESPACE' | 'BLOCK' | 'CLASS' | 'CASE' | 'LAMBDA')[] = [];
 
     const getIndent = (level: number) => {
         return INDENT_STRING.repeat(Math.max(0, level));
@@ -297,9 +297,23 @@ export function formatCppDeep(text: string): string {
             const type = braceStack.length > 0 ? braceStack[braceStack.length - 1] : 'BLOCK'; // Peek
             if (type === 'BLOCK' || type === 'CLASS') {
                 indentLevel = Math.max(0, indentLevel - 1);
+            } else if (type === 'NAMESPACE') {
+                // Namespace indentation (Google Style: 0 indent)
+                // We handled indent increase in '{', check below.
+                // Wait, if we didn't indent for namespace, we don't dedent.
+                // Logic is in '{' handler.
+            } else if (type === 'LAMBDA') {
+                indentLevel = Math.max(0, indentLevel - 1);
             }
+
+            braceStack.pop();
             braceDepth = Math.max(0, braceDepth - 1);
 
+            // Special handling for lambdas inside expressions: don't break line
+            // Only push line if it's not inline lambda end
+            // Heuristic: if next token is ) or , or ; then maybe inline?
+            // But if it's a big block lambda, we usually want new line.
+            // Google style: closing brace of lambda on new line if body is multi-line.
             if (currentLine.trim() !== '') pushLine();
         }
 
@@ -536,6 +550,8 @@ export function formatCppDeep(text: string): string {
         else if (token.text === '{') {
             let isNamespace = false;
             let isClass = false;
+            let isLambda = false;
+
             let k = i - 1;
             while (k >= 0) {
                 const t = meaningfulTokens[k];
@@ -563,7 +579,26 @@ export function formatCppDeep(text: string): string {
                     isClass = true;
                     break;
                 }
-                if (t.text === ')' || t.text === ']') break;
+                if (t.text === ')' || t.text === ']') {
+                    // Check for lambda: [](...) {
+                    if (t.text === ')') {
+                        // find matching (
+                        let balance = 1;
+                        let m = k - 1;
+                        while (m >= 0 && balance > 0) {
+                            if (meaningfulTokens[m].text === ')') balance++;
+                            else if (meaningfulTokens[m].text === '(') balance--;
+                            m--;
+                        }
+                        // m is now before (
+                        if (m >= 0 && meaningfulTokens[m].text === ']') {
+                             isLambda = true;
+                        }
+                    } else if (t.text === ']') {
+                         isLambda = true;
+                    }
+                    break;
+                }
                 if (t.text === '=') break;
                 if (t.text === ';') break;
                 k--;
@@ -575,8 +610,12 @@ export function formatCppDeep(text: string): string {
 
             if (isNamespace) {
                 braceStack.push('NAMESPACE');
+                // Google Style: Namespaces do not indent
             } else if (isClass) {
                 braceStack.push('CLASS');
+                indentLevel++;
+            } else if (isLambda) {
+                braceStack.push('LAMBDA');
                 indentLevel++;
             } else {
                 braceStack.push('BLOCK');
@@ -591,9 +630,11 @@ export function formatCppDeep(text: string): string {
             }
         }
         else if (token.text === '}') {
-             const type = braceStack.pop();
+             // Logic handled in Indent Adjustments section at start of loop
              if (next && next.text === ';') {
                  // };
+             } else if (next && next.text === ',') {
+                 // },
              } else {
                  pushLine();
              }
