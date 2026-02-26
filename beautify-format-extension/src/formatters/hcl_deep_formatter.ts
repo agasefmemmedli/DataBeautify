@@ -5,7 +5,7 @@ export function formatHCLDeep(text: string): string {
     const tokens = tokenizer.tokenize();
 
     // 1. Group tokens into lines
-    const lines: Token[][] = [];
+    let lines: Token[][] = [];
     let currentLine: Token[] = [];
 
     for (const token of tokens) {
@@ -20,6 +20,33 @@ export function formatHCLDeep(text: string): string {
     }
     if (currentLine.length > 0) {
         lines.push(currentLine);
+    }
+
+    // 1.5. Merge lines ending with { or starting with {
+    // If a line starts with `{` and previous line is not empty/comment/brace, merge.
+    const mergedLines: Token[][] = [];
+    if (lines.length > 0) {
+        mergedLines.push(lines[0]);
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            const prevLine = mergedLines[mergedLines.length - 1];
+
+            // Check if line starts with {
+            if (line.length > 0 && line[0].text === '{') {
+                // Check if previous line is eligible for merge
+                // Not eligible if it ends with { (already open block) or if it's a comment
+                if (prevLine.length > 0) {
+                    const lastToken = prevLine[prevLine.length - 1];
+                    if (lastToken.text !== '{' && lastToken.type !== TokenType.Comment) {
+                        // Merge!
+                        prevLine.push(...line);
+                        continue;
+                    }
+                }
+            }
+            mergedLines.push(line);
+        }
+        lines = mergedLines;
     }
 
     // 2. Format Line Content & Indentation
@@ -41,52 +68,72 @@ export function formatHCLDeep(text: string): string {
             dedent = 1;
         }
 
-        // Handle heredoc content (preserve as is, no indent)
-        // Note: Tokenizer outputs heredoc block as one token?
-        // My tokenizer implemented `readHeredoc` which returns the whole block as one token including newlines?
-        // Wait, `tokenize` splits by char. `readHeredoc` returns a string.
-        // But `tokenize` pushes it as ONE token.
-        // If it contains newlines, my grouping logic above `token.type === TokenType.Newline` handles explicit newlines.
-        // BUT `readHeredoc` consumes text including newlines.
-        // So the token.text contains newlines.
-        // This means `lines` array logic might put a huge heredoc in one line if I'm not careful.
-        // However, `Token` definition assumes it fits in the stream.
-        // If a token contains `\n`, it will be rendered as such.
-        // But `formatHCLDeep` logic iterates `lines` and applies indentation.
-        // A heredoc token should probably be printed with its internal structure.
-        // AND indentation should be handled carefully.
-        // Terraform heredocs: `<<-EOF` strips indentation, `<<EOF` does not?
-        // Actually, `terraform fmt` usually indent the `<<` line, but the content?
-        // Let's assume the Token text preserves the content format.
-
         const level = Math.max(0, indentLevel - dedent);
 
-        // Construct line text
-        let lineText = '';
-        for (let j = 0; j < line.length; j++) {
-            const token = line[j];
+        // Check for Heredoc token
+        const heredocIdx = line.findIndex(t => t.type === TokenType.Heredoc);
 
-            // Special handling for heredoc token: it might contain newlines
-            if (token.type === TokenType.Heredoc) {
-                // If it's a heredoc, it includes the delimiters.
-                // We should just append it.
-                // BUT, if we want to indent the start line, we do that via `indent`.
-                // The internal lines of heredoc?
-                // `readHeredoc` captured everything.
-                lineText += token.text;
-            } else {
-                lineText += token.text;
+        if (heredocIdx !== -1) {
+            // Process line up to heredoc
+            let preHeredocText = '';
+            for(let j=0; j<heredocIdx; j++) {
+                const t = line[j];
+                preHeredocText += t.text;
+                if (j < heredocIdx - 1 && shouldSpace(t, line[j+1])) preHeredocText += ' ';
+                else if (j === heredocIdx - 1 && shouldSpace(t, line[heredocIdx])) preHeredocText += ' ';
             }
 
-            if (j < line.length - 1) {
-                const next = line[j+1];
-                if (shouldSpace(token, next)) {
-                    lineText += ' ';
+            const heredocToken = line[heredocIdx];
+            // Split heredoc text
+            // Detect type: << or <<-
+            const isIndented = heredocToken.text.startsWith('<<-');
+            const linesInHeredoc = heredocToken.text.split('\n');
+
+            // Construct the first line
+            let firstLineText = preHeredocText + linesInHeredoc[0];
+
+            // Create modified tokens for the first line (truncate heredoc token)
+            const modifiedLineTokens = [...line];
+            modifiedLineTokens[heredocIdx] = {
+                ...heredocToken,
+                text: linesInHeredoc[0]
+            };
+
+            formattedLines.push({ indent: level, tokens: modifiedLineTokens, text: firstLineText });
+
+            // Handle subsequent lines of heredoc
+            for (let k = 1; k < linesInHeredoc.length; k++) {
+                let content = linesInHeredoc[k];
+                // Indentation logic
+                const isLast = k === linesInHeredoc.length - 1;
+
+                if (isIndented) {
+                    content = content.trimStart();
+                    let contentIndent = level + 1;
+                    if (isLast) contentIndent = level; // closing delimiter aligned with block
+
+                    formattedLines.push({ indent: contentIndent, tokens: [], text: content });
+                } else {
+                    // <<: preserve content exactly. Indent should be 0.
+                    formattedLines.push({ indent: 0, tokens: [], text: content });
                 }
             }
-        }
+        } else {
+            // Standard line processing
+            let lineText = '';
+            for (let j = 0; j < line.length; j++) {
+                const token = line[j];
+                lineText += token.text;
 
-        formattedLines.push({ indent: level, tokens: line, text: lineText });
+                if (j < line.length - 1) {
+                    const next = line[j+1];
+                    if (shouldSpace(token, next)) {
+                        lineText += ' ';
+                    }
+                }
+            }
+            formattedLines.push({ indent: level, tokens: line, text: lineText });
+        }
 
         // Update Indent
         for (const t of line) {
@@ -100,6 +147,16 @@ export function formatHCLDeep(text: string): string {
     let groupStart = -1;
     for (let i = 0; i < formattedLines.length; i++) {
         const line = formattedLines[i];
+
+        // Skip heredoc content lines (empty tokens array) or empty text
+        if (line.tokens.length === 0 && line.text !== '') {
+            if (groupStart !== -1) {
+                alignGroup(formattedLines, groupStart, i);
+                groupStart = -1;
+            }
+            continue;
+        }
+
         if (line.text === '') {
             if (groupStart !== -1) {
                 alignGroup(formattedLines, groupStart, i);
@@ -108,8 +165,14 @@ export function formatHCLDeep(text: string): string {
             continue;
         }
 
+        // Check for comment-only line
+        const isComment = line.tokens.length > 0 && line.tokens[0].type === TokenType.Comment;
+        if (isComment) {
+            continue;
+        }
+
         const isAssignment = isTopLevelAssignment(line.tokens);
-        // Also ensure we don't align across different indent levels
+
         if (isAssignment) {
             if (groupStart === -1) {
                 groupStart = i;
@@ -133,9 +196,6 @@ export function formatHCLDeep(text: string): string {
     // 4. Final Render
     return formattedLines.map(l => {
         if (l.text === '') return '';
-        // If line is just a heredoc (multiline), we might need care?
-        // But heredoc token usually starts with `<<EOF`.
-        // The indentation applies to the `<<` line.
         return '  '.repeat(l.indent) + l.text;
     }).join('\n');
 }
@@ -153,12 +213,16 @@ function isTopLevelAssignment(tokens: Token[]): boolean {
 function alignGroup(lines: { indent: number, tokens: Token[], text: string }[], start: number, end: number) {
     if (end - start < 2) return;
 
-    // Find max LHS length
-    let maxLhs = 0;
+    // Filter valid assignment lines in range
     const entries: { lhs: string, rhs: string, index: number }[] = [];
 
     for (let i = start; i < end; i++) {
         const line = lines[i];
+        if (line.tokens.length === 0) continue; // Skip heredoc content/empty
+
+        // Skip comments in alignment calculation
+        if (line.tokens[0].type === TokenType.Comment) continue;
+
         // Split at first top-level =
         let eqIdx = -1;
         let depth = 0;
@@ -179,9 +243,16 @@ function alignGroup(lines: { indent: number, tokens: Token[], text: string }[], 
             const lhs = joinTokens(lhsTokens);
             const rhs = joinTokens(rhsTokens);
 
-            maxLhs = Math.max(maxLhs, lhs.length);
             entries.push({ lhs, rhs, index: i });
         }
+    }
+
+    if (entries.length < 2) return; // Need at least 2 to align
+
+    // Find max LHS length
+    let maxLhs = 0;
+    for (const entry of entries) {
+        if (entry.lhs.length > maxLhs) maxLhs = entry.lhs.length;
     }
 
     // Apply

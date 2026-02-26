@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Terraform/HCL (Deep Formatting Implemented)
 - [x] SQL (Deep Formatting Implemented)
 - [x] C# (Deep Formatting Implemented)
 - [x] C (Deep Formatting Implemented)
