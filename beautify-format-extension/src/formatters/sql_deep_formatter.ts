@@ -1,17 +1,18 @@
 
-// Re-implementing with improvements...
+import { format as sqlFormat } from 'sql-formatter';
 
 export async function formatSQLDeep(text: string): Promise<string> {
     try {
-        const { format } = await import('sql-formatter');
-
         // 1. Base Formatting with sql-formatter
-        let formatted = format(text, {
-            language: 'sql',
+        let formatted = sqlFormat(text, {
+            language: 'postgresql', // Using PostgreSQL as it covers standard SQL + extra features commonly used
             keywordCase: 'upper',
             tabWidth: 4,
             linesBetweenQueries: 2,
-            indentStyle: 'standard'
+            indentStyle: 'standard',
+            logicalOperatorNewline: 'before',
+            expressionWidth: 60,
+            denseOperators: false
         });
 
         // 2. Post-processing for Deep Formatting
@@ -23,58 +24,214 @@ export async function formatSQLDeep(text: string): Promise<string> {
 }
 
 /**
- * Shared post-processing logic for alignment (AS aliases)
+ * Shared post-processing logic for alignment (AS aliases, =, Types)
  */
 function processSQLDeep(text: string): string {
     const lines = text.split('\n');
     const processedLines: string[] = [];
 
-    // Alignment logic for AS aliases
-    let buffer: { line: string, asIndex: number }[] = [];
+    // Buffers for different alignment contexts
+    let aliasBuffer: { line: string, index: number }[] = [];
+    let assignmentBuffer: { line: string, index: number }[] = [];
+    let typeBuffer: { line: string, nameEndIndex: number }[] = [];
 
-    function flushBuffer() {
-        if (buffer.length === 0) return;
+    // Context flags
+    let inCreateTable = false;
+    let inUpdate = false;
+    let inUpdateSet = false;
 
-        // Find max position of AS
-        let maxPreAsLen = 0;
-        buffer.forEach(item => {
-            const preAs = item.line.substring(0, item.asIndex).trimEnd();
-            if (preAs.length > maxPreAsLen) maxPreAsLen = preAs.length;
+    function flushAliasBuffer() {
+        if (aliasBuffer.length === 0) return;
+
+        let maxPre = 0;
+        aliasBuffer.forEach(item => {
+            const pre = item.line.substring(0, item.index).trimEnd();
+            if (pre.length > maxPre) maxPre = pre.length;
         });
 
-        buffer.forEach(item => {
-            const preAs = item.line.substring(0, item.asIndex).trimEnd();
-            const postAs = item.line.substring(item.asIndex).trim();
-            // Ensure single space before AS if needed, or align
-            const padding = ' '.repeat(maxPreAsLen - preAs.length + 1);
-            processedLines.push(`${preAs}${padding}${postAs}`);
+        aliasBuffer.forEach(item => {
+            const pre = item.line.substring(0, item.index).trimEnd();
+            const post = item.line.substring(item.index).trim();
+            const padding = ' '.repeat(maxPre - pre.length + 1);
+            processedLines.push(`${pre}${padding}${post}`);
         });
-        buffer = [];
+        aliasBuffer = [];
+    }
+
+    function flushAssignmentBuffer() {
+        if (assignmentBuffer.length === 0) return;
+
+        let maxPre = 0;
+        assignmentBuffer.forEach(item => {
+            const pre = item.line.substring(0, item.index).trimEnd();
+            if (pre.length > maxPre) maxPre = pre.length;
+        });
+
+        assignmentBuffer.forEach(item => {
+            const pre = item.line.substring(0, item.index).trimEnd();
+            const post = item.line.substring(item.index).trim();
+            const padding = ' '.repeat(maxPre - pre.length + 1);
+            processedLines.push(`${pre}${padding}${post}`);
+        });
+        assignmentBuffer = [];
+    }
+
+    function flushTypeBuffer() {
+        if (typeBuffer.length === 0) return;
+
+        let maxNameLen = 0;
+        typeBuffer.forEach(item => {
+            const name = item.line.substring(0, item.nameEndIndex).trimEnd();
+            if (name.length > maxNameLen) maxNameLen = name.length;
+        });
+
+        typeBuffer.forEach(item => {
+            const name = item.line.substring(0, item.nameEndIndex).trimEnd();
+            const rest = item.line.substring(item.nameEndIndex).trim();
+            const padding = ' '.repeat(maxNameLen - name.length + 1);
+            processedLines.push(`${name}${padding}${rest}`);
+        });
+        typeBuffer = [];
+    }
+
+    function flushAll() {
+        flushAliasBuffer();
+        flushAssignmentBuffer();
+        flushTypeBuffer();
     }
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const trimmed = line.trim();
+        const upperLine = line.toUpperCase();
+
         if (trimmed.startsWith('--') || trimmed.startsWith('/*')) {
-            flushBuffer();
+            flushAll();
             processedLines.push(line);
             continue;
         }
 
-        // Regex to find standalone AS
-        const asMatch = line.match(/^(\s+.*)\bAS\b\s+(.*)$/i);
-        if (asMatch && !line.includes('(') && !line.includes(')')) {
-            const matchIndex = line.search(/\bAS\b/i);
-            if (matchIndex !== -1) {
-                 buffer.push({ line, asIndex: matchIndex });
+        if (trimmed === '') {
+            flushAll();
+            processedLines.push(line);
+            continue;
+        }
+
+        // Detect Start of CREATE TABLE
+        if (upperLine.includes('CREATE TABLE')) {
+            inCreateTable = true;
+            flushAll();
+            processedLines.push(line);
+            continue;
+        }
+
+        // Detect End of CREATE TABLE
+        // Check if this line is the end (contains `);`)
+        if (inCreateTable && trimmed.endsWith(');')) {
+            // Check if this line also has a column definition
+            // e.g. "  status VARCHAR(20));"
+            // The regex expects space between name and type.
+            // But usually the closing paren ); is attached to the last line or on a new line.
+            // If on a new line, it won't match the regex anyway.
+            // If on the same line, we strip ); for matching purpose?
+            // Let's try to match ignoring trailing `);`
+            const cleanLine = line.replace(/\);$/, '').trimEnd();
+            const match = cleanLine.match(/^(\s+[a-zA-Z0-9_"]+)\s+([a-zA-Z0-9_]+.*)$/);
+
+            if (match) {
+                 const namePart = match[1];
+                 typeBuffer.push({ line, nameEndIndex: namePart.length });
+            } else {
+                 // Just closing brace
+                 flushTypeBuffer();
+                 processedLines.push(line);
+                 inCreateTable = false;
                  continue;
+            }
+            flushTypeBuffer(); // Flush everything including this line
+            inCreateTable = false;
+            continue;
+        }
+
+        // Detect UPDATE
+        if (upperLine.startsWith('UPDATE ')) {
+            inUpdate = true;
+            flushAll();
+            processedLines.push(line);
+            continue;
+        }
+
+        // Detect SET (could be on same line as UPDATE or next)
+        if (inUpdate && upperLine.trim().startsWith('SET')) {
+             inUpdateSet = true;
+             flushAll();
+             processedLines.push(line);
+             continue;
+        }
+
+        // Detect End of SET (WHERE or ;)
+        if (inUpdateSet && (upperLine.trim().startsWith('WHERE') || trimmed.endsWith(';'))) {
+             flushAssignmentBuffer();
+             inUpdateSet = false;
+             inUpdate = false; // Reset update too
+             processedLines.push(line);
+             continue;
+        }
+
+        // Logic for Aliases (AS)
+        // Only if not in special contexts to avoid conflicts
+        if (!inCreateTable && !inUpdateSet) {
+            const asMatch = line.match(/^(\s+.*)\bAS\b\s+(.*)$/i);
+            if (asMatch && !line.includes('(') && !line.includes(')')) { // Simple alias only
+                const matchIndex = line.search(/\bAS\b/i);
+                if (matchIndex !== -1) {
+                    aliasBuffer.push({ line, index: matchIndex });
+                    continue;
+                }
+            } else {
+                flushAliasBuffer();
             }
         }
 
-        flushBuffer();
-        processedLines.push(line);
+        // Logic for Assignments (=) in UPDATE SET
+        if (inUpdateSet) {
+            const eqIndex = line.indexOf('=');
+            if (eqIndex !== -1) {
+                assignmentBuffer.push({ line, index: eqIndex });
+                continue;
+            } else {
+                flushAssignmentBuffer();
+            }
+        }
+
+        // Logic for Types in CREATE TABLE
+        if (inCreateTable) {
+            // Heuristic: Indented line, starts with identifier, then space, then type
+            // e.g. "    id SERIAL PRIMARY KEY,"
+            // We want to align "SERIAL"
+            // Ignore lines that are just constraints like "CONSTRAINT ..." or "PRIMARY KEY ..." if they start with keywords
+            // But we assume keywords are upper case.
+            // Let's be stricter: must match identifier pattern.
+            const match = line.match(/^(\s+[a-zA-Z0-9_"]+)\s+([a-zA-Z0-9_]+.*)$/);
+            if (match) {
+                // Exclude if the first word is a keyword like CONSTRAINT, PRIMARY, FOREIGN, CHECK, UNIQUE
+                const firstWord = match[1].trim();
+                const keywords = ['CONSTRAINT', 'PRIMARY', 'FOREIGN', 'CHECK', 'UNIQUE'];
+                if (!keywords.includes(firstWord.toUpperCase())) {
+                    const namePart = match[1];
+                    typeBuffer.push({ line, nameEndIndex: namePart.length });
+                    continue;
+                }
+            }
+            flushTypeBuffer();
+        }
+
+        // If no match in buffers
+        if (!inCreateTable && !inUpdateSet) {
+             processedLines.push(line);
+        }
     }
-    flushBuffer();
+    flushAll();
 
     return processedLines.join('\n');
 }
@@ -97,7 +254,7 @@ export function tokenizeSQL(text: string): Token[] {
         'DATABASE', 'SCHEMA', 'TRIGGER', 'PROCEDURE', 'FUNCTION', 'DECLARE', 'BEGIN', 'COMMIT', 'ROLLBACK',
         'CROSS', 'NATURAL', 'WITH', 'TOP', 'OFFSET', 'FETCH', 'CONSTRAINT', 'ASC', 'DESC', 'NULLS',
         'FIRST', 'LAST', 'PARTITION', 'OVER', 'WINDOW', 'CAST', 'TRY_CAST', 'COALESCE', 'RANK', 'DENSE_RANK',
-        'ROW_NUMBER', 'FULL'
+        'ROW_NUMBER', 'FULL', 'JSONB', 'SERIAL', 'VARCHAR', 'TIMESTAMP', 'INT', 'INTEGER', 'BOOLEAN', 'TEXT'
     ]);
 
     while (i < len) {
@@ -173,7 +330,7 @@ export function tokenizeSQL(text: string): Token[] {
             if (i < len) {
                 const next = text[i];
                 const combined = value + next;
-                if (['<=', '>=', '!=', '<>', '+=', '-=', '*=', '/=', '%='].includes(combined)) {
+                if (['<=', '>=', '!=', '<>', '+=', '-=', '*=', '/=', '%=', '::'].includes(combined)) {
                     value = combined;
                     i++;
                 }
@@ -264,15 +421,10 @@ export function formatSQLFallback(text: string): string {
             }
             // Join Logic: LEFT, RIGHT, INNER, OUTER, FULL, JOIN
             else if (['JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL'].includes(val)) {
-                // If it's a join type, start new line
-                // But if it's JOIN following a join type, DON'T start new line
                 let isContinuation = false;
                 if (prevToken && ['LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL'].includes(prevToken.value)) {
                     isContinuation = true;
                 }
-
-                // console.log(`DEBUG: Token: ${val}, Prev: ${prevToken ? prevToken.value : 'null'}, isContinuation: ${isContinuation}`);
-
                 if (!isContinuation) {
                     pushLine();
                 }
@@ -283,6 +435,10 @@ export function formatSQLFallback(text: string): string {
             }
             // Logical Ops
             else if (['AND', 'OR'].includes(val)) {
+                pushLine();
+            }
+            // CASE related
+            else if (['WHEN', 'ELSE'].includes(val)) {
                 pushLine();
             }
         }
@@ -319,7 +475,7 @@ export function formatSQLFallback(text: string): string {
             else if (prevToken && prevToken.type === 'SYMBOL' && ['.', '::'].includes(prevToken.value)) space = false;
             else if (token.value === '(' && prevToken && prevToken.type === 'IDENTIFIER') space = false; // Func
             else if (lastChar === '(') space = false;
-            else if (lastChar === ' ') space = false; // Already has space (e.g. from previous token logic? No, only currentLine update)
+            else if (lastChar === ' ') space = false;
 
             if (space) currentLine += ' ' + token.value;
             else currentLine += token.value;
@@ -344,6 +500,7 @@ export function formatSQLFallback(text: string): string {
             if (['CASE'].includes(token.value)) {
                 indentLevel++;
                 parenStack.push('case');
+                pushLine(); // Break after CASE
             }
         }
     }
