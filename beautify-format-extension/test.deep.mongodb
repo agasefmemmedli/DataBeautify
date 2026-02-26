@@ -1,31 +1,32 @@
-// Valid MongoDB Shell Script
-use myDatabase
-db.myCollection.drop()
+// MongoDB Shell Test
 
+use myDatabase
 show collections
 
-db.myCollection.insertOne({
+db.users.find({
     name: "Deep Formatting",
-    date: new Date(),
-    val: 123,
-    tags: ["a", "b", "c"]
-})
-
-// Complex query
-db.myCollection.find({
     $or: [
-        { name: "Deep Formatting" },
-        { val: { $gt: 100 } }
+        { "address.city": { $in: ["New York", "London"] } },
+        { age: { $gt: 25 } }
     ]
-}).sort({ val: -1 }).limit(10).forEach(function(doc) {
-    print("Found: " + doc.name);
-})
+}).sort({ name: 1 }).limit(10)
+
+db.orders.aggregate([
+    { $match: { status: "completed" } },
+    { $group: { _id: "$custId", total: { $sum: "$amount" } } },
+    { $sort: { total: -1 } }
+])
 
 // Function definition
-function myHelper(id) {
-    return db.myCollection.findOne({ _id: id });
+function updateUsers() {
+    const cursor = db.users.find();
+    while (cursor.hasNext()) {
+        const user = cursor.next();
+        printjson(user);
+    }
 }
 
-// Shell helpers
-it
-cls
+// Shell commands mixed with JS
+show dbs
+updateUsers()
+exit
