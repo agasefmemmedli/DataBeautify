@@ -295,18 +295,34 @@ function normalizeValue(value: string): string {
     return value.replace(/(^|[\s(,])0(px|em|rem|in|cm|mm|pt|pc|ex|ch|vw|vh|vmin|vmax)(?=$|[\s,);])/gi, '$10');
 }
 
+function normalizeString(s: string): string {
+    if (s.length < 2) return s;
+    const first = s[0];
+    const last = s[s.length - 1];
+    if ((first === '"' || first === "'") && first === last) {
+        const content = s.slice(1, -1);
+        if (content.includes('"') && !content.includes("'")) {
+             return "'" + content + "'";
+        }
+        if (!content.includes('"')) {
+            return '"' + content.replace(/\\'/g, "'") + '"';
+        }
+        return s;
+    }
+    return s;
+}
+
 function reconstruct(tokens: Token[]): string {
     let res = '';
     for (const t of tokens) {
         if (t.type === TokenType.Whitespace) {
             res += ' ';
+        } else if (t.type === TokenType.String) {
+            res += normalizeString(t.value);
         } else {
             res += t.value;
         }
     }
-    // Collapse spaces in general strings (except String tokens handled by t.value)
-    // Actually, if we output ' ' for each whitespace token, we might get multiple spaces.
-    // Standard reconstruct for params/selectors: collapse spaces.
     return res.replace(/\s+/g, ' ');
 }
 
@@ -338,7 +354,15 @@ function reconstructValue(tokens: Token[]): string {
             if (k < tokens.length && tokens[k].type === TokenType.Word) {
                 const hex = tokens[k].value;
                 if (/^[0-9a-fA-F]{3,8}$/.test(hex)) {
-                    res += '#' + hex.toLowerCase();
+                    let newHex = hex.toLowerCase();
+                    // Shrink if possible: #aabbcc -> #abc
+                    if (newHex.length === 6 &&
+                        newHex[0] === newHex[1] &&
+                        newHex[2] === newHex[3] &&
+                        newHex[4] === newHex[5]) {
+                        newHex = newHex[0] + newHex[2] + newHex[4];
+                    }
+                    res += '#' + newHex;
                     i++; // Skip hex word
                     continue;
                 }
@@ -347,30 +371,12 @@ function reconstructValue(tokens: Token[]): string {
 
         if (t.type === TokenType.Whitespace) {
             res += ' ';
+        } else if (t.type === TokenType.String) {
+            res += normalizeString(t.value);
         } else {
             res += t.value;
         }
     }
-
-    // We want to collapse multiple spaces in property values (standard CSS)
-    // but PRESERVE spaces inside String tokens (t.value).
-    // The loop above produces ' ' for Whitespace tokens.
-    // If we have "   " (String token), it is added as "   ".
-    // If we have Word Space Space Word, we get Word  Word.
-    // We should collapse the spaces outside strings.
-    // But `res` is a string now. We don't know where strings are.
-    // Simple fix: Tokenizer merged consecutive whitespace into single Whitespace token?
-    // css_tokenizer.ts: `while ... /\s/.test ...`. Yes!
-    // So one Whitespace token = one or more spaces.
-    // If we output ' ', we collapse them!
-    // So `res` already has collapsed spaces (one space per whitespace sequence).
-    // So we don't need regex replace on `res`.
-    // Wait, `reconstruct` uses regex replace. `reconstructValue` doesn't?
-    // `reconstruct` collapses blindly.
-    // `reconstructValue` should also yield collapsed spaces.
-    // Since tokenizer merges whitespace, `t.type === Whitespace` represents a sequence of spaces.
-    // Outputting ' ' replaces that sequence with one space.
-    // Correct!
 
     return res.trim();
 }
@@ -412,7 +418,12 @@ function reconstructSelector(tokens: Token[]): string {
             if (res.length > 0) res += ' ';
             pendingSpace = false;
         }
-        res += t.value;
+
+        if (t.type === TokenType.String) {
+            res += normalizeString(t.value);
+        } else {
+            res += t.value;
+        }
     }
 
     return res.trim();

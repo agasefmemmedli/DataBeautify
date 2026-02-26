@@ -1,0 +1,8 @@
+div[  type  =  'text'  ] {
+    color: #AABBCC;
+    background: #000000;
+    content: 'foo';
+    font-family: "Arial", 'Helvetica';
+}
+span +   div   >   p {
+    margin: 0px;
