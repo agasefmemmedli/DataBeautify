@@ -1,11 +1,10 @@
-"use strict";
-const { ShellTokenizer, TokenType } = require('./out/formatters/shell_tokenizer');
-
-const text = 'readonly SCRIPT_NAME="deep-formatter"';
-const tokenizer = new ShellTokenizer(text);
-const tokens = tokenizer.tokenize();
-
-console.log('Tokens:');
-tokens.forEach(t => {
-    console.log(`Type: ${t.type}, Text: '${t.text}', Col: ${t.col}`);
-});
+const { tokenize } = require('./out/formatters/powershell_tokenizer');
+const text = `
+    foreach ($i in 1..$Count) {
+        $result = Get-Process |
+            Where-Object { $_.Id -gt 1000 } |
+            Select-Object Name, Id
+    }
+`;
+const tokens = tokenize(text);
+console.log(JSON.stringify(tokens, null, 2));

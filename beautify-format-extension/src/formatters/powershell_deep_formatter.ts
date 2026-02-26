@@ -36,12 +36,13 @@ export function formatPowerShellDeep(text: string): string {
     let newlinePending = 0; // 0: none, 1: strict newline, 2: blank line
     let spacePending = false;
     let lastTokenIsUnary = false;
+    let inPipeline = false;
 
     // Track context
     const stack: string[] = [];
 
     function getIndent(): string {
-        return indentString.repeat(Math.max(0, indentLevel));
+        return indentString.repeat(Math.max(0, indentLevel + (inPipeline ? 1 : 0)));
     }
 
     function append(str: string) {
@@ -73,6 +74,15 @@ export function formatPowerShellDeep(text: string): string {
                      newlinePending = newlines > 1 ? 2 : 1;
                  } else if (newlines > 1) {
                      newlinePending = 2;
+                 }
+
+                 // Check for statement termination to reset pipeline
+                 if (lastToken) {
+                     const isOperator = lastToken.type === 'Operator' ||
+                                        ['|', ',', '.', '::', '(', '[', '{', '='].includes(lastToken.value);
+                     if (!isOperator) {
+                         inPipeline = false;
+                     }
                  }
             } else {
                 spacePending = true;
@@ -128,8 +138,17 @@ export function formatPowerShellDeep(text: string): string {
                      newlinePending = 0;
                      spacePending = false;
                  } else {
-                     if (!newlinePending) newlinePending = 1;
+                     // Don't newline if pipe follows
+                     const next = stream.peek();
+                     if (next && next.value === '|') {
+                         newlinePending = 0;
+                         spacePending = true;
+                     } else if (!newlinePending) {
+                         newlinePending = 1;
+                     }
                  }
+                 // Reset pipeline on block end (usually ends statement)
+                 inPipeline = false;
             }
         }
 
@@ -253,9 +272,10 @@ export function formatPowerShellDeep(text: string): string {
         // Newline after specific tokens
         if (value === ';') {
             newlinePending = 1;
+            inPipeline = false;
         } else if (value === '|') {
             newlinePending = 1;
-            // TODO: Handle pipeline indentation
+            inPipeline = true;
         } else if (value === ',') {
             spacePending = true;
         }
