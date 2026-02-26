@@ -10,7 +10,6 @@ export function formatShellDeep(text: string): string {
     let heredocDelimiter = '';
     let heredocOp = '';
 
-    // Stack to track context for indentation and spacing rules
     const contextStack: string[] = [];
 
     let currentLineTokens: Token[] = [];
@@ -61,7 +60,6 @@ export function formatShellDeep(text: string): string {
             return;
         }
 
-        // Check for heredoc start
         for (let j = 0; j < interestingTokens.length; j++) {
             const t = interestingTokens[j];
             if (t.type === TokenType.HeredocStart) {
@@ -76,7 +74,6 @@ export function formatShellDeep(text: string): string {
 
         const first = interestingTokens[0];
 
-        // Dedent check BEFORE printing line
         const dedentKeywords = new Set(['fi', 'done', 'esac', '}', 'elif', 'else', ')', ']]', ']']);
 
         if (dedentKeywords.has(first.text)) {
@@ -93,9 +90,82 @@ export function formatShellDeep(text: string): string {
         for (let j = 0; j < interestingTokens.length; j++) {
             const t = interestingTokens[j];
             const prev = j > 0 ? interestingTokens[j-1] : null;
-            const next = j + 1 < interestingTokens.length ? interestingTokens[j+1] : null;
 
-            // Context tracking (start)
+            if (j > 0 && prev) {
+                let space = ' ';
+                const currentContext = contextStack.length > 0 ? contextStack[contextStack.length - 1] : null;
+                const isArithmetic = currentContext === 'arithmetic';
+                const isTest = currentContext === 'test';
+
+                const isAdjacent = (t.col === prev.col + prev.text.length);
+
+                if (isAdjacent) {
+                    space = '';
+                } else {
+                    space = ' ';
+                }
+
+                // 1. Comparison operators in Test context
+                if (isTest) {
+                    const ops = ['=', '!=', '==', '=~', '<', '>', '-eq', '-ne', '-gt', '-lt', '-ge', '-le', '-z', '-n', '&&', '||'];
+                    if (ops.includes(t.text) || ops.includes(prev.text)) {
+                        space = ' ';
+                    }
+                }
+
+                // 2. Arithmetic operators
+                if (isArithmetic) {
+                    const ops = ['+', '-', '*', '/', '%', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<', '>', '<=', '>=', '=', '&', '|', '^', '<<', '>>', '&&', '||'];
+                    if (ops.includes(t.text) || ops.includes(prev.text)) {
+                         space = ' ';
+                    }
+                }
+
+                // 3. Redirection and Pipes
+                if (['|', '||', '&&', '&>'].includes(t.text) || ['|', '||', '&&', '&>'].includes(prev.text)) {
+                    space = ' ';
+                }
+
+                if (['>', '>>', '<', '<<', '<<-'].includes(t.text)) {
+                     const isFD = /^\d+$/.test(prev.text);
+                     if (isAdjacent && isFD) {
+                         space = '';
+                     } else {
+                         space = ' ';
+                     }
+                }
+                if (['>', '>>', '<', '<<', '<<-'].includes(prev.text)) {
+                    space = ' ';
+                }
+
+                // 4. Assignments
+                if (t.text === '=' && !isTest && !isArithmetic) {
+                    space = '';
+                }
+                if (prev.text === '=' && !isTest && !isArithmetic) {
+                    space = '';
+                }
+
+                // 5. Keywords
+                if (['if', 'for', 'while', 'case', 'function', 'select', 'elif'].includes(prev.text)) {
+                    if (['(', '[[', '[', '{'].includes(t.text)) {
+                        space = ' ';
+                    }
+                }
+
+                // 6. Tightness overrides
+                if (t.text === ';' || t.text === ';;') space = '';
+                if (t.text === ')' && prev.text === '(') space = '';
+                if (prev.text === '$(') space = '';
+                if (prev.text === '${') space = '';
+
+                if (t.text === '}' && interestingTokens.some(tok => tok.text === '${')) {
+                     if (isAdjacent) space = '';
+                }
+
+                lineStr += space;
+            }
+
             if (t.text === '((' || t.text === '$(((' || t.text === '$((') {
                 contextStack.push('arithmetic');
             } else if (t.text === '[[' || t.text === '[') {
@@ -104,91 +174,8 @@ export function formatShellDeep(text: string): string {
                 contextStack.push('case');
             }
 
-            if (j > 0 && prev) {
-                let space = ' ';
-                const currentContext = contextStack.length > 0 ? contextStack[contextStack.length - 1] : null;
-                const isArithmetic = currentContext === 'arithmetic';
-                const isTest = currentContext === 'test';
-
-                // Adjacency check
-                const isAdjacent = (t.col === prev.col + prev.text.length);
-
-                // Base rule: If adjacent, NO space. If not, Space.
-                // This preserves concatenation semantics and flags logic.
-                if (isAdjacent) {
-                    space = '';
-                } else {
-                    space = ' ';
-                }
-
-                // --- Overrides to Enforce Beautification (Space) ---
-
-                // 1. Comparison operators in Test context [[ ... ]]
-                if (isTest) {
-                    const ops = ['=', '!=', '==', '=~', '<', '>', '-eq', '-ne', '-gt', '-lt', '-ge', '-le'];
-                    if (ops.includes(t.text) || ops.includes(prev.text)) {
-                        space = ' ';
-                    }
-                }
-
-                // 2. Arithmetic operators in Arithmetic context (( ... ))
-                if (isArithmetic) {
-                    const ops = ['+', '-', '*', '/', '%', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<', '>', '<=', '>=', '=', '&', '|', '^', '<<', '>>'];
-                    if (ops.includes(t.text) || ops.includes(prev.text)) {
-                        // Exception: Unary operators? Difficult to detect perfectly.
-                        // Assuming binary for now to be safe/standard.
-                        space = ' ';
-                    }
-                    // Space around logic operators && || inside ((...))?
-                    // Tokenizer treats && as Operator.
-                    if (t.text === '&&' || t.text === '||' || prev.text === '&&' || prev.text === '||') space = ' ';
-                }
-
-                // 3. Keywords often need space even if adjacent?
-                //    `if(` -> `if (`.
-                if (['if', 'for', 'while', 'case', 'function', 'select'].includes(prev.text) && t.text === '(') {
-                    space = ' ';
-                }
-                if (['if', 'for', 'while', 'case', 'function', 'select', 'elif'].includes(prev.text) && t.text === '[[') {
-                    space = ' ';
-                }
-                if (prev.text === ']' && t.text === ';') space = ''; // `];` -> `];`. (handled by isAdjacent if strict, but maybe not)
-                if (prev.text === ']]' && t.text === ';') space = '';
-
-                // --- Overrides to Enforce No-Space (Tight) ---
-
-                // 4. Semicolons
-                if (t.text === ';' || t.text === ';;') space = '';
-
-                // 5. Parens
-                if (t.text === ')' && prev.text === '(') space = ''; // ()
-
-                // 6. Command substitution $( ... )
-                //    Force no space after $(
-                if (prev.text === '$(') space = '';
-
-                // 7. Parameter expansion ${ ... }
-                //    Force no space after ${
-                if (prev.text === '${') space = '';
-                //    Force no space before } if simple var?
-                if (t.text === '}' && prev.type === TokenType.Identifier && interestingTokens.some(tok => tok.text === '${')) {
-                     // Only if adjacent?
-                     // If user typed `${ VAR }`, keep spaces.
-                     // But we want "Deep Formatting".
-                     // If we are deep formatting, we prefer `${VAR}`.
-                     // But safe approach: respect adjacency for insides of ${...}.
-                     // The base rule `isAdjacent` handles this!
-                     // If `${` and `VAR` adjacent -> no space.
-                     // If `VAR` and `}` adjacent -> no space.
-                     // If `${` space `VAR` -> space.
-                     // This is acceptable preservation.
-                }
-
-                lineStr += space;
-            }
             lineStr += t.text;
 
-            // Context tracking (end)
             if (t.text === '))' && contextStack.length > 0 && contextStack[contextStack.length - 1] === 'arithmetic') {
                 contextStack.pop();
             } else if ((t.text === ']]' || t.text === ']') && contextStack.length > 0 && contextStack[contextStack.length - 1] === 'test') {
@@ -200,7 +187,6 @@ export function formatShellDeep(text: string): string {
 
         formattedLines.push(lineStr);
 
-        // Indent check AFTER printing line
         const last = interestingTokens[interestingTokens.length - 1];
 
         if (['then', 'do', '{'].includes(last.text)) {
@@ -213,18 +199,28 @@ export function formatShellDeep(text: string): string {
             indentLevel++;
         }
         else if (interestingTokens[0].text === '[[' && !interestingTokens.some(t => t.text === ']]')) {
-            indentLevel++;
+             if (last.text !== ']]') indentLevel++;
         }
 
-        // Case pattern indent
         if (last.text === ')' && contextStack.length > 0 && contextStack[contextStack.length-1] === 'case') {
-             const isFunc = interestingTokens.length >= 2 && interestingTokens[interestingTokens.length-2].text === '(';
-             if (!isFunc) {
-                 indentLevel++;
+             // Case pattern must have content before ')', e.g. "pattern)"
+             // If line is just ")", it's a closing subshell/function paren.
+             if (interestingTokens.length > 1) {
+                 const isAssignment = interestingTokens.some(t => t.text === '=');
+                 const isSubshellStart = first.text === '(';
+                 const isFunction = interestingTokens.some(t => t.text === 'function') ||
+                                    (interestingTokens.length >= 2 && interestingTokens[interestingTokens.length-2].text === '(');
+
+                 if (!isAssignment && !isSubshellStart && !isFunction) {
+                     indentLevel++;
+                 }
              }
         }
 
-        // 'else', 'elif' indent (body)
+        if (last.text === ';;') {
+            if (indentLevel > 0) indentLevel--;
+        }
+
         if (first.text === 'else') {
             indentLevel++;
         } else if (first.text === 'elif') {
