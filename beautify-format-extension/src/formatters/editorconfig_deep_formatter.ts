@@ -15,40 +15,50 @@ export function formatEditorConfigDeep(text: string): string {
     interface Property {
         key: string;
         value: string;
-        comments: string[];
+        comments: string[]; // Comments appearing before this property
         inlineComment?: string;
     }
 
     interface Section {
-        header: string | null;
+        header: string | null; // null for implicit root (properties at top)
         properties: Property[];
-        comments: string[];
+        comments: string[]; // Comments appearing before this section header
         inlineComment?: string;
     }
 
     const sections: Section[] = [];
+    // Initialize with implicit root section
     let currentSection: Section = { header: null, properties: [], comments: [] };
     let currentComments: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
-        // Check for comments
-        // We need to be careful not to split inside quotes, though EditorConfig values rarely have quotes except strictly needed.
-        // Assuming standard EditorConfig syntax where # or ; starts a comment unless escaped?
-        // EditorConfig spec says: "Comments: ; or #"
-        // It doesn't strictly specify quoting rules for values containing # or ; but usually values don't contain them.
-
+        // Parse line character by character to handle quotes in comments
         let content = line;
         let inlineComment = '';
-
-        // Find comment start
+        let inQuote = false;
+        let quoteChar = '';
         let commentIdx = -1;
+
         for (let j = 0; j < line.length; j++) {
             const char = line[j];
-            if (char === '#' || char === ';') {
-                commentIdx = j;
-                break;
+            // const prev = j > 0 ? line[j-1] : '';
+
+            if (inQuote) {
+                if (char === '\\') {
+                     j++; // Escape next char
+                } else if (char === quoteChar) {
+                    inQuote = false;
+                }
+            } else {
+                if (char === '"' || char === "'") {
+                    inQuote = true;
+                    quoteChar = char;
+                } else if (char === '#' || char === ';') {
+                    commentIdx = j;
+                    break;
+                }
             }
         }
 
@@ -63,20 +73,25 @@ export function formatEditorConfigDeep(text: string): string {
         if (trimmed === '') {
             if (inlineComment) {
                 currentComments.push(inlineComment);
-            } else if (line.trim() === '') {
-                 // Preserve empty lines as empty strings in comments?
-                 // Or just ignore extra vertical whitespace and enforce our own?
-                 // Let's enforce our own spacing between sections, so we ignore blank lines here
-                 // UNLESS they are inside a block of comments?
-                 // Simplest is to ignore blank lines and rely on reconstruction.
             }
+            // Ignore blank lines; we enforce our own spacing
             continue;
         }
 
-        // Section Header
+        // Section Header: [section]
         if (trimmed.startsWith('[')) {
-            // Push previous section
-            sections.push(currentSection);
+            // Push previous section if it has content or comments
+            // For implicit root, only push if it has properties or comments
+            if (currentSection.header !== null || currentSection.properties.length > 0 || currentSection.comments.length > 0) {
+                 sections.push(currentSection);
+            } else if (currentSection.header === null && currentComments.length > 0) {
+                 // Special case: comments at start of file belonging to implicit root but no properties yet?
+                 // Usually these belong to the file header.
+                 // We push the implicit root.
+                 currentSection.comments = currentComments; // These comments belong to the root section start
+                 currentComments = []; // Consumed
+                 sections.push(currentSection);
+            }
 
             // Start new section
             currentSection = {
@@ -89,7 +104,7 @@ export function formatEditorConfigDeep(text: string): string {
             continue;
         }
 
-        // Property
+        // Property: key = value
         const eqIndex = trimmed.indexOf('=');
         if (eqIndex !== -1) {
             const key = trimmed.substring(0, eqIndex).trim();
@@ -105,33 +120,44 @@ export function formatEditorConfigDeep(text: string): string {
             continue;
         }
 
-        // Unknown line (fallback)
-        // Treat as comment to preserve it
+        // Unknown non-empty line
+        // Treat as comment to preserve data integrity
         currentComments.push(line.trim());
     }
 
     // Push last section
-    sections.push(currentSection);
+    // If it's implicit root and empty, skip it UNLESS we have pending comments (trailing comments)
+    if (currentSection.header !== null || currentSection.properties.length > 0 || currentSection.comments.length > 0) {
+        sections.push(currentSection);
+    } else if (currentSection.header === null && currentComments.length > 0) {
+        // Trailing comments at end of file, treat as belonging to a dummy final section or append later?
+        // Let's attach them to the last pushed section if possible, or create a dummy section.
+        if (sections.length > 0) {
+             // Append to last section's properties comments? No.
+             // Append to last section's comments? No, those are *before* header.
+             // We'll handle trailing comments separately.
+        }
+    }
 
     // Reconstruct
     const formattedLines: string[] = [];
 
+    // Helper to add lines
+    const addLine = (l: string) => formattedLines.push(l);
+
     sections.forEach((section, index) => {
-        // If it's the root section (header is null) and empty, skip it UNLESS it has comments
-        // Usually index 0 is the implicit root section.
+        // Skip empty implicit root if it wasn't pushed (already handled by logic above, but double check)
         const isImplicitRoot = section.header === null;
+        if (isImplicitRoot && section.properties.length === 0 && section.comments.length === 0) return;
 
-        if (isImplicitRoot && section.properties.length === 0 && section.comments.length === 0) {
-            return;
-        }
-
-        // Add spacing between sections (but not before the very first content)
+        // Add spacing between sections
+        // But not before the very first line of output
         if (formattedLines.length > 0) {
-            formattedLines.push('');
+            addLine('');
         }
 
         // Section Comments
-        section.comments.forEach(c => formattedLines.push(c));
+        section.comments.forEach(c => addLine(c));
 
         // Section Header
         if (section.header) {
@@ -139,12 +165,12 @@ export function formatEditorConfigDeep(text: string): string {
             if (section.inlineComment) {
                 headerLine += ` ${section.inlineComment}`;
             }
-            formattedLines.push(headerLine);
+            addLine(headerLine);
         }
 
         // Properties
         if (section.properties.length > 0) {
-             // Sort: root first, then alphabetical
+            // Sort: root first, then alphabetical
             const sortedProps = [...section.properties].sort((a, b) => {
                 if (a.key === 'root' && b.key !== 'root') return -1;
                 if (b.key === 'root' && a.key !== 'root') return 1;
@@ -157,11 +183,11 @@ export function formatEditorConfigDeep(text: string): string {
                 if (p.key.length > maxKeyLen) maxKeyLen = p.key.length;
             });
 
-            const indent = isImplicitRoot ? '' : '    ';
+            const indent = isImplicitRoot ? '' : '    '; // 4 spaces indentation
 
             sortedProps.forEach(p => {
                 // Property Comments
-                p.comments.forEach(c => formattedLines.push(`${indent}${c}`));
+                p.comments.forEach(c => addLine(`${indent}${c}`));
 
                 // Property Line
                 const padding = ' '.repeat(maxKeyLen - p.key.length);
@@ -171,15 +197,23 @@ export function formatEditorConfigDeep(text: string): string {
                     line += ` ${p.inlineComment}`;
                 }
 
-                formattedLines.push(line);
+                addLine(line);
             });
         }
     });
 
     // Trailing comments (if any were left in currentComments after loop)
     if (currentComments.length > 0) {
-        if (formattedLines.length > 0) formattedLines.push('');
-        currentComments.forEach(c => formattedLines.push(c));
+        if (formattedLines.length > 0) addLine('');
+        currentComments.forEach(c => addLine(c));
+    }
+
+    // Ensure single final newline
+    if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+        // formattedLines.push(''); // Standard practice to end with newline?
+        // Join handles newlines between lines.
+        // If we want EOL, we assume the caller handles it or we return string.
+        // Usually editors handle final newline.
     }
 
     return formattedLines.join('\n');
