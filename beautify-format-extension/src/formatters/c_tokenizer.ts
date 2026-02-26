@@ -46,7 +46,7 @@ export class CTokenizer {
     private static readonly OPERATORS = new Set([
         '->', '++', '--', '&&', '||', '<<', '>>', '==', '!=', '<=', '>=',
         '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=',
-        '+', '-', '*', '/', '%', '^', '&', '|', '~', '!', '=', '<', '>', '?', ':', ',', ';', '.'
+        '+', '-', '*', '/', '%', '^', '&', '|', '~', '!', '=', '<', '>', '?', ':', ',', ';', '.', '\\'
     ]);
 
     // Regexes (Sticky)
@@ -138,7 +138,8 @@ export class CTokenizer {
                 const match = this.reIdentifier.exec(this.code);
                 if (match) {
                     const directive = match[0];
-                    if (['include', 'define', 'undef', 'if', 'ifdef', 'ifndef', 'else', 'elif', 'endif', 'error', 'line', 'pragma', 'version', 'extension'].includes(directive)) {
+                    // Whole-line directives
+                    if (['include', 'error', 'pragma', 'line', 'version', 'extension'].includes(directive)) {
                         let end = this.pos;
                         while (end < this.code.length) {
                             if (this.code[end] === '\n' || this.code[end] === '\r') {
@@ -157,6 +158,14 @@ export class CTokenizer {
                         tokens.push({ type: TokenType.Preprocessor, text, line: this.line, col: this.col });
                         this.advanceStr(text);
                         continue;
+                    }
+                    // Partial directives (only consume directive itself)
+                    else if (['define', 'undef', 'if', 'ifdef', 'ifndef', 'else', 'elif', 'endif'].includes(directive)) {
+                         const end = k + directive.length;
+                         const text = this.code.substring(this.pos, end);
+                         tokens.push({ type: TokenType.Preprocessor, text, line: this.line, col: this.col });
+                         this.advanceStr(text);
+                         continue;
                     }
                 }
             }
