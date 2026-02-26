@@ -633,34 +633,12 @@ export async function handlePowerShell(editor: vscode.TextEditor, text: string) 
     // Validate PowerShell using custom resilient validator
     validationMessage = validatePowerShell(text);
 
-    // Try Deep Formatting with Prettier (Standard Style)
+    // Deep Formatting logic
     try {
-        const prettier = await import('prettier');
-        const pluginPowerShellMod = await import('prettier-plugin-powershell');
-        const pluginPowerShell = pluginPowerShellMod.default || pluginPowerShellMod;
-
-        formatted = await prettier.format(text, {
-            parser: "powershell",
-            plugins: [pluginPowerShell],
-            tabWidth: 4,
-            printWidth: 100,
-            useTabs: false,
-            trailingComma: "none",
-        });
-    } catch (prettierError: any) {
-        console.warn('Prettier PowerShell formatting failed, falling back to custom formatter', prettierError);
-
-        // Resilient fallback logic
-        try {
-            formatted = formatPowerShellDeep(text);
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to format PowerShell: ${error.message}`);
-            return;
-        }
-
-        if (!validationMessage) {
-             validationMessage = "Deep formatting (Prettier) failed. Applied deep formatting.";
-        }
+        formatted = formatPowerShellDeep(text);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to format PowerShell: ${error.message}`);
+        return;
     }
 
     await applyEdit(editor, formatted);
