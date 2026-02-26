@@ -1,0 +1,32 @@
+// Multiline Map Test
+$breakpoints: (
+  small: 320px,
+  medium: 768px,
+  large: 1024px
+);
+
+// Map Merge
+$new-breakpoints: map-merge($breakpoints, (
+  xlarge: 1200px
+));
+
+// Map Get
+.container {
+  @media (min-width: map-get($breakpoints, medium)) {
+    width: 80%;
+  }
+}
+
+// Complex Map
+$theme-colors: (
+  "primary": (
+    "base": #3b5998,
+    "light": lighten(#3b5998, 15%),
+    "dark": darken(#3b5998, 15%)
+  ),
+  "secondary": (
+    "base": #8b9dc3,
+    "light": lighten(#8b9dc3, 15%),
+    "dark": darken(#8b9dc3, 15%)
+  )
+);
