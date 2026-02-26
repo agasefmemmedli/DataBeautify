@@ -121,3 +121,55 @@ int main() {
 
     return 0;
 }
+
+// --- NEW DEEP FORMATTING TESTS ---
+
+namespace MyProject {
+namespace Internal {
+
+class ComplexClass {
+ public:
+  ComplexClass(int x, int y, std::string name)
+      : x_(x),
+        y_(y),
+        name_(std::move(name)),
+        data_({1, 2, 3}) {}
+
+  void ProcessData() {
+    int    shortVar   = 10;
+    double longVarName = 3.14159;
+    bool   flag       = true;
+
+    if (flag) {
+      auto lambda = [=](int a, int b) -> int {
+        return a + b;
+      };
+      int result = lambda(x_, y_);
+    }
+  }
+
+ private:
+  int         x_;
+  int         y_;
+  std::string name_;
+  std::vector<int> data_;
+};
+
+template <typename T, typename U>
+struct Pair {
+  T first;
+  U second;
+};
+
+void GlobalFunction() {
+  std::map<int, std::string> mapOfStrings;
+  mapOfStrings[1] = "One";
+  mapOfStrings[10] = "Ten";
+
+  int a = 1;
+  int b = 2;
+  int c = a + b;
+}
+
+}  // namespace Internal
+}  // namespace MyProject
