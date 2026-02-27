@@ -153,6 +153,14 @@ function processSQLDeep(text: string): string {
             continue;
         }
 
+        // Detect End of CREATE TABLE (isolated closing paren)
+        if (inCreateTable && trimmed === ');') {
+            flushTypeBuffer();
+            processedLines.push(line);
+            inCreateTable = false;
+            continue;
+        }
+
         // Detect UPDATE
         if (upperLine.startsWith('UPDATE ')) {
             inUpdate = true;
@@ -224,6 +232,9 @@ function processSQLDeep(text: string): string {
                 }
             }
             flushTypeBuffer();
+            // Just push the line if no match, but flush first
+            processedLines.push(line);
+            continue;
         }
 
         // If no match in buffers

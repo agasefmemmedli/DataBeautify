@@ -85,7 +85,7 @@ async function runTests() {
     }
     const testCases = [
         {
-            file: 'test.deep.sql',
+            file: 'test/test.deep.sql',
             expectedContains: [
                 'SELECT',
                 'FROM',
@@ -101,7 +101,7 @@ async function runTests() {
     let failed = 0;
     for (const testCase of testCases) {
         console.log(`\nTesting ${testCase.file}...`);
-        const filePath = path.join('.', testCase.file);
+        const filePath = path.join(__dirname, testCase.file);
         if (!fs.existsSync(filePath)) {
             console.error(`File ${testCase.file} not found!`);
             failed++;
