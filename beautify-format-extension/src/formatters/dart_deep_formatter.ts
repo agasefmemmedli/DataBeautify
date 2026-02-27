@@ -325,9 +325,9 @@ export function formatDartDeep(text: string): string {
             //   ..add(5);
             // Indent is +2 spaces relative to 'var'.
             // If 'var' is at level 1, cascade is at level 1 + 2?
-            // Yes, indentLevel handles block depth. Cascades add extra indentation.
+            // No, cascade is at level 1 + 1 (2 spaces indent).
             if (token.text === '..' || token.text === '?..') {
-                currentIndent += 2;
+                currentIndent += 1;
             }
 
             // Adjust for constructor initializer colon

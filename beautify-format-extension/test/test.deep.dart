@@ -1,0 +1,97 @@
+import 'package:foo/foo.dart';
+import 'dart:math' as math;
+import 'dart:async';
+import './my_lib.dart';
+import 'package:bar/bar.dart';
+
+// Annotations
+@deprecated
+@Todo('Fix this', priority: 1)
+class DeepFormatting {
+  final String? name;
+  late int _value;
+
+  // Constructor with named parameters and initializers
+  DeepFormatting({required this.name, int value = 0}) : _value = value;
+
+  // Named constructor
+  DeepFormatting.fromJson(Map<String, dynamic> json)
+      : name = json['name'],
+        _value = json['value'] ?? 0;
+
+  // Getter with arrow syntax
+  int get value => _value;
+
+  // Setter
+  set value(int v) {
+    _value = v;
+  }
+
+  // Method with complex generics and nullable types
+  Future<List<Map<String, T>>> process<T extends num>(T input) async {
+    if (input == null) return [];
+
+    // Cascades
+    var list = [1, 2, 3]
+      ..add(4)
+      ..remove(1)
+      ..map((e) => e * 2);
+
+    // Null-aware cascade
+    var listNull = null
+      ?..add(5);
+
+    // Spread operator (check regression)
+    var list2 = [...list, 5, 6];
+
+    // If-null and Safe navigation
+    var x = name?.length ?? 0;
+
+    // Collection if and for
+    var collection = [
+      if (x > 0) 'positive',
+      for (var i = 0; i < 3; i++) 'item $i',
+    ];
+
+    // Switch expression (Dart 3)
+    var status = switch (x) {
+      0 => 'zero',
+      _ => 'non-zero',
+    };
+
+    // Switch statement (New test case)
+    switch (x) {
+    case 1:
+    print('one');
+    break;
+    default:
+    print('default');
+    }
+
+    // Records
+    var record = (1, a: 2);
+    var (first, a: second) = record;
+
+    // Comparison regression check
+    if (x > (1 + 2)) {
+      print('greater');
+    }
+
+    return [];
+  }
+}
+
+void main() {
+  // Multiline strings
+  var s = '''
+    Line 1
+      Line 2
+  ''';
+
+  var r = r'raw\string';
+
+  // Function with named args
+  foo(a: 1, b: 2);
+}
+
+void foo({int? a, int? b}) {}
