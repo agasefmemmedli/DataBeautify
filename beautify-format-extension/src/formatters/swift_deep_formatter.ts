@@ -84,11 +84,6 @@ export function formatSwiftDeep(text: string): string {
                 flushImports();
                 outputLines.push(trimmed);
             }
-        } else {
-             flushImports();
-             if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
-                outputLines.push('');
-            }
         }
         currentLine = '';
         spacePending = false;
@@ -106,7 +101,13 @@ export function formatSwiftDeep(text: string): string {
         // --- Newline Handling ---
         if (token.type === TokenType.Newline) {
             const count = (token.text.match(/\n/g) || []).length;
-            newlinePending = Math.max(newlinePending, count > 1 ? 2 : 1);
+            if (count > 1) {
+                newlinePending = 2;
+            } else if (newlinePending === 1) {
+                newlinePending = 2;
+            } else if (newlinePending === 0) {
+                newlinePending = 1;
+            }
             stream.advance();
             continue;
         }
@@ -139,7 +140,7 @@ export function formatSwiftDeep(text: string): string {
             } else if (token.text === 'case' || token.text === 'default') {
                 const ctx = currentContext();
                 if (ctx && ctx.type === ContextType.Switch) {
-                    lineIndent = ctx.indent + 1;
+                    lineIndent = ctx.indent;
                 }
             } else {
                 // Check if we are inside a Control statement (guard/if conditions)
@@ -191,7 +192,7 @@ export function formatSwiftDeep(text: string): string {
                 isSwitch: isSwitch
             });
 
-            if (spacePending && currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
+            if (currentLine.length > 0 && !currentLine.endsWith(' ')) currentLine += ' ';
             currentLine += '{';
             spacePending = false;
             indentLevel++;
@@ -291,7 +292,7 @@ export function formatSwiftDeep(text: string): string {
              const ctx = currentContext();
              if (ctx && ctx.type === ContextType.Switch) {
                  if (/^\s*(case|default)\b/.test(currentLine)) {
-                     indentLevel = ctx.indent + 2;
+                     indentLevel = ctx.indent + 1;
                  }
              }
 
@@ -388,7 +389,7 @@ export function formatSwiftDeep(text: string): string {
 
             if (lastToken) {
                  if (['(', '[', '{', ',', ':', '=', 'return', 'case', 'if', 'while', 'guard'].includes(lastToken.text)) isBinary = false;
-                 if (lastToken.type === TokenType.Operator) isBinary = false;
+                 if (lastToken.type === TokenType.Operator && !['>', '<'].includes(lastToken.text)) isBinary = false;
             } else {
                 isBinary = false;
             }
