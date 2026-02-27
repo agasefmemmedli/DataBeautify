@@ -1,7 +1,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { formatJavaDeep } = require('./src/formatters/java_deep_formatter');
+// Use the compiled output instead of the source file
+const { formatJavaDeep } = require('./out/formatters/java_deep_formatter');
 
 const testFile = path.resolve(__dirname, 'test/test.deep.java');
 try {
