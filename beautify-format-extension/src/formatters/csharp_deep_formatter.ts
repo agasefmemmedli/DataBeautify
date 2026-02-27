@@ -209,12 +209,36 @@ export function formatCSharpDeep(text: string): string {
 
         if (token.text === '{') {
             if (!inAutoProp) {
-                const isInitializer = prev && (['new', '=', '=>', 'return', 'else'].includes(prev.text) || prev.text === ']' || prev.text === ')');
+                // Check for true initializers: array, collection, object, or lambda/expression
+                // We exclude block starters like ), else, do from being "initializers" which would allow inline braces
+                const isInitializer = prev && (['new', '=', '=>', 'return'].includes(prev.text) || prev.text === ']');
+
+                // Exclude 'else' and ')' (from if/for/while/method) to enforce Allman style
+                // ')' precedes { in methods, if, for, while, switch -> Force Newline
+                // 'else' precedes { -> Force Newline
+                // 'do' precedes { -> Force Newline
+
                 if (prev && (prev.text === '=>' || prev.text === '=')) {
-                    // Allow inline
+                    // Allow inline for short lambdas or properties
+                    if (isInitializer) {
+                        // Check if it's a collection/object initializer
+                         // keep inline if short, but usually we can break.
+                         // For now, let's allow inline if user had it? No, enforce style.
+                         // But list initializers `new List<int> { 1, 2, 3 }` are common.
+                    } else {
+                        // Force newline for lambdas unless very short? Deep formatter usually enforces structure.
+                        // However, `x => { return x; }` is common.
+                        // Let's enforce newline for `{` generally unless it's an initializer.
+                        forceNewline = true;
+                    }
                 } else if (isInitializer) {
-                    // Allow inline
+                    // new Class { ... } or new int[] { ... }
+                    // Keep inline logic or force newline?
+                    // Usually `new Type {` is allowed inline in K&R, but Allman often puts newline.
+                    // However, `new int[] { 1, 2 }` often stays inline.
+                    // Let's respect "initializer" as potentially inline, but standard blocks as strict newline.
                 } else {
+                    // Standard block (class, method, if, for, etc) -> Force Newline (Allman)
                     forceNewline = true;
                 }
             }
@@ -222,7 +246,8 @@ export function formatCSharpDeep(text: string): string {
         else if (token.text === '}') {
             if (!inAutoProp) {
                 if (prev && prev.text === '{') {
-                     // Empty block
+                     // Empty block - keep on same line if user wants, or collapse?
+                     // Let's allow empty blocks `{ }`
                 } else {
                     forceNewline = true;
                 }
@@ -231,11 +256,15 @@ export function formatCSharpDeep(text: string): string {
         else if (['else', 'catch', 'finally', 'while'].includes(token.text)) {
              if (token.text === 'while') {
                  if (prev && prev.text === '}') {
+                     // do { ... } while (...);
+                     // Allman style: while is on the next line after do-while brace closes?
+                     // Actually Allman usually puts while on new line.
                      forceNewline = true;
                  } else {
                      forceNewline = true;
                  }
              } else {
+                 // else on new line (Allman)
                  forceNewline = true;
              }
         }
@@ -323,6 +352,7 @@ export function formatCSharpDeep(text: string): string {
                 }
                 else if (['new', 'typeof', 'sizeof', 'default', 'checked', 'unchecked', 'nameof'].includes(prev.text)) {
                     if (token.text === '(') spaceBefore = false;
+                    else if (token.text === '[') spaceBefore = false; // new int[] vs new List
                     else spaceBefore = true;
                 }
                 else {
@@ -331,6 +361,7 @@ export function formatCSharpDeep(text: string): string {
             }
             else if (prev.type === TokenType.Identifier) {
                  if (token.text === '(') spaceBefore = false;
+                 if (token.text === '[') spaceBefore = false; // Array access or definition
             }
         }
 
@@ -394,6 +425,21 @@ export function formatCSharpDeep(text: string): string {
         if (token.text === '{') spaceBefore = true;
         if (token.text === '(') {
             if (prev && (prev.type === TokenType.Identifier || prev.text === '>' || prev.text === ')' || prev.text === ']')) spaceBefore = false;
+        }
+
+        // Special case for property access on new line
+        if (token.text === '.' && currentLine.trim() === '') spaceBefore = false;
+
+        // Fix for .ToList() having space before it if prev was )
+        if (token.text === '.') {
+             if (prev && prev.text === ')') spaceBefore = false;
+        }
+
+        // Fix for `int []` -> `int[]`
+        if (token.text === '[') {
+            if (prev && prev.type === TokenType.Keyword && ['int', 'string', 'bool', 'byte', 'char', 'long', 'short', 'float', 'double', 'decimal', 'object', 'void'].includes(prev.text)) {
+                spaceBefore = false;
+            }
         }
 
         if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) append(' ');
