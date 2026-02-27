@@ -22,3 +22,4 @@
 - [x] C# (Deep Formatting Implemented)
 - [x] Java (Deep Formatting Implemented)
 - [x] TypeScript (Deep Formatting Implemented)
+- [x] Shell Script (Deep Formatting Implemented)

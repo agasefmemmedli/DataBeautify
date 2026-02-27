@@ -33,7 +33,9 @@ export class ShellTokenizer {
         'if', 'then', 'else', 'elif', 'fi',
         'case', 'esac', 'for', 'select', 'while', 'until', 'do', 'done',
         'function', 'time', '[[', ']]', '{', '}', '(', ')', '!',
-        'in', 'return', 'exit', 'break', 'continue', 'local', 'declare', 'readonly', 'export'
+        'in', 'return', 'exit', 'break', 'continue', 'local', 'declare', 'readonly', 'export',
+        'trap', 'set', 'unset', 'shift', 'eval', 'exec', 'read', 'cd', 'echo', 'printf', 'let',
+        'alias', 'unalias', 'source', '.', 'test'
     ]);
 
     // Operators that might affect formatting or parsing
@@ -80,6 +82,47 @@ export class ShellTokenizer {
                 continue;
             }
 
+            // Line Continuation (Backslash + Newline)
+            if (char === '\\') {
+                if (this.pos + 1 < this.code.length) {
+                    const next = this.code[this.pos + 1];
+                    if (next === '\n' || next === '\r') {
+                        // Skip backslash + newline and treat as whitespace for tokenizing,
+                        // but maybe we want to preserve it?
+                        // If we preserve it as a Token, the formatter can decide indentation.
+                        // Let's create a 'LineContinuation' token?
+                        // Or just treat as whitespace but special.
+                        // For deep formatter, we want to indent the next line.
+                        // Let's emit a specific token.
+                        let text = '\\';
+                        let len = 1;
+                        if (next === '\r') {
+                            if (this.pos + 2 < this.code.length && this.code[this.pos + 2] === '\n') {
+                                text += '\r\n';
+                                len += 2;
+                            } else {
+                                text += '\r';
+                                len++;
+                            }
+                        } else {
+                            text += '\n';
+                            len++;
+                        }
+
+                        // We will emit this as Newline but with special text so formatter knows it is continuation?
+                        // Or maybe 'Whitespace'? No, Newline is structural.
+                        // Let's use Newline but the text is '\\\n'.
+                        // But wait, standard Newline token is just '\n'.
+                        // If we include '\', it's part of the token.
+                        tokens.push({ type: TokenType.Newline, text: text, line: this.line, col: this.col });
+                        this.advance(len);
+                        this.line++;
+                        this.col = 1;
+                        continue;
+                    }
+                }
+            }
+
             // Whitespace (excluding newline)
             if (/[ \t]/.test(char)) {
                 let text = '';
@@ -95,7 +138,15 @@ export class ShellTokenizer {
 
             // Comment
             if (char === '#') {
-                const isStart = this.pos === 0 || /\s/.test(this.code[this.pos - 1]);
+                // Check if it's start of word (not inside ${#...} which is handled by Variable logic, but here we are at top level loop)
+                // Actually ${#var} starts with $ which is handled below.
+                // But `echo #comment` vs `echo word#notcomment`
+                // Standard shell: # starts comment if it is at the start of a token.
+                // i.e. preceded by whitespace or start of line.
+                // Or if previous char was control operator?
+
+                const isStart = this.pos === 0 || /\s/.test(this.code[this.pos - 1]) || /[;&|(){}]/.test(this.code[this.pos - 1]);
+
                 if (isStart) {
                     let text = '';
                     const startCol = this.col;
@@ -140,16 +191,20 @@ export class ShellTokenizer {
             // Assignment check: VAR=VAL
             if (char === '=') {
                 const prevToken = tokens.length > 0 ? tokens[tokens.length - 1] : null;
-                const isImmediate = prevToken &&
-                    (prevToken.type === TokenType.Identifier || prevToken.type === TokenType.String || prevToken.type === TokenType.Variable) &&
-                    (prevToken.col + prevToken.text.length === this.col);
-
+                // Identifier followed immediately by =
+                // But careful with ==
                 const nextChar = this.pos + 1 < this.code.length ? this.code[this.pos + 1] : '';
+                if (nextChar !== '=' && nextChar !== '~') {
+                    // Check if previous token was Identifier/Variable/String and adjacent
+                    const isImmediate = prevToken &&
+                        (prevToken.type === TokenType.Identifier || prevToken.type === TokenType.String || prevToken.type === TokenType.Variable) &&
+                        (prevToken.col + prevToken.text.length === this.col);
 
-                if (isImmediate && nextChar !== '=' && nextChar !== '~') {
-                    tokens.push({ type: TokenType.Assignment, text: '=', line: this.line, col: this.col });
-                    this.advance();
-                    continue;
+                    if (isImmediate) {
+                        tokens.push({ type: TokenType.Assignment, text: '=', line: this.line, col: this.col });
+                        this.advance();
+                        continue;
+                    }
                 }
             }
 
@@ -201,14 +256,36 @@ export class ShellTokenizer {
                     let varName = '$';
                     let currentPos = this.pos + 1;
 
-                    if (/[?#$!*@0-9-]/.test(this.code[currentPos])) {
+                    // Special parameters: $? $# $$ $! $* $@ $0 $- $_
+                    if (/[?#$!*@0-9\-_]/.test(this.code[currentPos])) {
                         varName += this.code[currentPos];
                         tokens.push({ type: TokenType.Variable, text: varName, line: startLine, col: startCol });
                         this.advance(2);
                         continue;
                     }
 
-                    if (/[a-zA-Z_]/.test(this.code[currentPos])) {
+                    // ${...} or $((...)) or $(...)
+                    if (this.code[currentPos] === '{' || this.code[currentPos] === '(') {
+                        // Let operator logic handle $(( and $(
+                        // But ${ is handled here or operator?
+                        // We have ${ in OPERATORS. So it might be picked up by Operator logic if we don't handle it here.
+                        // But Operator logic is checked BEFORE Variable logic.
+                        // Wait, I put Operator check BEFORE Variable check?
+                        // Yes. So ${ will be tokenized as Operator '${'.
+                        // Is that fine?
+                        // If it is tokenized as Operator, we need to handle matching '}' in tokenizer or parser.
+                        // For formatting, we treat ${...} as a unit ideally?
+                        // But it can contain nested strings and commands.
+                        // Deep formatting usually prefers to tokenize content if we want to format inside.
+                        // But for shell, formatting inside ${} is rare unless it is complex.
+                        // Let's rely on Operator for ${ and handle bracing in Formatter?
+                        // But wait, if I put Operator check BEFORE, then $ will be consumed by ${ check if present.
+                        // Correct.
+
+                        // What about plain $VAR?
+                        // Operator check will NOT match $VAR unless $ is in OPERATORS (it is not, only ${, $((, $( ).
+                        // So $VAR falls through to here.
+                    } else if (/[a-zA-Z_]/.test(this.code[currentPos])) {
                         while (currentPos < this.code.length && /[a-zA-Z0-9_]/.test(this.code[currentPos])) {
                             varName += this.code[currentPos];
                             currentPos++;
@@ -231,7 +308,7 @@ export class ShellTokenizer {
 
                     if (/[\s\n\r]/.test(c)) break;
                     if ('"\'`'.includes(c)) break;
-                    if (';&|<>()/{}'.includes(c)) break;
+                    if (';&|<>()/{}'.includes(c)) break; // Stop at operators
                     if (c === '$') break;
                     if (c === '\\') {
                          if (this.pos + 1 < this.code.length) {
@@ -239,6 +316,13 @@ export class ShellTokenizer {
                              this.advance(2);
                              continue;
                          }
+                    }
+                    if (c === '#') {
+                        // Comment start check again?
+                        // word#foo is valid.
+                        // But typically we tokenize until separator.
+                        // If we hit #, is it a separator? No.
+                        // Unless we want to be very precise.
                     }
 
                     // Check if char is start of an operator we care about splitting
@@ -249,9 +333,19 @@ export class ShellTokenizer {
                 }
 
                 if (text === '') {
-                    // Fallback (e.g. backslash alone at end?)
-                    text = char;
-                    this.advance();
+                    // Fallback (e.g. backslash alone at end? or char matched break condition immediately)
+                    // If we broke because of operator, we should have matched operator above.
+                    // But maybe it's a single char operator not in the set?
+                    // e.g. ',' (comma) is not in OPERATORS.
+                    // '.' (dot) is in KEYWORDS but not OPERATORS?
+                    // If it is '.', it matches Operator check (no) -> Variable (no) -> Identifier loop.
+                    // Identifier loop stops at ... wait, '.' is not in break list.
+                    // So '.' is consumed as Identifier.
+
+                    if (this.pos < this.code.length) {
+                         text = this.code[this.pos];
+                         this.advance();
+                    }
                 }
 
                 const type = ShellTokenizer.KEYWORDS.has(text) ? TokenType.Keyword : TokenType.Identifier;
