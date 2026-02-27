@@ -19,3 +19,4 @@
 - [x] C (Deep Formatting Implemented)
 - [x] C++ (Deep Formatting Implemented)
 - [x] C# (Deep Formatting Implemented)
+- [x] Java (Deep Formatting Implemented)

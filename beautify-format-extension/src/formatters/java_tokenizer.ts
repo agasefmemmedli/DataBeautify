@@ -38,7 +38,7 @@ export class JavaTokenizer {
         'volatile', 'while', 'true', 'false', 'null',
         // Contextual keywords (Java 9+ modules, records, sealed classes)
         'module', 'requires', 'exports', 'opens', 'to', 'uses', 'provides', 'with',
-        'record', 'var', 'yield', 'sealed', 'non-sealed', 'permits'
+        'record', 'var', 'yield', 'sealed', 'non-sealed', 'permits', 'when'
     ]);
 
     // Java Operators
@@ -303,20 +303,15 @@ export class JavaTokenizer {
 
     private matchTextBlock(): string | null {
         // """..."""
-        // Starts with """, ends with """
         let start = this.pos;
-        // Logic: matches """
-
         let currentPos = start + 3;
         while (currentPos < this.code.length) {
-            if (this.code[currentPos] === '"') {
-                // Check if we have matching end sequence """
-                // Must not be escaped. Text blocks don't use standard backslash escaping for the triple quote itself unless it's explicitly \"""
-                // Actually, inside text block, \""" is escaped triple quote.
-                // But wait, escaping rules are complex.
-                // Simple heuristic: if we see """, it ends.
-                // Check if preceded by odd number of backslashes? No, \""" is escaped.
+            if (this.code[currentPos] === '"' &&
+                currentPos + 2 < this.code.length &&
+                this.code[currentPos+1] === '"' &&
+                this.code[currentPos+2] === '"') {
 
+                // Check if escaped by backslashes
                 let backslashes = 0;
                 let k = currentPos - 1;
                 while (k >= start + 3 && this.code[k] === '\\') {
@@ -324,21 +319,15 @@ export class JavaTokenizer {
                     k--;
                 }
 
-                if (currentPos + 2 < this.code.length && this.code[currentPos+1] === '"' && this.code[currentPos+2] === '"') {
-                    // Found """
-                    // Check if escaped
-                     if (backslashes % 2 !== 0) {
-                         // The first quote is escaped, so it's not a terminator
-                         // e.g. ... \""" ...
-                         currentPos += 1;
-                         continue;
-                     }
+                if (backslashes % 2 === 0) {
+                    // Not escaped, so it is the terminator
                     return this.code.substring(this.pos, currentPos + 3);
                 }
+                // Else: escaped, continue searching
             }
             currentPos++;
         }
-        return null;
+        return null; // Unterminated text block
     }
 
     private matchChar(): string | null {
