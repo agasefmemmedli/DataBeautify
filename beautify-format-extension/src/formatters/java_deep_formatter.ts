@@ -244,11 +244,28 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         if (token.type === TokenType.String && token.text.startsWith('"""')) {
              const lines = token.text.split('\n');
              if (lines.length > 1) {
-                 append(lines[0]);
+                 // Calculate common whitespace prefix for lines 1..n
+                 let minIndent = Number.MAX_VALUE;
+                 for (let k = 1; k < lines.length; k++) {
+                     const line = lines[k];
+                     if (line.trim().length === 0) continue;
+                     const match = line.match(/^\s*/);
+                     if (match) {
+                         const len = match[0].length;
+                         if (len < minIndent) minIndent = len;
+                     }
+                 }
+                 if (minIndent === Number.MAX_VALUE) minIndent = 0;
+
+                 append(lines[0]); // First line usually empty or starts after """
                  for(let k=1; k<lines.length; k++) {
                      outputLines.push(currentLine);
                      currentLine = '';
-                     currentLine = lines[k];
+                     let lineContent = lines[k];
+                     if (lineContent.length >= minIndent) {
+                         lineContent = lineContent.substring(minIndent);
+                     }
+                     currentLine = getIndent(indentLevel) + lineContent;
                  }
              } else {
                  append(token.text);
@@ -266,6 +283,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
             let foundArrayInit = false;
             let foundLambda = false;
             let foundRecord = false;
+            let foundSwitchRule = false;
 
             let balance = 0;
             let p = i - 1;
@@ -279,12 +297,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                         if (q >= 0 && tokens[q].text === 'switch') foundSwitch = true;
 
                         // Detect Record Body: record Name(...) {
-                        // The loop is scanning backwards from {
-                        // So t is (...)
-                        // q is before (
-                        // In `record Name(...)`, q is `Name`. q-1 is `record`.
                         if (q >= 1 && tokens[q-1].text === 'record') foundRecord = true;
-                         // Handle `public record Name`
                         if (q >= 1 && tokens[q].type === TokenType.Identifier && tokens[q-1].text === 'record') foundRecord = true;
 
                         break;
@@ -300,8 +313,10 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                     if (balance === 0) break;
                 }
                 else if (t.text === '->') {
-                     foundLambda = true;
-                     break;
+                     if (balance === 0) {
+                        foundSwitchRule = true; // Block after arrow: case 1 -> { ... }
+                        break;
+                     }
                 }
                 p--;
             }
@@ -314,13 +329,23 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                  blockStack.push('LAMBDA_BLOCK');
             } else if (foundRecord) {
                  blockStack.push('RECORD_BODY');
+            } else if (foundSwitchRule) {
+                blockStack.push('BLOCK');
+                pushLine();
             } else {
                 blockStack.push('BLOCK');
             }
 
-            // Standard Java Style (Google/Sun) keeps opening brace on the same line (OTBS)
-            // So we do NOT pushLine here.
-            // Spacing logic handles the space before {.
+            // Standard OTBS: open brace on same line.
+            // But if we just pushed a block, we often want the content to start on the next line.
+            // Especially for method bodies, class bodies, if blocks.
+            // Array init might stay on same line.
+            if (foundSwitch || foundRecord || (!foundArrayInit && !foundLambda)) {
+                // Heuristic: If followed by non-closing brace, force newline.
+                if (next && next.text !== '}') {
+                    pushLine();
+                }
+            }
         }
         else if (token.text === '}') {
              if (next && ['catch', 'finally', 'else', 'while'].includes(next.text)) {
@@ -342,10 +367,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
             if (inCaseLabel) {
                 inCaseLabel = false;
                 if (next && next.text === '{') {
-                     // case ... -> { ... }
-                     // Standard practice: if block follows, treat it as normal block logic
-                     // But we need to ensure indentation is correct for the block itself?
-                     // { will increase indent.
+                     // blockStack push will happen at '{'
                 } else {
                      blockStack.push('SWITCH_RULE');
                      indentLevel++;
@@ -359,11 +381,6 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                  blockStack.pop();
                  indentLevel--;
              }
-             // For switch expression, if we were in a rule without block, we popped it.
-             // But if we are in a switch expression and this ; ends it (e.g. var x = switch(...) { ... }; )
-             // The closing } handles the switch block pop.
-             // But if we are inside a rule: case -> foo;
-             // We just popped SWITCH_RULE. Correct.
 
              if (parenDepth === 0) pushLine();
              else append(' ');
@@ -383,9 +400,6 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              }
              // If followed by type (Identifier) on same line, it's likely a type annotation or single line annotation
              else if (next && next.type === TokenType.Identifier && parenDepth === 0) {
-                 // If the annotation is on its own line in source, keep it that way?
-                 // Standard style: @Override \n public void ...
-                 // But @NotNull String s
                  // Heuristic: if next token is on new line, pushLine
                  const nextIsNewLine = next.line > token.line;
                  if (nextIsNewLine) {
@@ -404,13 +418,6 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
         }
         else if (token.text === ',') {
              if (blockStack.length > 0 && blockStack[blockStack.length-1] === 'SWITCH_RULE') {
-                 // Comma inside a switch rule expression?
-                 // e.g. case 1, 2, 3 -> ...
-                 // This is handled BEFORE ->.
-                 // If we are inside -> expression, comma means tuple or something? Java doesn't have tuples.
-                 // Method call args? method(a, b).
-                 // SWITCH_RULE is pushed AFTER ->. So we are in the expression.
-                 // So we should just append space.
                  append(' ');
              }
              else if (blockStack.length > 0 && (blockStack[blockStack.length-1] === 'ANNOTATION_ARGS' || blockStack[blockStack.length-1] === 'RECORD_ARGS' || blockStack[blockStack.length-1] === 'PAREN_BLOCK')) {
@@ -451,24 +458,20 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                     // Check if it's a Record definition
                     // record Name ( ... )
                     if (i >= 2 && tokens[i-2].text === 'record') {
-                         let hasNewlines = false;
-                        let tempBalance = 0;
-                        for(let k=i+1; k<tokens.length; k++) {
-                            if (tokens[k].text === '(') tempBalance++;
-                            if (tokens[k].text === ')') {
-                                if (tempBalance === 0) break;
-                                tempBalance--;
-                            }
-                            if (k>i && tokens[k].line > tokens[k-1].line) {
-                                hasNewlines = true;
-                                break;
-                            }
-                        }
-                        if (hasNewlines) {
-                            blockStack.push('RECORD_ARGS');
-                            indentLevel++;
-                            pushLine();
-                        }
+                         blockStack.push('RECORD_ARGS');
+                         indentLevel++;
+                         // Force newline for first arg if there are args
+                         // If empty (), don't pushLine?
+                         if (next && next.text !== ')') {
+                             pushLine();
+                         }
+                    } else if (i >= 1 && tokens[i-1].text === 'record') {
+                         // record ( ... ) ? uncommon but possible
+                         blockStack.push('RECORD_ARGS');
+                         indentLevel++;
+                         if (next && next.text !== ')') {
+                             pushLine();
+                         }
                     } else {
                          // General Parenthesized Block (Method Call, Def, If, etc.)
                          // If content has newlines, indent.
@@ -488,21 +491,6 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                         if (hasNewlines) {
                             blockStack.push('PAREN_BLOCK');
                             indentLevel++;
-                            // Don't pushLine immediately for ( ? usually ( \n arg
-                            // But usually we want: method(\n    arg
-                            // If next token is on new line, pushLine will happen naturally via blank line logic?
-                            // No, blank line logic is for >1 newlines.
-                            // We need to detect if next token is on next line.
-                            // But `pushLine` forces a newline.
-                            // If we just indent, subsequent `append` will use `getIndent`.
-                            // But we need to ensure the first argument is on a new line?
-                            // Standard: method(\n arg
-                            // or method(arg1, \n arg2)
-                            // If we detected newlines, we should encourage wrapping.
-                            // Let's not force pushLine immediately unless next token is effectively on new line.
-                            // But if we just indent, and next token is on same line, it won't be indented.
-                            // So let's rely on original newlines for the *first* argument.
-                            // But for subsequent args (after comma), we force pushLine.
                         }
                     }
                 }
@@ -514,22 +502,16 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              let popped = false;
              if (blockStack.length > 0) {
                  const top = blockStack[blockStack.length-1];
-                 // Check if top matches what we are popping
-                 // We don't have explicit tracking of which '(' pushed what, but we can infer
-                 // Actually, we should probably check if parenDepth matches what we expect for the top block?
-                 // But for now, relying on stack order.
                  if (top === 'ANNOTATION_ARGS' || top === 'RECORD_ARGS' || top === 'PAREN_BLOCK') {
-                     // Only pop if this ) closes the block.
-                     // Since we increment indentLevel, we should only pop when parenDepth drops below where it started?
-                     // But we don't track start depth.
-                     // However, we only push one of these PER '('.
-                     // So one ')' should pop one.
                      blockStack.pop();
                      indentLevel--;
                      popped = true;
 
                      if (currentLine.trim() !== '') {
-                         if (token.line > prev!.line) {
+                         // If RECORD_ARGS or ANNOTATION_ARGS, we want closing paren on new line if multiline
+                         if (top === 'RECORD_ARGS' || top === 'ANNOTATION_ARGS') {
+                             pushLine();
+                         } else if (token.line > prev!.line) {
                              pushLine();
                          }
                      }
@@ -539,7 +521,6 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void'].includes(next.text)) {
                  pushLine();
              } else if (popped && next && next.type === TokenType.Preprocessor) {
-                 // After closing annotation args, if next is another annotation, newline
                  pushLine();
              }
         }
