@@ -299,9 +299,7 @@ export function formatCppDeep(text: string): string {
                 indentLevel = Math.max(0, indentLevel - 1);
             } else if (type === 'NAMESPACE') {
                 // Namespace indentation (Google Style: 0 indent)
-                // We handled indent increase in '{', check below.
-                // Wait, if we didn't indent for namespace, we don't dedent.
-                // Logic is in '{' handler.
+                // We do NOT dedent if we didn't indent.
             } else if (type === 'LAMBDA') {
                 indentLevel = Math.max(0, indentLevel - 1);
             }
@@ -512,6 +510,9 @@ export function formatCppDeep(text: string): string {
         let extraSpaces = 0;
 
         if (token.text === 'public' || token.text === 'private' || token.text === 'protected') {
+            // Google Style: public: indented 1 space relative to class.
+            // If class is at indent 0, inside is 1 (2 spaces). public: should be 1 space.
+            // So indentOffset = -1 (parent level), extraSpaces = 1.
             indentOffset = -1;
             extraSpaces = 1;
         }
@@ -519,6 +520,14 @@ export function formatCppDeep(text: string): string {
         if (inInitializerList) {
              if (token.text === ':') {
                  if (currentLine.trim() !== '') pushLine();
+                 // Continuation indent (4 spaces) relative to function (which is indentLevel)
+                 // But wait, indentLevel was incremented at function {.
+                 // No, usually constructor() : ... {
+                 // The : comes before {.
+                 // So indentLevel is class level (e.g. 1).
+                 // Constructor decl is at level 1 (2 spaces).
+                 // Init list should be +4 spaces = 6 spaces.
+                 // So indentOffset = 2 (2 * 2 = 4 spaces extra).
                  indentOffset = 2;
                  extraSpaces = 0;
              } else if (token.text === ',') {
@@ -611,6 +620,7 @@ export function formatCppDeep(text: string): string {
             if (isNamespace) {
                 braceStack.push('NAMESPACE');
                 // Google Style: Namespaces do not indent
+                // So indentLevel stays same.
             } else if (isClass) {
                 braceStack.push('CLASS');
                 indentLevel++;
