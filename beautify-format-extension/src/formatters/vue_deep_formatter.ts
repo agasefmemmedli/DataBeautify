@@ -1,3 +1,4 @@
+
 import { HTMLTokenizer, TokenType, Token } from './html_tokenizer';
 import { formatJSDeep } from './js_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
@@ -39,7 +40,6 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
         const token = tokens[i];
 
         if (token.type === TokenType.TagOpen) {
-            // Buffer attributes until TagEnd or TagSelfClose
             const tagNameOriginal = token.text.substring(1); // Remove <
             const tagNameLower = tagNameOriginal.toLowerCase();
             const isVoid = voidTags.has(tagNameLower);
@@ -49,17 +49,23 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
             const attributes: { name: string, value?: string }[] = [];
             let j = i + 1;
             let tagEndToken: Token | null = null;
+            let tagSelfClosing = false;
 
+            // Collect attributes
             while (j < tokens.length) {
                 const t = tokens[j];
-                if (t.type === TokenType.TagEnd || t.type === TokenType.TagSelfClose) {
+                if (t.type === TokenType.TagEnd) {
                     tagEndToken = t;
-                    i = j; // Advance main loop
+                    i = j; // Update i
+                    break;
+                } else if (t.type === TokenType.TagSelfClose) {
+                    tagEndToken = t;
+                    tagSelfClosing = true;
+                    i = j; // Update i
                     break;
                 } else if (t.type === TokenType.AttributeName) {
                     const name = t.text;
                     let value: string | undefined = undefined;
-                    // Check if next token is value
                     if (j + 1 < tokens.length && tokens[j + 1].type === TokenType.AttributeValue) {
                         value = tokens[j + 1].text;
                         j++; // Skip value token
@@ -87,159 +93,131 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                 }
             }
 
-            // Sort Attributes (except for script/style where order might matter less but usually safe)
+            // Sort Attributes
             if (sortAttributes) {
                 const priority = ['v-if', 'v-for', 'v-model', 'v-bind', 'v-on', 'ref', 'key', 'id', 'name', 'class', 'style', 'src', 'href', 'type', 'lang', 'scoped'];
                 attributes.sort((a, b) => {
-                    // Check priority list
                     const getPriority = (name: string) => {
-                        if (name.startsWith('v-')) return 0; // Directives first
-                        if (name.startsWith(':')) return 1; // Bindings
-                        if (name.startsWith('@')) return 2; // Events
+                        if (name.startsWith('v-')) return 0;
+                        if (name.startsWith(':')) return 1;
+                        if (name.startsWith('@')) return 2;
                         const idx = priority.indexOf(name);
                         return idx !== -1 ? idx + 3 : 99;
                     };
-
                     const pA = getPriority(a.name);
                     const pB = getPriority(b.name);
-
                     if (pA !== pB) return pA - pB;
                     return a.name.localeCompare(b.name);
                 });
             }
 
-            // Format Open Tag
-            const selfClosing = tagEndToken?.type === TokenType.TagSelfClose || isVoid;
-            const closingStr = (tagEndToken?.type === TokenType.TagSelfClose || isVoid) ? ' />' : '>';
+            // Construct Tag String
+            const closingStr = (tagSelfClosing || isVoid) ? ' />' : '>';
+            let tagStr = `<${tagNameOriginal}`;
 
-            let tagLine = `<${tagNameOriginal}`;
-
-            // Attribute Formatting
-            // Try single line first
-            let singleLineAttrs = '';
+            let attrsStr = '';
             for (const attr of attributes) {
-                singleLineAttrs += ` ${attr.name}`;
+                attrsStr += ` ${attr.name}`;
                 if (attr.value !== undefined) {
-                    // Normalize to double quotes and escape
-                    const escaped = attr.value.replace(/"/g, '&quot;');
-                    singleLineAttrs += `="${escaped}"`;
+                    let val = attr.value;
+                    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                         val = val.substring(1, val.length - 1);
+                    }
+                    val = val.replace(/"/g, '&quot;');
+                    attrsStr += `="${val}"`;
                 }
             }
 
             const currentIndent = getIndent(indentLevel);
-            const totalLen = (currentIndent + tagLine + singleLineAttrs + closingStr).length;
 
-            if (attributes.length > 0 && totalLen > printWidth) {
-                // Multi-line mode
-                formattedLines.push(currentIndent + tagLine);
-                for (const attr of attributes) {
-                    let attrStr = ` ${attr.name}`;
-                    if (attr.value !== undefined) {
-                        const escaped = attr.value.replace(/"/g, '&quot;');
-                        attrStr += `="${escaped}"`;
-                    }
-                    formattedLines.push(getIndent(indentLevel + 1) + attrStr.trim());
-                }
-                formattedLines.push(currentIndent + closingStr);
+            if ((currentIndent.length + tagStr.length + attrsStr.length + closingStr.length) > printWidth && attributes.length > 0) {
+                 formattedLines.push(currentIndent + tagStr);
+                 for (const attr of attributes) {
+                     let attrLine = ` ${attr.name}`;
+                     if (attr.value !== undefined) {
+                         let val = attr.value;
+                         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                              val = val.substring(1, val.length - 1);
+                         }
+                         val = val.replace(/"/g, '&quot;');
+                         attrLine += `="${val}"`;
+                     }
+                     formattedLines.push(getIndent(indentLevel + 1) + attrLine.trim());
+                 }
+                 formattedLines.push(currentIndent + closingStr);
             } else {
-                // Single line mode
-                formattedLines.push(currentIndent + tagLine + singleLineAttrs + closingStr);
+                 formattedLines.push(currentIndent + tagStr + attrsStr + closingStr);
             }
 
-            if (!selfClosing) {
+            // Handle Script/Style Content
+            if ((tagNameLower === 'script' || tagNameLower === 'style') && !tagSelfClosing) {
+                 // Expect next token to be content (Text/CDATA)
+                 if (i + 1 < tokens.length && (tokens[i+1].type === TokenType.Text || tokens[i+1].type === TokenType.CDATA)) {
+                     const contentToken = tokens[i+1];
+                     const contentText = contentToken.text;
+
+                     // Format Content
+                     let formattedContent = contentText;
+                     try {
+                        if (tagNameLower === 'script') {
+                             formattedContent = formatJSDeep(contentText, { tabSize, insertSpaces, printWidth });
+                        } else {
+                             if (lang === 'scss') formattedContent = formatSCSSDeep(contentText, { tabSize, insertSpaces });
+                             else if (lang === 'less') formattedContent = formatLessDeep(contentText, { tabSize, insertSpaces });
+                             else if (lang === 'sass') formattedContent = formatSassDeep(contentText);
+                             else formattedContent = formatCSSDeep(contentText, { tabSize, insertSpaces });
+                        }
+                     } catch (e) {
+                         // Fallback
+                     }
+
+                     // Indent and push
+                     const lines = formattedContent.split('\n');
+                     const contentIndentLevel = indentLevel + 1;
+
+                     for (const line of lines) {
+                         const trimmedLine = line.trim();
+                         if (trimmedLine.length > 0) {
+                             formattedLines.push(getIndent(contentIndentLevel) + trimmedLine);
+                         } else {
+                             formattedLines.push('');
+                         }
+                     }
+
+                     i++; // Consume content
+                 }
+            } else if (!tagSelfClosing && !isVoid) {
                 indentLevel++;
             }
 
-            // Optimization: Keep empty or short elements on one line
-            // Check if we can keep closing tag on same line
-            if (tagEndToken && tagEndToken.type === TokenType.TagEnd && !selfClosing && !inPre && tagNameLower !== 'script' && tagNameLower !== 'style') {
-                let nextIdx = j + 1;
-                // Empty element <tag></tag>
-                if (nextIdx < tokens.length && tokens[nextIdx].type === TokenType.TagClose) {
-                    const closeToken = tokens[nextIdx];
+            // Optimization for simple elements <span class="spinner"></span>
+            if (!tagSelfClosing && !isVoid && !inPre && tagNameLower !== 'script' && tagNameLower !== 'style') {
+                // Lookahead for closing tag
+                if (i + 1 < tokens.length && tokens[i+1].type === TokenType.TagClose) {
+                    const closeToken = tokens[i+1];
                     const closeTagName = closeToken.text.substring(2).toLowerCase();
                     if (closeTagName === tagNameLower) {
+                        // Check if we can collapse
                         const lastLineIdx = formattedLines.length - 1;
-                        if (lastLineIdx >= 0) {
+                        const lastLine = formattedLines[lastLineIdx];
+                        const projectedLen = lastLine.length + closeToken.text.length + 1; // +1 for >
+
+                        if (projectedLen <= printWidth) {
                             formattedLines[lastLineIdx] += `</${closeTagName}>`;
-                        }
-                        indentLevel--; // Revert indent
-                        // Consume optional TagEnd >
-                        let k = nextIdx + 1;
-                        if (k < tokens.length && tokens[k].type === TokenType.TagEnd) {
+
+                            // Consume TagClose and TagEnd
+                            let k = i + 1;
+                            // TagClose
                             k++;
-                        }
-                        i = k - 1; // Advance loop
-                        continue;
-                    }
-                }
-                // Simple text content <tag>text</tag>
-                if (nextIdx < tokens.length && tokens[nextIdx].type === TokenType.Text) {
-                    const textToken = tokens[nextIdx];
-                    if (nextIdx + 1 < tokens.length && tokens[nextIdx + 1].type === TokenType.TagClose) {
-                        const closeToken = tokens[nextIdx + 1];
-                        const closeTagName = closeToken.text.substring(2).toLowerCase();
-                        if (closeTagName === tagNameLower) {
-                            const textContent = textToken.text.trim();
-                            const lastLine = formattedLines[formattedLines.length - 1] || '';
-                            const projectedLen = lastLine.length + textContent.length + closeToken.text.length + 1; // +1 for >
-
-                            if (projectedLen <= printWidth && !textContent.includes('\n')) {
-                                formattedLines[formattedLines.length - 1] += textContent + `</${closeTagName}>`;
-                                indentLevel--; // Revert indent
-                                // Consume optional TagEnd >
-                                let k = nextIdx + 2;
-                                if (k < tokens.length && tokens[k].type === TokenType.TagEnd) {
-                                    k++;
-                                }
-                                i = k - 1; // Advance loop
-                                continue;
+                            // TagEnd
+                            if (k < tokens.length && tokens[k].type === TokenType.TagEnd) {
+                                k++;
                             }
+
+                            i = k - 1; // Advance main loop
+                            indentLevel--; // Revert indent (it was incremented above)
                         }
                     }
-                }
-            }
-
-            // Handle Content for Script/Style specifically if it follows immediately
-            if ((tagNameLower === 'script' || tagNameLower === 'style') && !selfClosing) {
-                // The next token should be Text, then TagClose
-                if (i + 1 < tokens.length && tokens[i + 1].type === TokenType.Text) {
-                    const contentToken = tokens[i + 1];
-                    let formattedContent = contentToken.text;
-
-                    // Format based on lang
-                    try {
-                        if (tagNameLower === 'script') {
-                            // JS/TS
-                            formattedContent = formatJSDeep(contentToken.text, { tabSize, insertSpaces, printWidth });
-                        } else if (tagNameLower === 'style') {
-                            // CSS/SCSS/LESS/SASS
-                            if (lang === 'scss') {
-                                formattedContent = formatSCSSDeep(contentToken.text, { tabSize, insertSpaces });
-                            } else if (lang === 'less') {
-                                formattedContent = formatLessDeep(contentToken.text, { tabSize, insertSpaces });
-                            } else if (lang === 'sass') {
-                                formattedContent = formatSassDeep(contentToken.text);
-                            } else {
-                                formattedContent = formatCSSDeep(contentToken.text, { tabSize, insertSpaces });
-                            }
-                        }
-                    } catch (e) {
-                        // Fallback to original text if formatter fails
-                        console.warn(`Failed to format ${tagNameLower} block:`, e);
-                    }
-
-                    // Indent the formatted content
-                    const lines = formattedContent.split('\n');
-                    for (const line of lines) {
-                        if (line.trim().length > 0) {
-                            formattedLines.push(getIndent(indentLevel) + line);
-                        } else if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-                            formattedLines.push('');
-                        }
-                    }
-
-                    i++; // Skip Text token
                 }
             }
 
@@ -254,35 +232,24 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                     i = j;
                     break;
                 }
-                // Skip whitespace/comments/attributes inside closing tag if any
-                if (tokens[j].type !== TokenType.Whitespace && tokens[j].type !== TokenType.Comment && tokens[j].type !== TokenType.AttributeName) {
-                     break;
-                }
                 j++;
             }
 
-            // Dedent
-            indentLevel = Math.max(0, indentLevel - 1);
+            if (tagNameLower !== 'script' && tagNameLower !== 'style') {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+
             formattedLines.push(getIndent(indentLevel) + `</${tagNameLower}>`);
 
         } else if (token.type === TokenType.Text) {
-            if (inPre) {
-                formattedLines.push(token.text);
-            } else {
-                const trimmed = token.text.trim();
-                if (trimmed.length > 0) {
-                    // Indent text content
-                    const lines = token.text.split('\n');
-                    for (const line of lines) {
-                        const lineTrimmed = line.trim();
-                        if (lineTrimmed.length > 0) {
-                             formattedLines.push(getIndent(indentLevel) + lineTrimmed);
-                        }
-                    }
-                }
-            }
-        } else if (token.type === TokenType.Comment || token.type === TokenType.CDATA || token.type === TokenType.Doctype || token.type === TokenType.PI) {
-            formattedLines.push(getIndent(indentLevel) + token.text);
+             const trimmed = token.text.trim();
+             if (trimmed.length > 0) {
+                 if (inPre) {
+                     formattedLines.push(token.text);
+                 } else {
+                     formattedLines.push(getIndent(indentLevel) + trimmed);
+                 }
+             }
         }
     }
 
