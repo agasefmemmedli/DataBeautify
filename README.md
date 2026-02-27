@@ -1,5 +1,6 @@
 # To-Improve List
 
+- [x] Dart (Deep Formatting Implemented)
 - [x] Swift (Deep Formatting Implemented)
 - [x] Kotlin (Deep Formatting Implemented)
 - [x] Python (Deep Formatting Implemented)

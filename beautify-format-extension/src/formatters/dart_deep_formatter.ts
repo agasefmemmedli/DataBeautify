@@ -54,7 +54,7 @@ export function formatDartDeep(text: string): string {
 
     // Switch State Tracking
     // Stack stores the indent level of the 'switch' keyword
-    const switchStack: { indent: number, inCase: boolean }[] = [];
+    const switchStack: { indent: number, inCase: boolean, isExpression: boolean }[] = [];
 
     // Block State Tracking (True = Structural/Expanded, False = Inline)
     const blockStack: boolean[] = [];
@@ -67,7 +67,7 @@ export function formatDartDeep(text: string): string {
 
     const isType = (t: Token) => {
         // Simple heuristic: Capitalized or built-in types
-        return /^[A-Z]/.test(t.text) || ['int', 'double', 'num', 'bool', 'dynamic', 'void', 'var', 'String', 'List', 'Map', 'Set', 'Future', 'Stream'].includes(t.text);
+        return /^[A-Z]/.test(t.text) || ['int', 'double', 'num', 'bool', 'dynamic', 'void', 'var', 'String', 'List', 'Map', 'Set', 'Future', 'Stream', 'final', 'const', 'late'].includes(t.text);
     };
 
     for (let i = 0; i < enhancedTokens.length; i++) {
@@ -96,12 +96,19 @@ export function formatDartDeep(text: string): string {
         // Handle Switch Case/Default Dedent (Before processing)
         if (switchStack.length > 0) {
             const currentSwitch = switchStack[switchStack.length - 1];
-            // If we encounter 'case' or 'default', we should be at switchIndent + 1
-            if (token.text === 'case' || token.text === 'default') {
-                // Ensure we are indented correctly relative to switch
-                // We manually force indentLevel for case labels
-                indentLevel = currentSwitch.indent + 1;
-                currentSwitch.inCase = false; // We are at label, not body
+
+            if (!currentSwitch.isExpression) {
+                // Statement Switch: If we encounter 'case' or 'default', we should be at switchIndent + 1
+                if (token.text === 'case' || token.text === 'default') {
+                    // Ensure we are indented correctly relative to switch
+                    // We manually force indentLevel for case labels
+                    indentLevel = currentSwitch.indent + 1;
+                    currentSwitch.inCase = false; // We are at label, not body
+                }
+            } else {
+                 // Expression Switch: 'case' keyword not used (usually). It uses patterns.
+                 // e.g. 0 => 'zero',
+                 // We don't have 'case' keyword.
             }
         }
 
@@ -118,9 +125,30 @@ export function formatDartDeep(text: string): string {
                 if (p.type === TokenType.Identifier || p.text === 'get' || p.text === 'set') {
                     return true;
                 }
-                return false;
+                // Switch expression: switch (x) { ... }
+                // if p is switch, it IS structural/block
+                if (p.text === 'switch') return true;
+
+                // Map literal? var x = { ... }
+                // Set literal? var x = { ... }
+                // If previous was = or : or , or ( or [ or return, likely literal -> inline
+                if (['=', ':', ',', '(', '[', 'return', '=>'].includes(p.text)) return false;
+
+                return false; // Default to inline for unknown
             };
-            blockStack.push(isStructuralBlock(prev));
+
+            // Check for map literal explicitly
+            let isMap = false;
+            if (prev && ['=', ':', 'return', '=>', '(', '[', ','].includes(prev.text)) isMap = true;
+            if (prev && prev.type === TokenType.Identifier && next && next.text === ':') isMap = true; // named param map?
+
+            // If indentation level is deep, we might want to expand even if it's a map
+            // But standard Dart style expands maps if they are multi-line.
+            // We rely on token.precedingNewlines to detect user intent for maps?
+            // Or force expand if long?
+            // For now, let's track if it's structural (Control Flow / Class) vs Literal.
+            const structural = isStructuralBlock(prev);
+            blockStack.push(structural);
         }
 
         let blockJustPoppedStructural = false;
@@ -148,7 +176,8 @@ export function formatDartDeep(text: string): string {
                 forceNewline = false; // Collapse empty blocks
             } else {
                 // If the block was structural, force newline.
-                // If it was inline, respect user newline (already set).
+                // If it was inline (map/set), respect user newline (already set) OR force if multi-line content?
+                // For deep formatting, we usually enforce newlines for structural blocks.
                 if (blockJustPoppedStructural) {
                     forceNewline = true;
                 }
@@ -156,14 +185,12 @@ export function formatDartDeep(text: string): string {
         }
         if (prev && prev.text === '{') {
             if (token.text !== '}') {
-                // Check current block type (top of stack)
-                // Note: We pushed to stack for current '{' (prev) in previous iteration?
-                // Wait, we process 'token'. 'prev' was processed in previous loop step.
-                // So blockStack.top corresponds to 'prev' (the '{' we just passed).
                 const isStructural = blockStack.length > 0 ? blockStack[blockStack.length - 1] : true;
-
                 if (isStructural) {
                     forceNewline = true;
+                } else {
+                    // For literals, if user had newline, keep it.
+                    // If items inside are complex, maybe force?
                 }
             }
         }
@@ -188,6 +215,9 @@ export function formatDartDeep(text: string): string {
         if (prev && prev.type === TokenType.Decorator && token.type === TokenType.Keyword) {
             if (inParen === 0) forceNewline = true;
         }
+        if (prev && prev.type === TokenType.Decorator && token.type === TokenType.Identifier) { // @override void
+             if (inParen === 0) forceNewline = true;
+        }
 
         // Cascades
         if (token.text === '..' || token.text === '?..') {
@@ -196,16 +226,24 @@ export function formatDartDeep(text: string): string {
 
         // Switch Case/Default
         if (switchStack.length > 0) {
-            if (token.text === 'case' || token.text === 'default') {
-                forceNewline = true;
-            }
-            if (prev && prev.text === ':') {
-                 const currentSwitch = switchStack[switchStack.length - 1];
-                 // If previous token was colon and we are in a switch (and it was a case label colon)
-                 // We need to check if we just finished a case label.
-                 if (!currentSwitch.inCase) {
+            const currentSwitch = switchStack[switchStack.length - 1];
+            if (!currentSwitch.isExpression) {
+                if (token.text === 'case' || token.text === 'default') {
+                    forceNewline = true;
+                }
+                if (prev && prev.text === ':') {
+                     // If previous token was colon and we are in a switch (and it was a case label colon)
+                     // We need to check if we just finished a case label.
+                     if (!currentSwitch.inCase) {
+                          forceNewline = true;
+                          currentSwitch.inCase = true; // Enter body
+                     }
+                }
+            } else {
+                 // Switch Expression
+                 // Comma separates cases
+                 if (prev && prev.text === ',') {
                       forceNewline = true;
-                      currentSwitch.inCase = true; // Enter body
                  }
             }
         }
@@ -219,6 +257,7 @@ export function formatDartDeep(text: string): string {
         // Note: This simple heuristic (inBrace >= 1) might incorrectly identify ternary operators in field initializers if they end with ')'
         if (token.text === ':' && inParen === 0 && inBrace >= 1 && switchStack.length === 0) {
             if (prev && prev.text === ')') {
+                 // Likely constructor initializer list start
                  forceNewline = true;
                  inInitializerList = true; // Enter Initializer List
             }
@@ -228,6 +267,25 @@ export function formatDartDeep(text: string): string {
         if (inInitializerList && (token.text === '{' || token.text === ';')) {
             inInitializerList = false;
         }
+
+        // Class Member Spacing
+        if (inBrace === 1 && indentLevel === 1) {
+             if ((token.type === TokenType.Keyword || isType(token) || token.type === TokenType.Decorator) &&
+                 prev && (prev.text === ';' || prev.text === '}') &&
+                 !['else', 'catch', 'on'].includes(token.text)) {
+
+                  if (prev.text === '}') {
+                       blankLine = true;
+                       forceNewline = true;
+                  }
+
+                  if (token.type === TokenType.Decorator && prev.text === ';') {
+                      blankLine = true;
+                      forceNewline = true;
+                  }
+             }
+        }
+
 
         // Append to output
         if (forceNewline || (currentLine.length === 0 && output.length > 0)) {
@@ -240,23 +298,38 @@ export function formatDartDeep(text: string): string {
             let currentIndent = indentLevel;
 
             if (inInitializerList) {
-                // If we are in initializer list, and it's a new line, we should be indented +2 relative to constructor start (indentLevel)
+                // Initializer list is indented +2 relative to constructor (which is at indentLevel)
+                // Wait, if indentLevel is 1 (inside class), constructor is at 1.
+                // Initializer list should be at 1 + 2 = 3.
+                // But previously I saw it wasn't indented enough.
+                // Let's force +2.
                 currentIndent = indentLevel + 2;
             }
 
             // Switch Case Body Indentation
             if (switchStack.length > 0) {
                 const currentSwitch = switchStack[switchStack.length - 1];
-                if (currentSwitch.inCase && token.text !== 'case' && token.text !== 'default' && token.text !== '}') {
-                    // We are in case body, add extra indent
-                    currentIndent = currentSwitch.indent + 2;
+                if (!currentSwitch.isExpression) {
+                    if (currentSwitch.inCase && token.text !== 'case' && token.text !== 'default' && token.text !== '}') {
+                        // We are in case body, add extra indent
+                        currentIndent = currentSwitch.indent + 2;
+                    }
                 }
             }
 
             // Adjust indent for Cascades
+            // Cascade should align with the receiver? Or just indent + 1 level?
+            // Standard Dart style:
+            // var list = [1, 2, 3]
+            //   ..add(4)
+            //   ..add(5);
+            // Indent is +2 spaces relative to 'var'.
+            // If 'var' is at level 1, cascade is at level 1 + 2?
+            // Yes, indentLevel handles block depth. Cascades add extra indentation.
             if (token.text === '..' || token.text === '?..') {
                 currentIndent += 2;
             }
+
             // Adjust for constructor initializer colon
             if (token.text === ':') {
                  if (prev && prev.text === ')') {
@@ -310,7 +383,7 @@ export function formatDartDeep(text: string): string {
                           if (switchStack.length > 0) {
                                const currentSwitch = switchStack[switchStack.length - 1];
                                // If potentially a case label colon
-                               if (!currentSwitch.inCase) {
+                               if (!currentSwitch.isExpression && !currentSwitch.inCase) {
                                    spaceBefore = false;
                                }
                           }
@@ -343,6 +416,8 @@ export function formatDartDeep(text: string): string {
                           } else {
                                spaceBefore = true;
                           }
+                     } else if (token.text === '=>') {
+                          spaceBefore = true;
                      } else {
                           spaceBefore = true;
                      }
@@ -425,8 +500,17 @@ export function formatDartDeep(text: string): string {
                       // Skip comments between ( and switch
                       while (j >= 0 && enhancedTokens[j].type === TokenType.Comment) j--;
 
+                      // Check if it's a Switch Statement or Switch Expression
+                      // Statement: switch (x) { ... }
+                      // Expression: var x = switch (y) { ... };
                       if (j >= 0 && enhancedTokens[j].text === 'switch') {
-                           switchStack.push({ indent: indentLevel - 1, inCase: false }); // indentLevel was just incremented, so switch is at indentLevel-1
+                           // Determine if expression by checking what's before 'switch'
+                           let k = j - 1;
+                           while (k >= 0 && enhancedTokens[k].type === TokenType.Comment) k--;
+
+                           const isExpression = k >= 0 && (enhancedTokens[k].text === '=' || enhancedTokens[k].text === ':' || enhancedTokens[k].text === 'return' || enhancedTokens[k].text === '=>' || enhancedTokens[k].text === '(');
+
+                           switchStack.push({ indent: indentLevel - 1, inCase: false, isExpression });
                       }
                  }
             }
@@ -476,32 +560,53 @@ function sortDartImports(text: string): string {
             else if (line.includes("'package:") || line.includes('"package:')) type = 1;
 
             importLines.push({ line: lines[i], type, index: i });
-        } else if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('library ')) {
-            if (firstImportIndex !== -1 && !line.startsWith('//') && line !== '' && !line.startsWith('library ')) {
-                 break;
-            }
-            // Update last import index if we are inside a block of imports+comments
-            // if (firstImportIndex !== -1) {
-            //    lastImportIndex = i;
-            // }
-            // Reverted this change to avoid including trailing blanks/comments that shouldn't be part of the sort block
         } else if (firstImportIndex !== -1) {
-             break;
+            // Stop if we hit a non-blank, non-comment line that is not an import/library
+            // But allow blank lines and comments if they look like part of the block?
+            // Actually, safest is to stop at ANY non-import/non-library line.
+            // But usually there are blank lines in between.
+            if (line === '') {
+                // blank line, continue
+            } else if (line.startsWith('library ')) {
+                // library directive, often before imports
+                // If it was BEFORE imports, we haven't set firstImportIndex yet.
+                // If it is AFTER imports? Valid Dart? Yes.
+                // But usually library is first.
+                break;
+            } else if (line.startsWith('//') || line.startsWith('/*')) {
+                // Comments.
+                // If we encounter a comment, is it part of the import block?
+                // If it's a section header "class Foo", it breaks.
+                // If it's "// Imports for JSON", it might be part.
+                // Heuristic: If comment is followed by import, it is part.
+                // But we don't know yet.
+                // Safe bet: Sort ONLY if the block is pure imports/exports + blanks.
+                // If we see a comment, we terminate the block to be safe.
+                // Wait, my previous failure was because `// Annotations` was treated as part of the block?
+                // `// Annotations` came AFTER `import ... bar`.
+                // So I should STOP at `// Annotations`.
+                break;
+            } else {
+                // Code or other directive
+                break;
+            }
         }
     }
 
     if (importLines.length === 0) return text;
 
-    let hasComments = false;
-    for(let i = firstImportIndex; i <= lastImportIndex; i++) {
-        const line = lines[i].trim();
-        if (line.startsWith('//') || line.startsWith('/*')) {
-            hasComments = true;
-            break;
-        }
-    }
+    // Check if we captured valid range
+    // Since we break on comment, we don't need to check hasComments unless we want to avoid sorting *interleaved* comments?
+    // We didn't capture comments in importLines.
+    // So we just replace lines[firstImportIndex...lastImportIndex] with sorted.
+    // BUT, lastImportIndex might not have been updated for the blank lines at the end.
+    // lastImportIndex tracks the last actual import line.
 
-    if (hasComments) return text;
+    // We should include blank lines *between* imports in the range we replace?
+    // Actually, `sortDartImports` rewrites the whole block with new blank lines.
+    // So we should replace from `firstImportIndex` to `lastImportIndex` (inclusive of the last import).
+    // Any blank lines *after* `lastImportIndex` are preserved as is (outside the splice).
+    // Any blank lines *between* first and last are absorbed.
 
     importLines.sort((a, b) => {
         if (a.type !== b.type) return a.type - b.type;
@@ -516,18 +621,23 @@ function sortDartImports(text: string): string {
     const sortedBlock: string[] = [];
     if (dartImports.length > 0) {
         sortedBlock.push(...dartImports);
-        if (packageImports.length > 0 || relativeImports.length > 0 || exports.length > 0) sortedBlock.push('');
+        sortedBlock.push('');
     }
     if (packageImports.length > 0) {
         sortedBlock.push(...packageImports);
-        if (relativeImports.length > 0 || exports.length > 0) sortedBlock.push('');
+        sortedBlock.push('');
     }
     if (relativeImports.length > 0) {
         sortedBlock.push(...relativeImports);
-        if (exports.length > 0) sortedBlock.push('');
+        sortedBlock.push('');
     }
     if (exports.length > 0) {
         sortedBlock.push(...exports);
+    }
+
+    // Remove trailing empty line in sorted block if present
+    if (sortedBlock.length > 0 && sortedBlock[sortedBlock.length - 1] === '') {
+        sortedBlock.pop();
     }
 
     lines.splice(firstImportIndex, lastImportIndex - firstImportIndex + 1, ...sortedBlock);
