@@ -309,7 +309,9 @@ export class DartTokenizer {
             'external', 'factory', 'false', 'final', 'finally', 'for', 'function', 'get', 'hide', 'if', 'implements',
             'import', 'in', 'interface', 'is', 'late', 'library', 'mixin', 'new', 'null', 'on', 'operator', 'part',
             'required', 'rethrow', 'return', 'set', 'show', 'static', 'super', 'switch', 'sync', 'this', 'throw',
-            'true', 'try', 'typedef', 'var', 'void', 'while', 'with', 'yield', 'record'
+            'true', 'try', 'typedef', 'var', 'void', 'while', 'with', 'yield', 'record',
+            // Data Beautifier Added Keywords
+            'when', 'sealed', 'base', 'interface'
         ];
 
         if (keywords.includes(text)) {
