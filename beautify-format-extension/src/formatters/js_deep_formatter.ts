@@ -36,6 +36,70 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
     let spacePending = false;
     let pendingSwitch = false;
     let inJSXTag = false;
+    let inDecorator = false;
+
+    // Helper: Get next non-whitespace/comment token
+    const getNextRealToken = (index: number): Token | null => {
+        for (let k = index + 1; k < tokens.length; k++) {
+            const t = tokens[k];
+            if (t.type !== 'Whitespace' && t.type !== 'LineComment' && t.type !== 'BlockComment') {
+                return t;
+            }
+        }
+        return null;
+    };
+
+    // Helper: Get previous non-whitespace/comment token
+    const getPrevRealToken = (index: number): Token | null => {
+        for (let k = index - 1; k >= 0; k--) {
+            const t = tokens[k];
+            if (t.type !== 'Whitespace' && t.type !== 'LineComment' && t.type !== 'BlockComment') {
+                return t;
+            }
+        }
+        return null;
+    };
+
+    // Helper to identify generic brackets <T>
+    const isGenericOpen = (index: number) => {
+        const prev = getPrevRealToken(index);
+        if (!prev) return false;
+
+        // Allowed before generic open: Identifier, ), >, ]
+        if (prev.type === 'Identifier' || prev.value === ')' || prev.value === '>' || prev.value === ']') {
+            let depth = 1;
+            for (let k = index + 1; k < Math.min(index + 50, tokens.length); k++) {
+                const t = tokens[k];
+                if (t.value === '<') depth++;
+                else if (t.value === '>') {
+                    depth--;
+                    if (depth === 0) return true;
+                }
+                else if (t.value === ';' || t.value === '{' || t.value === '}' || t.value === '(' || t.value === ')') {
+                    return false;
+                }
+            }
+        }
+        return false;
+    };
+
+    const isGenericClose = (index: number) => {
+        let depth = 1;
+        for (let k = index - 1; k >= Math.max(0, index - 50); k--) {
+             const t = tokens[k];
+             if (t.value === '>') depth++;
+             else if (t.value === '<') {
+                 depth--;
+                 if (depth === 0) {
+                     return isGenericOpen(k);
+                 }
+             }
+             else if (t.value === ';' || t.value === '{' || t.value === '}' || t.value === '(' || t.value === ')') {
+                 return false;
+             }
+        }
+        return false;
+    };
 
     // Helper to look ahead for closing brace on same line
     const isShortBlock = (startIndex: number) => {
@@ -72,6 +136,7 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const nextToken = tokens[i + 1];
+        const nextRealToken = getNextRealToken(i);
 
         // --- JSX Handling ---
         if (token.type === 'JSXTagOpen') {
@@ -199,9 +264,30 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             if (newlines > 1) newlinePending = Math.max(newlinePending, 2);
             else if (newlines === 1) newlinePending = Math.max(newlinePending, 1);
             else if (token.value.includes(' ') || token.value.includes('\t')) {
+                // If previous token was < (generic), or next token is > (generic), suppress space
+                // But we need to check if lastToken was specifically a generic open
+                // Since we don't have token index in lastToken, we check tokens[i-1]
+                const prev = getPrevRealToken(i);
+                const next = getNextRealToken(i);
+
+                let suppress = false;
+                // Check previous token < generic
+                let j = i - 1;
+                while (j >= 0 && (tokens[j].type === 'Whitespace' || tokens[j].type === 'LineComment' || tokens[j].type === 'BlockComment')) {
+                    j--;
+                }
+                if (j >= 0 && tokens[j].value === '<' && isGenericOpen(j)) suppress = true;
+
+                // Check next token > generic
+                let k = i + 1;
+                while (k < tokens.length && (tokens[k].type === 'Whitespace' || tokens[k].type === 'LineComment' || tokens[k].type === 'BlockComment')) {
+                    k++;
+                }
+                if (k < tokens.length && tokens[k].value === '>' && isGenericClose(k)) suppress = true;
+
                 if (lastToken && (lastToken.type === 'TemplateHead' || lastToken.type === 'TemplateMiddle')) {
                     spacePending = false;
-                } else {
+                } else if (!suppress) {
                     spacePending = true;
                 }
             }
@@ -245,11 +331,47 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             continue;
         }
 
+        // Decorator Handling: ensure newline after decorator expression
+        if (token.type === 'Decorator') {
+            if (newlinePending > 0) {
+                formatted = formatted.trimEnd();
+                formatted += '\n'.repeat(newlinePending) + getIndent(indentLevel);
+                newlinePending = 0;
+            }
+            formatted += token.value; // @
+            spacePending = false; // No space after @
+            inDecorator = true;
+            lastToken = token;
+            continue;
+        }
+
+        // Handle Identifier after Decorator (@foo)
+        if (inDecorator && token.type === 'Identifier') {
+            // This is the decorator name
+            formatted += token.value;
+            // Check if next *real* token is (
+            if (nextRealToken && nextRealToken.value === '(') {
+                // Continue decorator
+            } else {
+                // End of decorator
+                inDecorator = false;
+                newlinePending = 1;
+            }
+            lastToken = token;
+            continue;
+        }
+
         // Open Paren/Bracket
         if (token.value === '(' || token.value === '[') {
              let isBlock = false;
+
              if (nextToken && nextToken.type === 'Whitespace' && nextToken.value.includes('\n')) {
                  isBlock = true;
+             }
+
+             if (inDecorator && token.value === '(') {
+                 // Decorator args
+                 isBlock = false; // Usually inline
              }
 
              if (newlinePending > 0) {
@@ -294,6 +416,12 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             }
 
              formatted += token.value;
+
+             if (inDecorator && token.value === ')') {
+                 inDecorator = false;
+                 newlinePending = 1;
+             }
+
              continue;
         }
 
@@ -337,6 +465,11 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             spacePending = false;
         }
 
+        // 4. Handle Arrow Function =>
+        if (token.value === '=>') {
+            spacePending = true;
+        }
+
         // Apply Newline/Indentation
         if (newlinePending > 0) {
             formatted = formatted.trimEnd();
@@ -351,6 +484,35 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
         }
 
         // Append Token
+        // Generic Handling: Avoid space before < if generic
+        if (token.value === '<' && isGenericOpen(i)) {
+             if (formatted.endsWith(' ')) {
+                 formatted = formatted.trimEnd(); // Remove space before generic <
+             }
+             formatted += token.value;
+             lastToken = token;
+
+             spacePending = false; // Suppress space for next token
+             continue;
+        }
+
+        // Handle > generic close
+        if (token.value === '>' && isGenericClose(i)) {
+             if (formatted.endsWith(' ')) {
+                 formatted = formatted.trimEnd(); // Remove space before generic >
+             }
+             formatted += token.value;
+             lastToken = token;
+             continue;
+        }
+
+        // If it was arrow function =>, ensure space before
+        if (token.value === '=>') {
+             if (!formatted.endsWith(' ')) {
+                 formatted += ' ';
+             }
+        }
+
         formatted += token.value;
 
         // 4. Post-Token Logic
@@ -387,7 +549,7 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             pendingSwitch = true;
         }
 
-        // Indent after colon
+        // Indent after colon (Switch Case)
         if (token.value === ':' && blockStack.length > 0 && blockStack[blockStack.length - 1].type === 'switch') {
              const base = switchBaseLevels[switchBaseLevels.length - 1];
              if (indentLevel === base + 1) {
@@ -403,12 +565,17 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
 
         // Newline after semicolon
         if (token.value === ';') {
-            const lastNewline = formatted.lastIndexOf('\n');
-            const currentLine = formatted.substring(lastNewline + 1);
-            if (!currentLine.includes('for (')) {
-                newlinePending = 1;
-            } else {
+            const currentBlock = blockStack[blockStack.length - 1];
+            if (currentBlock && currentBlock.inline) {
                 spacePending = true;
+            } else {
+                const lastNewline = formatted.lastIndexOf('\n');
+                const currentLine = formatted.substring(lastNewline + 1);
+                if (!currentLine.includes('for (')) {
+                    newlinePending = 1;
+                } else {
+                    spacePending = true;
+                }
             }
         }
 
@@ -416,24 +583,31 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
         if (token.type === 'Keyword') {
              if (['if', 'for', 'while', 'switch', 'catch', 'async'].includes(token.value)) {
                  spacePending = true;
-             } else if (['else', 'return', 'throw', 'export', 'import', 'from', 'case', 'extends', 'implements'].includes(token.value)) {
+             } else if (['else', 'return', 'throw', 'export', 'import', 'from', 'case', 'extends', 'implements', 'type', 'interface'].includes(token.value)) {
                  spacePending = true;
              }
         }
 
         // Space around operators
         if (token.type === 'Operator') {
-             if (!['!', '++', '--', '~', '?.', '.', '?'].includes(token.value)) {
-                 spacePending = true;
-             }
-             if (inJSXTag && token.value === '=') {
-                 spacePending = false;
-             }
-             if (token.value === '?') {
-                 if (nextToken && (nextToken.value === ':' || nextToken.value === '(' || nextToken.value === '.')) {
-                     spacePending = false;
-                 } else {
+             // TS Generics check inside operator logic to handle edge cases
+             if (token.value === '<' && isGenericOpen(i)) {
+                 // Handled above
+             } else if (token.value === '>' && isGenericClose(i)) {
+                 // Handled above
+             } else {
+                 if (!['!', '++', '--', '~', '?.', '.', '?'].includes(token.value)) {
                      spacePending = true;
+                 }
+                 if (inJSXTag && token.value === '=') {
+                     spacePending = false;
+                 }
+                 if (token.value === '?') {
+                     if (nextToken && (nextToken.value === ':' || nextToken.value === '(' || nextToken.value === '.')) {
+                         spacePending = false;
+                     } else {
+                         spacePending = true;
+                     }
                  }
              }
         }
@@ -451,19 +625,17 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
                  if (!(inJSXTag && token.value === '=')) {
                      spacePending = true;
                  }
+
              }
 
-             if (nextToken.type === 'Operator' && !['!', '++', '--', '~', '?.', '.', '(', ')', '[', ']', ';', ','].includes(nextToken.value)) {
-                 if (nextToken.value === '?') {
-                     const nextNext = tokens[i+2];
-                     if (nextNext && (nextNext.value === ':' || nextNext.value === '(')) {
-                         // No space before ?
-                     } else {
-                         spacePending = true;
-                     }
-                 } else {
-                     spacePending = true;
-                 }
+             // Ensure space before => if current is )
+             if (token.value === ')' && nextToken.value === '=>') {
+                 spacePending = true;
+             }
+
+             // Ensure space before { if current is )
+             if (token.value === ')' && nextToken.value === '{') {
+                 spacePending = true;
              }
         }
 
