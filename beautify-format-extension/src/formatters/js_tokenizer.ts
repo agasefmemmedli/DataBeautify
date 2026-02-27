@@ -536,9 +536,17 @@ export function tokenize(text: string): Token[] {
                 (char === '?' && next === '.') ||
                 (char === '?' && next === '?') ||
                 (char === '+' && next === '+') ||
+                (char === '+' && next === '=') ||
                 (char === '-' && next === '-') ||
+                (char === '-' && next === '=') ||
+                (char === '*' && next === '=') ||
+                (char === '/' && next === '=') ||
+                (char === '%' && next === '=') ||
+                (char === '^' && next === '=') ||
                 (char === '&' && next === '&') ||
+                (char === '&' && next === '=') ||
                 (char === '|' && next === '|') ||
+                (char === '|' && next === '=') ||
                 (char === '<' && next === '=') ||
                 (char === '>' && next === '=') ||
                 (char === '=' && next === '=') ||

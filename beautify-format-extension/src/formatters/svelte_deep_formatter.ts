@@ -1,4 +1,6 @@
 import { SvelteTokenizer, TokenType, Token } from './svelte_tokenizer';
+import { formatJSDeep } from './js_deep_formatter';
+import { formatCSSDeep } from './css_deep_formatter';
 
 // --- AST Interfaces ---
 
@@ -333,7 +335,6 @@ export class SvelteParser {
 export class SveltePrinter {
     private ast: SvelteRoot;
     private options: Required<SvelteFormattingOptions>;
-    private jsbeautify: any;
 
     constructor(ast: SvelteRoot, options: any) {
         this.ast = ast;
@@ -342,11 +343,6 @@ export class SveltePrinter {
             insertSpaces: options.insertSpaces !== false,
             printWidth: options.printWidth || 80
         };
-        try {
-            this.jsbeautify = require('js-beautify');
-        } catch(e) {
-            // Ignore if not available
-        }
     }
 
     public print(): string {
@@ -436,23 +432,39 @@ export class SveltePrinter {
             return output + '\n';
         }
 
-        if ((node.tagName === 'script' || node.tagName === 'style') && this.jsbeautify) {
+        if (node.tagName === 'script' || node.tagName === 'style') {
             const content = node.children.map(c => c.type === 'Text' ? (c as SvelteText).content : '').join('');
             if (content.trim()) {
                 let fmt = content;
+                const opts = {
+                    tabSize: this.options.tabSize,
+                    insertSpaces: this.options.insertSpaces,
+                    printWidth: this.options.printWidth
+                };
                 try {
-                    const opts = {
-                        indent_size: this.options.tabSize,
-                        indent_char: this.options.insertSpaces ? ' ' : '\t',
-                        indent_level: level + 1
-                    };
                     if (node.tagName === 'script') {
-                         fmt = this.jsbeautify.js(content, opts);
+                         fmt = formatJSDeep(content, opts);
                     } else {
-                         fmt = this.jsbeautify.css(content, opts);
+                         fmt = formatCSSDeep(content, opts);
                     }
-                } catch(e) {}
-                output += '\n' + fmt + '\n' + indent + `</${node.tagName}>\n`;
+                } catch(e) {
+                    // Fallback to original content if deep formatting fails (though formatters usually return something)
+                    console.error(`Error formatting ${node.tagName} content:`, e);
+                }
+
+                // Re-indent content
+                // formatJSDeep/CSSDeep return unindented (base level 0) string usually
+                // But formatCSSDeep might return indented relative to root?
+                // Let's assume they return 0-level indentation. We need to add `level + 1` indentation.
+
+                const lines = fmt.split('\n');
+                const contentIndent = ' '.repeat((level + 1) * this.options.tabSize);
+                const indentedContent = lines.map(line => {
+                    if (line.trim() === '') return '';
+                    return contentIndent + line;
+                }).join('\n');
+
+                output += '\n' + indentedContent.trimEnd() + '\n' + indent + `</${node.tagName}>\n`;
             } else {
                 output += `</${node.tagName}>\n`;
             }
