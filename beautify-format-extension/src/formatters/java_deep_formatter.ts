@@ -152,10 +152,15 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              const prevEndLine = prev.line + (prev.text.match(/\n/g) || []).length;
              if (token.line > prevEndLine) {
                  if (currentLine.trim() !== '') pushLine();
-                 // Add extra indent for continuation
-                 // But wait, append() uses current indentLevel.
-                 // We might want to temporarily bump indent?
-                 // For now, let's just append. Ideally we should have continuation indent logic.
+                 // Add extra indent for continuation if it's a dot
+                 // We don't want to permanently increase indentLevel.
+                 // We can just pad the current line start manually.
+                 // The standard indent + 4 spaces (continuation)
+                 // But subsequent appends use currentLine.
+                 // If currentLine is empty, `append` uses `getIndent(indentLevel)`.
+                 // We need to override this for THIS line.
+                 // Let's set a flag or just initialize currentLine.
+                 currentLine = getIndent(indentLevel) + INDENT_STRING; // Add one level extra
              }
         }
 
@@ -270,9 +275,9 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
             }
         }
 
-        if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) {
+        if (spaceBefore && currentLine.trim() !== '' && !currentLine.endsWith(' ')) {
              append(' ');
-        } else if (!spaceBefore && currentLine.endsWith(' ')) {
+        } else if (!spaceBefore && currentLine.endsWith(' ') && currentLine.trim() !== '') {
              currentLine = currentLine.trimEnd();
         }
 

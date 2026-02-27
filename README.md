@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Java (Deep Formatting Implemented)
 - [x] Swift (Deep Formatting Implemented)
 - [x] Kotlin (Deep Formatting Implemented)
 - [x] Python (Deep Formatting Implemented)
