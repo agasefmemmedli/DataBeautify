@@ -22,6 +22,15 @@ export function formatCDeep(text: string): string {
 
     // State
     let parenDepth = 0;
+    // Track indentation for each parenthesis level
+    // Store column index relative to start of line, or absolute?
+    // Let's store absolute column index if on same line, or indent string.
+    // Actually, simpler: if paren starts on a line, subsequent lines inside it align with start of paren + 1 (or indent + 4 if at end of line).
+    // But we build line by line.
+    // We need to know: When a newline happens inside parens, what should be the indent of the next line?
+    // We can push the desired indent string onto a stack.
+    let parenIndentStack: string[] = [];
+
     let braceStack: BraceContext[] = [];
     let newlineCount = 0;
     let justBrokeLine = false;
@@ -49,7 +58,17 @@ export function formatCDeep(text: string): string {
         newlineCount = 0;
 
         if (currentLine === '') {
-            currentLine = getIndent(offset) + str;
+            if (parenDepth > 0 && parenIndentStack.length > 0) {
+                // Use the paren indent for this depth
+                // However, parenIndentStack might have fewer entries if we just closed some parens on previous line?
+                // No, stack should track depth.
+                // If parenDepth > stack length, we haven't pushed yet? No, we push on '('.
+                // If we are at start of line inside parens, use the last indent.
+                const indent = parenIndentStack[parenIndentStack.length - 1];
+                currentLine = indent + str;
+            } else {
+                currentLine = getIndent(offset) + str;
+            }
         } else {
             currentLine += str;
         }
@@ -229,7 +248,7 @@ export function formatCDeep(text: string): string {
                         (effectivePrev.type === TokenType.Operator && ['!', '~', '++', '--', '*', '&', '(', '[', '{', '=', ',', ';', ':'].includes(effectivePrev.text)) ||
                         ['(', '[', '{', ',', 'return', 'case', '=', 'else', ':'].includes(effectivePrev.text)
                     )) {
-                        spaceBefore = true;
+                        spaceBefore = true; // int *p
 
                         if (effectivePrev.text === '(' || effectivePrev.text === '[' || effectivePrev.text === '{') spaceBefore = false;
                         if (effectivePrev.text === '*') spaceBefore = false;
@@ -279,6 +298,13 @@ export function formatCDeep(text: string): string {
                  if (currentLine.trim().startsWith('case ') || currentLine.trim() === 'default') spaceBefore = false;
             }
             if (token.text === '{') spaceBefore = true;
+
+            // Restrict Handling
+            if (token.text === 'restrict' || token.text === '__restrict' || token.text === '__restrict__') {
+                if (effectivePrev && effectivePrev.text === '*') {
+                    spaceBefore = true;
+                }
+            }
         }
 
         let extraIndent = 0;
@@ -287,6 +313,27 @@ export function formatCDeep(text: string): string {
         }
 
         if (spaceBefore && currentLine !== '' && !currentLine.endsWith(' ')) append(' ', extraIndent);
+
+        // Before appending, if this is a '(', calculate indent for next lines
+        if (token.text === '(') {
+            // Indent for contents is current column + 1
+            // Or if line is empty (start of line), indent level + 1?
+            let newIndent = '';
+            if (currentLine.trim() === '') {
+                 // Start of line (after indentation)
+                 newIndent = getIndent(extraIndent) + INDENT_STRING;
+            } else {
+                 // Align with (
+                 // We need to know current visual length.
+                 // Assuming spaceBefore handled correctly, length of currentLine + 1 (for space if any? no, currentLine already includes space)
+                 // Wait, we haven't appended '(' yet.
+                 // So currentLine length is position of '('.
+                 // We want next line to start at position of '(' + 1.
+                 newIndent = ' '.repeat(currentLine.length + 1);
+            }
+            parenIndentStack.push(newIndent);
+        }
+
         append(token.text, extraIndent);
 
         if (token.text === '{') {
@@ -410,7 +457,10 @@ export function formatCDeep(text: string): string {
         }
 
         if (token.text === '(') parenDepth++;
-        else if (token.text === ')') parenDepth = Math.max(0, parenDepth - 1);
+        else if (token.text === ')') {
+            parenDepth = Math.max(0, parenDepth - 1);
+            if (parenIndentStack.length > 0) parenIndentStack.pop();
+        }
     }
 
     if (currentLine.trim() !== '') pushLine();
@@ -418,6 +468,7 @@ export function formatCDeep(text: string): string {
     // Post-Processing: Include Sorting & Alignment
     processIncludes(outputLines);
     alignDeclarations(outputLines);
+    alignMacros(outputLines);
 
     return outputLines.join('\n');
 }
@@ -509,6 +560,55 @@ function alignDeclarations(lines: string[]) {
             }
 
             i = blockEnd;
+        } else {
+            i++;
+        }
+    }
+}
+
+function alignMacros(lines: string[]) {
+    let i = 0;
+    while (i < lines.length) {
+        if (lines[i].trim().startsWith('#define ')) {
+             let start = i;
+             let end = i;
+             while (end < lines.length && lines[end].trim().startsWith('#define ')) {
+                 end++;
+             }
+
+             if (end - start > 1) {
+                 const block = lines.slice(start, end);
+                 let parsed = [];
+                 let maxKeyLen = 0;
+
+                 for (const line of block) {
+                     const parts = line.trim().split(/\s+/);
+                     if (parts.length >= 3) {
+                         const defineKw = parts[0];
+                         const key = parts[1];
+                         // Combine the rest back (value might have spaces)
+                         // But macro might be just #define KEY
+                         // If parts.length < 3, it's just #define KEY (no value)
+                         const value = parts.slice(2).join(' ');
+                         if (key.length > maxKeyLen) maxKeyLen = key.length;
+                         parsed.push({ defineKw, key, value });
+                     } else {
+                         parsed.push({ original: line });
+                     }
+                 }
+
+                 for (let k = 0; k < block.length; k++) {
+                     const p = parsed[k];
+                     if ('key' in p && p.key) {
+                         // #define KEY   VALUE
+                         const padding = ' '.repeat(maxKeyLen - p.key.length);
+                         lines[start + k] = `${p.defineKw} ${p.key}${padding} ${p.value}`;
+                     } else {
+                         lines[start + k] = p.original!;
+                     }
+                 }
+             }
+             i = end;
         } else {
             i++;
         }

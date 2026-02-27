@@ -17,3 +17,4 @@
 - [x] Go (Deep Formatting Implemented)
 - [x] Rust (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)
+- [x] C (Deep Formatting Implemented)
