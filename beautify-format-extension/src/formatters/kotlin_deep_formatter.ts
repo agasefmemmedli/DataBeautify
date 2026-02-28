@@ -39,7 +39,40 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
             const newlines = (token.value.match(/\n/g) || []).length;
             if (token.line === 0 || newlines > 0) {
                 const effectiveNewlines = (token.line === 0) ? 1 : Math.min(newlines, 2);
-                if (effectiveNewlines > 0) {
+
+                // If we're forcing an inline block (detected by an upcoming '}' on the same line),
+                // we shouldn't insert newlines inside it unless there's an explicit manual break.
+                // Wait, if we set newline = true, then the next token prints on a new line.
+                // If we know we're in an inline block, let's ignore newlines.
+                let inInlineBlock = false;
+                if (!newline && formatted.endsWith(' ')) {
+                    const lastBraceIdx = formatted.lastIndexOf('{');
+                    if (lastBraceIdx !== -1 && formatted.indexOf('\n', lastBraceIdx) === -1) {
+                        // It's possible we are in an inline block. Let's check ahead to see if the block closes quickly.
+                        let closeIdx = -1;
+                        let tokenCount = 0;
+                        for (let j = i + 1; j < tokens.length; j++) {
+                            const peek = tokens[j];
+                            if (peek.type !== 'WHITESPACE') tokenCount++;
+                            if (peek.value === '}') {
+                                closeIdx = j;
+                                break;
+                            }
+                            if (peek.value === '{') break;
+                        }
+                        if (closeIdx !== -1 && tokenCount < 15) {
+                            inInlineBlock = true;
+                        }
+                    }
+                }
+
+                if (inInlineBlock && effectiveNewlines === 1) {
+                    // Suppress single newline inside inline block
+                    // But we must add a space if there wasn't one
+                    if (!formatted.endsWith(' ')) {
+                        formatted += ' ';
+                    }
+                } else if (effectiveNewlines > 0) {
                     // Prevent multiple empty lines at start or duplicate newlines
                     if (formatted.endsWith('\n\n')) {
                         // Already has blank line
@@ -49,7 +82,18 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
                         formatted += '\n'.repeat(effectiveNewlines);
                     }
                     newline = true;
+                } else {
+                    // 0 effective newlines, but whitespace existed.
+                    // Replace whitespace with a space
+                    if (!newline && !formatted.endsWith(' ') && !formatted.endsWith('\n')) {
+                        formatted += ' ';
+                    }
                 }
+            } else if (token.value.trim() === '') {
+                 // Ensure space is preserved
+                 if (!newline && !formatted.endsWith(' ') && !formatted.endsWith('\n')) {
+                     formatted += ' ';
+                 }
             }
             continue;
         }
@@ -81,8 +125,19 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
                 if (lastToken && lastToken.value === '{') {
                     // Keep on same line (empty block)
                 } else {
-                    formatted += '\n';
-                    newline = true;
+                    // Check if the current block is inline.
+                    // If the block started on the same line, keep the '}' on the same line too.
+                    // We can check if the line has a '\n' since the last '{'.
+                    const lastBraceIdx = formatted.lastIndexOf('{');
+                    const hasNewlineSinceBrace = lastBraceIdx !== -1 && formatted.indexOf('\n', lastBraceIdx) !== -1;
+
+                    if (!hasNewlineSinceBrace) {
+                        formatted += ' ';
+                        newline = false;
+                    } else {
+                        formatted += '\n';
+                        newline = true;
+                    }
                 }
             }
         }
@@ -118,8 +173,50 @@ export function formatKotlinDeep(text: string, options: KotlinFormatterOptions =
             if (nextToken && nextToken.value === '}') {
                 // Empty block {}, stay on line
             } else {
-                formatted += '\n';
-                newline = true;
+                // Check if this is a short, simple inline block (e.g. single expression lambda).
+                // Scan ahead to find the matching '}'. If it's close and doesn't contain another block, stay on same line.
+                let inlineBlock = false;
+                let closeIdx = -1;
+                let nestedBlocks = 0;
+                let tokenCount = 0;
+                let hasNewlineInside = false;
+
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const peek = tokens[j];
+                    if (peek.type !== 'WHITESPACE' && peek.type !== 'COMMENT' && peek.type !== 'BLOCK_COMMENT') {
+                        tokenCount++;
+                    }
+                    if (peek.value === '{') {
+                        nestedBlocks++;
+                    } else if (peek.value === '}') {
+                        if (nestedBlocks === 0) {
+                            closeIdx = j;
+                            break;
+                        } else {
+                            nestedBlocks--;
+                        }
+                    } else if (peek.type === 'WHITESPACE' && peek.value.includes('\n')) {
+                        hasNewlineInside = true;
+                    }
+                }
+
+                // If it's a short block (e.g., < 15 tokens) and no nested blocks and it doesn't span lines, keep it inline.
+                // We'll also allow slightly larger blocks if they don't have newlines.
+                if (closeIdx !== -1 && tokenCount < 15 && !hasNewlineInside) {
+                    inlineBlock = true;
+                }
+
+                if (inlineBlock) {
+                    // Suppress newline!
+                    // Note: We don't add space here, it is added before the next token in the print logic if needed,
+                    // but since `{` isn't followed by space automatically, we might want to manually append it.
+                    // Let's just avoid newline = true, and force a space
+                    formatted += ' ';
+                    newline = false;
+                } else {
+                    formatted += '\n';
+                    newline = true;
+                }
             }
         } else if (token.value === ';') {
             formatted += '\n';
@@ -251,6 +348,8 @@ function shouldAddSpace(beforeLast: Token | null, last: Token, current: Token, n
         if (['if', 'while', 'for', 'catch', 'when'].includes(last.value) && current.value === '(') return true;
         if (current.value === '{') return true;
     }
+    // Handle 'when' specifically if it was tokenized as IDENTIFIER instead of KEYWORD
+    if (last.value === 'when' && current.value === '(') return true;
     if (current.type === 'KEYWORD') {
          if (last.value === '}') return true; // } else
          if (last.value === ')') return true; // ) {
