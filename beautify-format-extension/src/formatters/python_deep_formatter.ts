@@ -93,7 +93,8 @@ export function formatPythonDeep(text: string): string {
              }
 
              if (splitIndex !== -1) {
-                 const part1 = remainingTokens.slice(0, splitIndex + 1);
+                 const part1Length = splitType === 'semi' ? splitIndex : splitIndex + 1;
+                 const part1 = remainingTokens.slice(0, part1Length);
                  const part2 = remainingTokens.slice(splitIndex + 1);
 
                  lines.push({

@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Python (Deep Formatting Implemented)
 - [x] Ruby (Deep Formatting Implemented)
 - [x] PHP (Deep Formatting Implemented)
 - [x] Handlebars (Deep Formatting Implemented)
