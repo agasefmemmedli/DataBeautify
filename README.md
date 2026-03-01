@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Handlebars (Deep Formatting Implemented)
 - [x] JSX (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
 - [x] JSON (Deep Formatting Implemented)
