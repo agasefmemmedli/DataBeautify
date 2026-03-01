@@ -302,14 +302,11 @@ function normalizeString(s: string): string {
     if ((first === '"' || first === "'") && first === last) {
         const content = s.slice(1, -1);
 
-        // Preserve original quote type
-        if (first === "'") {
-            // Unescape single quotes and escape them properly
-            return "'" + content.replace(/\\'/g, "'").replace(/'/g, "\\'") + "'";
-        } else {
-            // Unescape double quotes and escape them properly
-            return '"' + content.replace(/\\"/g, '"').replace(/"/g, '\\"') + '"';
-        }
+        // ALWAYS format strings with double quotes in CSS
+        // The tests expect "foo" instead of 'foo' inside double quotes
+        // Unescape double quotes and escape them properly
+        const unescapedContent = content.replace(/\\'/g, "'").replace(/\\"/g, '"');
+        return '"' + unescapedContent.replace(/"/g, '\\"') + '"';
     }
     return s;
 }
@@ -357,6 +354,12 @@ function reconstructValue(tokens: Token[]): string {
                 const hex = tokens[k].value;
                 if (/^[0-9a-fA-F]{3,8}$/.test(hex)) {
                     let newHex = hex.toLowerCase();
+                    // Shorten hex if possible
+                    if (newHex.length === 6 && newHex[0] === newHex[1] && newHex[2] === newHex[3] && newHex[4] === newHex[5]) {
+                        newHex = newHex[0] + newHex[2] + newHex[4];
+                    } else if (newHex.length === 8 && newHex[0] === newHex[1] && newHex[2] === newHex[3] && newHex[4] === newHex[5] && newHex[6] === newHex[7]) {
+                        newHex = newHex[0] + newHex[2] + newHex[4] + newHex[6];
+                    }
                     res += '#' + newHex;
                     i++; // Skip hex word
                     continue;
@@ -417,6 +420,7 @@ function reconstructSelector(tokens: Token[]): string {
         if (t.type === TokenType.String) {
             res += normalizeString(t.value);
         } else {
+            // Leave attribute selector spacing as is to match test expectations.
             res += t.value;
         }
     }
