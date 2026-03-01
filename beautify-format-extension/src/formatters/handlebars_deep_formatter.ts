@@ -386,10 +386,11 @@ class HandlebarsPrinter {
 
             case 'Mustache':
                 const m = node as Mustache;
-                if (m.kind === 'unescaped') return indent + `{{{${m.content}}}}`;
-                if (m.kind === 'partial') return indent + `{{>${m.content}}}`;
-                if (m.kind === 'comment') return indent + `{{!${m.content}}}`;
-                return indent + `{{${m.content}}}`;
+                const inner = m.content.trim();
+                if (m.kind === 'unescaped') return indent + `{{{ ${inner} }}}`;
+                if (m.kind === 'partial') return indent + `{{> ${inner} }}`;
+                if (m.kind === 'comment') return indent + `{{!-- ${inner} --}}`;
+                return indent + `{{ ${inner} }}`;
 
             case 'Text':
                 const val = (node as Text).value.trim();
