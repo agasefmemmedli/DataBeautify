@@ -83,8 +83,18 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
             } else if (t.type === TokenType.TagClose) {
                 buffer += t.text;
             } else if (t.type === TokenType.Text) {
-                // Collapse whitespace
-                buffer += t.text.replace(/\s+/g, ' ');
+                // Check if text has multiple lines. If it does, we shouldn't format it inline.
+                if (t.text.includes('\n')) {
+                    // Check if the lines are purely whitespace
+                    if (t.text.trim() !== '') {
+                        return null;
+                    } else {
+                        // Empty lines of whitespace, can be collapsed
+                        buffer += t.text.replace(/\s+/g, ' ');
+                    }
+                } else {
+                    buffer += t.text.replace(/\s+/g, ' ');
+                }
             } else if (t.type === TokenType.Comment || t.type === TokenType.CDATA) {
                 buffer += t.text;
             }
@@ -228,9 +238,12 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
             indentLevel = Math.max(0, indentLevel - 1);
             formattedLines.push(`${getIndent(indentLevel)}${token.text}`);
         } else if (token.type === TokenType.Text) {
-            const trimmed = token.text.trim();
-            if (trimmed) {
-                formattedLines.push(`${getIndent(indentLevel)}${trimmed}`);
+            const lines = token.text.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) {
+                    formattedLines.push(`${getIndent(indentLevel)}${trimmed}`);
+                }
             }
         } else if (token.type === TokenType.Comment || token.type === TokenType.CDATA || token.type === TokenType.Doctype || token.type === TokenType.PI) {
             formattedLines.push(`${getIndent(indentLevel)}${token.text}`);
