@@ -111,7 +111,50 @@ export function formatPHPDeep(code: string, options: FormattingOptions = {}): st
                     }
                     importBuffer.forEach(s => formattedLines.push(getIndent(indentLevel, indentString) + s));
                     importBuffer = [];
+
+                    // Add a blank line after the imports block if we're at the top level
+                    if (indentLevel === 0 && nextT && nextT.type !== TokenType.CloseTag) {
+                        formattedLines.push('');
+                    }
                 }
+                continue;
+            }
+        }
+
+        // Add blank line after namespace definition
+        if (token.type === TokenType.Keyword && token.text === 'namespace') {
+            let j = i + 1;
+            let hasSemicolon = false;
+            while (j < tokens.length) {
+                const t = tokens[j];
+                if (t.type === TokenType.Punctuation && t.text === ';') {
+                    hasSemicolon = true;
+                    break;
+                }
+                if (t.text === '{') {
+                    break;
+                }
+                j++;
+            }
+            if (hasSemicolon) {
+                if (currentLineTokens.length > 0) {
+                    flushLine(formattedLines, currentLineTokens, indentLevel, indentString, lineStartParenDepth);
+                    currentLineTokens = [];
+                }
+                const namespaceTokens = tokens.slice(i, j + 1);
+                const namespaceStr = namespaceTokens.map(t => t.text).join(' ')
+                    .replace(/\s*\\\s*/g, '\\') // Remove spaces around backslash
+                    .replace(/\s*;\s*$/, ';')
+                    .replace(/^namespace\s+/, 'namespace ');
+
+                formattedLines.push(getIndent(indentLevel, indentString) + namespaceStr);
+
+                // Add a blank line after the namespace declaration
+                const nextT = peekNextCode(j);
+                if (nextT && nextT.type !== TokenType.CloseTag) {
+                    formattedLines.push('');
+                }
+                i = j;
                 continue;
             }
         }

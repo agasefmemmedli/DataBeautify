@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] PHP (Deep Formatting Implemented)
 - [x] Handlebars (Deep Formatting Implemented)
 - [x] JSX (Deep Formatting Implemented)
 - [x] XML (Deep Formatting Implemented)
