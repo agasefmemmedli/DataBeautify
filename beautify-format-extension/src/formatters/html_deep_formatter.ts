@@ -14,7 +14,7 @@ export function formatHTMLDeep(html: string, options: HTMLFormattingOptions = {}
     const tabSize = options.tabSize || 2;
     const insertSpaces = options.insertSpaces !== false;
     const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
-    const printWidth = options.printWidth || 120;
+    const printWidth = options.printWidth || 80;
     const sortAttributes = options.sortAttributes !== false;
 
     // Void elements (no closing tag)
