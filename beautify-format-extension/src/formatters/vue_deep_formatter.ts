@@ -176,9 +176,13 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                      const contentIndentLevel = indentLevel + 1;
 
                      for (const line of lines) {
-                         const trimmedLine = line.trim();
-                         if (trimmedLine.length > 0) {
-                             formattedLines.push(getIndent(contentIndentLevel) + trimmedLine);
+                         // Some formatters like formatSCSSDeep add their own indentation.
+                         // Trim lines before prepending indentation unless they are inside blocks?
+                         // Actually, preserving inner indentation from the deep formatters:
+                         // Deep formatter outputs indented code. We just prepend base indent.
+                         const hasContent = line.trim().length > 0;
+                         if (hasContent) {
+                             formattedLines.push(getIndent(contentIndentLevel) + line);
                          } else {
                              formattedLines.push('');
                          }
