@@ -141,13 +141,6 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
                 current++;
             }
 
-            // Sort properties alphabetically
-            properties.sort((a, b) => {
-                const keyA = a.key.replace(/^"|"$/g, '');
-                const keyB = b.key.replace(/^"|"$/g, '');
-                return keyA.localeCompare(keyB);
-            });
-
             return { type: 'Object', properties, comments, trailingComments };
         } else if (t.type === TokenType.BracketOpen) {
             current++;

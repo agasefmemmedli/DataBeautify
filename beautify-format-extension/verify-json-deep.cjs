@@ -95,29 +95,29 @@ try {
     process.exit(1);
 }
 
-// Check Sorting
-// "a", "list", "m", "obj", "z"
-const expectedOrder = ['"a": 2', '"list":', '"m": 3', '"obj":', '"z": 1'];
+// Check that original order is preserved (Prettier standard - NO alphabetical sorting)
+// "z", "a", "m", "list", "obj"
+const expectedOrder = ['"z": 1', '"a": 2', '"m": 3', '"list":', '"obj":'];
 let lastIndex = -1;
 for (const key of expectedOrder) {
     const index = formattedTest2.indexOf(key);
     if (index === -1) {
-        console.error(`❌ Key sorting check failed. Missing ${key}`);
+        console.error(`❌ Key preservation check failed. Missing ${key}`);
         process.exit(1);
     }
     if (index < lastIndex) {
-        console.error(`❌ Key sorting check failed. ${key} appeared out of order.`);
+        console.error(`❌ Key preservation check failed. ${key} appeared out of order.`);
         process.exit(1);
     }
     lastIndex = index;
 }
 
-// Check nested object sorting
+// Check nested object order preservation
 const objIndex = formattedTest2.indexOf('"obj":');
-const xIndex = formattedTest2.indexOf('"x": 2', objIndex);
 const yIndex = formattedTest2.indexOf('"y": 1', objIndex);
-if (xIndex === -1 || yIndex === -1 || xIndex > yIndex) {
-    console.error('❌ Nested object key sorting check failed. Expected "x" before "y".');
+const xIndex = formattedTest2.indexOf('"x": 2', objIndex);
+if (xIndex === -1 || yIndex === -1 || yIndex > xIndex) {
+    console.error('❌ Nested object key preservation check failed. Expected "y" before "x".');
     process.exit(1);
 }
 
