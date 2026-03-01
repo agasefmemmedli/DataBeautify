@@ -326,5 +326,77 @@ export function formatRubyDeep(text: string): string {
         prevIsUnary = isUnary;
     }
 
+    // --- Post-Processing: Vertical Alignment for consecutive assignments ---
+    output = alignRubyAssignments(output);
+
     return output + (output.endsWith('\n') ? '' : '\n');
+}
+
+/**
+ * Aligns consecutive variable assignments.
+ * Example:
+ * a      = 1
+ * bbb    = 2
+ * cccccc = 3
+ */
+function alignRubyAssignments(text: string): string {
+    const lines = text.split('\n');
+    const result: string[] = [];
+
+    let groupStart = -1;
+    let maxEqualPos = 0;
+
+    const flushGroup = () => {
+        if (groupStart === -1) return;
+        const groupEnd = result.length - 1;
+        if (groupEnd > groupStart) {
+            for (let i = groupStart; i <= groupEnd; i++) {
+                const line = result[i];
+                const match = line.match(/^(\s*[a-zA-Z0-9_@$]+(?:\.[a-zA-Z0-9_@$]+)*\s*)=([^=].*)$/);
+                if (match) {
+                    const leftPart = match[1].trimEnd();
+                    const rightPart = match[2];
+                    const padding = ' '.repeat(maxEqualPos - leftPart.length);
+                    result[i] = `${leftPart}${padding} =${rightPart}`;
+                }
+            }
+        }
+        groupStart = -1;
+        maxEqualPos = 0;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Check if line is a simple assignment (single `=`) and not part of a larger expression if possible
+        // Regex matches `   var_name = value`
+        const match = line.match(/^(\s*[a-zA-Z0-9_@$]+(?:\.[a-zA-Z0-9_@$]+)*\s*)=([^=].*)$/);
+
+        if (match && !line.includes('==') && !line.includes('=>') && !line.includes('!=') && !line.includes('<=') && !line.includes('>=')) {
+            const leftPart = match[1].trimEnd();
+            if (groupStart === -1) {
+                groupStart = result.length;
+            }
+            if (leftPart.length > maxEqualPos) {
+                maxEqualPos = leftPart.length;
+            }
+            result.push(line);
+        } else {
+            // Check for comments
+            if (line.trim().startsWith('#')) {
+                result.push(line);
+                continue;
+            }
+            if (line.trim() === '') {
+                flushGroup();
+                result.push(line);
+                continue;
+            }
+            flushGroup();
+            result.push(line);
+        }
+    }
+    flushGroup();
+
+    return result.join('\n');
 }
