@@ -301,13 +301,15 @@ function normalizeString(s: string): string {
     const last = s[s.length - 1];
     if ((first === '"' || first === "'") && first === last) {
         const content = s.slice(1, -1);
-        if (content.includes('"') && !content.includes("'")) {
-             return "'" + content + "'";
+
+        // Preserve original quote type
+        if (first === "'") {
+            // Unescape single quotes and escape them properly
+            return "'" + content.replace(/\\'/g, "'").replace(/'/g, "\\'") + "'";
+        } else {
+            // Unescape double quotes and escape them properly
+            return '"' + content.replace(/\\"/g, '"').replace(/"/g, '\\"') + '"';
         }
-        if (!content.includes('"')) {
-            return '"' + content.replace(/\\'/g, "'") + '"';
-        }
-        return s;
     }
     return s;
 }
@@ -355,13 +357,6 @@ function reconstructValue(tokens: Token[]): string {
                 const hex = tokens[k].value;
                 if (/^[0-9a-fA-F]{3,8}$/.test(hex)) {
                     let newHex = hex.toLowerCase();
-                    // Shrink if possible: #aabbcc -> #abc
-                    if (newHex.length === 6 &&
-                        newHex[0] === newHex[1] &&
-                        newHex[2] === newHex[3] &&
-                        newHex[4] === newHex[5]) {
-                        newHex = newHex[0] + newHex[2] + newHex[4];
-                    }
                     res += '#' + newHex;
                     i++; // Skip hex word
                     continue;
