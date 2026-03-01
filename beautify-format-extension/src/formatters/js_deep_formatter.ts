@@ -470,6 +470,29 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             spacePending = true;
         }
 
+        // Space before operators
+        if (token.type === 'Operator') {
+             if (token.value === '<' && isGenericOpen(i)) {
+                 // Handled above
+             } else if (token.value === '>' && isGenericClose(i)) {
+                 // Handled above
+             } else {
+                 if (!['!', '++', '--', '~', '?.', '.', '?'].includes(token.value)) {
+                     spacePending = true;
+                 }
+                 if (inJSXTag && token.value === '=') {
+                     spacePending = false;
+                 }
+                 if (token.value === '?') {
+                     if (nextToken && (nextToken.value === ':' || nextToken.value === '(' || nextToken.value === '.')) {
+                         spacePending = false;
+                     } else {
+                         spacePending = true;
+                     }
+                 }
+             }
+        }
+
         // Apply Newline/Indentation
         if (newlinePending > 0) {
             formatted = formatted.trimEnd();
