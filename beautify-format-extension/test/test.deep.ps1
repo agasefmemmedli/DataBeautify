@@ -5,6 +5,10 @@ function Get-DeepTest {
         [int]$Count = 1
     )
 
+    $var1 = 1
+    $longerVar2 = 2
+    [string]$longestVar3 = "3"
+
     # Process items
     if ($Name -eq 'Test') {
         Write-Host "Running Test"
