@@ -52,6 +52,50 @@ try {
          process.exit(1);
     }
 
+    // Test Case 3: Deep formatting of multiple arguments (proxy_set_header)
+    console.log('\n--- Test Case 3: Multiple Arguments Alignment ---');
+    const proxyContent = `
+server {
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    set $my_var 1;
+}
+`;
+    formatted = formatNginxDeep(proxyContent);
+    // console.log(formatted);
+
+    // Host has length 4, X-Real-IP has length 9, X-Forwarded-For has length 15. maxArg1Len = 15.
+    // proxy_set_header has length 16, set has length 3. maxDirectiveLen = 16.
+
+    // proxy_set_header Host (15 - 4 = 11 spaces)
+    if (!formatted.includes('    proxy_set_header Host            $host;')) {
+         console.error('FAILED: Multiple arguments not aligned correctly (Host)');
+         console.log(formatted);
+         process.exit(1);
+    }
+
+    // proxy_set_header X-Real-IP (15 - 9 = 6 spaces)
+    if (!formatted.includes('    proxy_set_header X-Real-IP       $remote_addr;')) {
+         console.error('FAILED: Multiple arguments not aligned correctly (X-Real-IP)');
+         console.log(formatted);
+         process.exit(1);
+    }
+
+    // proxy_set_header X-Forwarded-For (15 - 15 = 0 spaces)
+    if (!formatted.includes('    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;')) {
+         console.error('FAILED: Multiple arguments not aligned correctly (X-Forwarded-For)');
+         console.log(formatted);
+         process.exit(1);
+    }
+
+    // set (16 - 3 = 13 spaces directive padding), $my_var (15 - 7 = 8 spaces arg1 padding)
+    if (!formatted.includes('    set              $my_var         1;')) {
+         console.error('FAILED: Multiple arguments not aligned correctly (set)');
+         console.log(formatted);
+         process.exit(1);
+    }
+
     console.log('PASSED: Nginx Deep Formatting verified.');
 
 } catch (e) {
