@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] PowerShell (Deep Formatting Implemented)
 - [x] Go (Deep Formatting Implemented)
 - [x] Rust (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)

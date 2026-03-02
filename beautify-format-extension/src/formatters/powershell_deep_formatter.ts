@@ -284,5 +284,64 @@ export function formatPowerShellDeep(text: string): string {
         lastTokenIsUnary = currentIsUnary;
     }
 
-    return formatted + '\n';
+    return alignAssignments(formatted + '\n');
+}
+
+function alignAssignments(text: string): string {
+    const lines = text.split('\n');
+    const result: string[] = [];
+    let groupStart = -1;
+
+    const flushGroup = () => {
+        if (groupStart === -1) return;
+        const endIndex = result.length;
+        if (endIndex - groupStart > 1) { // Only align if there are consecutive lines
+            const group = result.slice(groupStart, endIndex);
+
+            // Find the maximum index of '=' in the group
+            let maxEqualsIndex = 0;
+            for (const line of group) {
+                const equalsIndex = line.indexOf(' = ');
+                if (equalsIndex > maxEqualsIndex) {
+                    maxEqualsIndex = equalsIndex;
+                }
+            }
+
+            // Align all lines in the group
+            for (let i = 0; i < group.length; i++) {
+                const line = group[i];
+                const equalsIndex = line.indexOf(' = ');
+                if (equalsIndex !== -1) {
+                    const padding = ' '.repeat(maxEqualsIndex - equalsIndex);
+                    result[groupStart + i] = line.slice(0, equalsIndex) + padding + ' = ' + line.slice(equalsIndex + 3);
+                }
+            }
+        }
+        groupStart = -1;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Match standard variable assignment: $var = ... or [type]$var = ...
+        // and ignore multi-line structures like hashtables or blocks for simplicity
+        if (trimmed.startsWith('$') || trimmed.startsWith('[')) {
+            const equalsIndex = line.indexOf(' = ');
+            // Ensure there is a '=' and it's not inside a string or comment
+            if (equalsIndex !== -1 && !trimmed.startsWith('#')) {
+                if (groupStart === -1) {
+                    groupStart = i;
+                }
+            } else {
+                flushGroup();
+            }
+        } else {
+            flushGroup();
+        }
+        result.push(line);
+    }
+    flushGroup();
+
+    return result.join('\n');
 }
