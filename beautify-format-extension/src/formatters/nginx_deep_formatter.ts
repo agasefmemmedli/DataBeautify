@@ -137,7 +137,11 @@ function alignDirectives(text: string): string {
         'access_log', 'error_log', 'include', 'proxy_pass', 'fastcgi_pass',
         'fastcgi_param', 'proxy_set_header', 'add_header', 'ssl_certificate',
         'ssl_certificate_key', 'ssl_protocols', 'ssl_ciphers', 'gzip',
-        'gzip_types', 'location', 'upstream'
+        'gzip_types', 'location', 'upstream', 'set', 'proxy_buffer_size',
+        'proxy_buffers', 'proxy_busy_buffers_size', 'fastcgi_buffer_size',
+        'fastcgi_buffers', 'fastcgi_busy_buffers_size', 'client_max_body_size',
+        'client_body_buffer_size', 'keepalive_timeout', 'sendfile',
+        'tcp_nopush', 'tcp_nodelay', 'worker_processes', 'worker_connections'
     ]);
 
     for (let i = 0; i < lines.length; i++) {
@@ -185,28 +189,54 @@ function processAlignmentBlock(lines: string[], start: number, end: number) {
 
     // Find max directive length
     let maxDirectiveLen = 0;
-    const parsedLines: {directive: string, args: string}[] = [];
+    let maxArg1Len = 0;
+    const parsedLines: {directive: string, arg1: string, argRemaining: string}[] = [];
 
     for (let i = start; i < end; i++) {
         const trimmed = lines[i].trim();
         const firstSpace = trimmed.indexOf(' ');
         if (firstSpace === -1) {
-             parsedLines.push({ directive: trimmed, args: '' });
+             parsedLines.push({ directive: trimmed, arg1: '', argRemaining: '' });
              continue;
         }
         const directive = trimmed.substring(0, firstSpace);
-        const args = trimmed.substring(firstSpace + 1);
+        const argsTrimmed = trimmed.substring(firstSpace + 1).trim();
+
+        let arg1 = '';
+        let argRemaining = '';
+        const arg1SpaceMatch = argsTrimmed.match(/\s/);
+
+        if (!arg1SpaceMatch) {
+             arg1 = argsTrimmed;
+        } else {
+             const arg1SpaceIdx = arg1SpaceMatch.index!;
+             arg1 = argsTrimmed.substring(0, arg1SpaceIdx);
+             argRemaining = argsTrimmed.substring(arg1SpaceIdx).trim();
+        }
 
         if (directive.length > maxDirectiveLen) maxDirectiveLen = directive.length;
-        parsedLines.push({ directive, args });
+        if (argRemaining !== '') {
+             if (arg1.length > maxArg1Len) maxArg1Len = arg1.length;
+        }
+
+        parsedLines.push({ directive, arg1, argRemaining });
     }
 
     // Apply alignment
     for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
-        if (item.args) {
-            const padding = ' '.repeat(maxDirectiveLen - item.directive.length);
-            lines[start + i] = `${firstIndent}${item.directive}${padding} ${item.args}`;
+        if (item.arg1 || item.argRemaining) {
+            const dirPadding = ' '.repeat(maxDirectiveLen - item.directive.length);
+
+            let finalArgs = '';
+            if (item.argRemaining) {
+                 const arg1Padding = ' '.repeat(maxArg1Len - item.arg1.length);
+                 finalArgs = `${item.arg1}${arg1Padding} ${item.argRemaining}`;
+            } else {
+                 finalArgs = item.arg1;
+            }
+
+            lines[start + i] = `${firstIndent}${item.directive}${dirPadding} ${finalArgs}`;
         }
     }
 }
