@@ -143,6 +143,9 @@ export function formatRustDeep(text: string): string {
         if (inWhereClause && (token.text === '{' || token.text === ';')) {
             inWhereClause = false;
             indentLevel = Math.max(0, indentLevel - 1);
+            if (token.text === '{') {
+                forceNewline(); // in rustfmt, the { after a where clause must be on a new line
+            }
         }
 
         // Method Chaining: .method()

@@ -1,6 +1,5 @@
 # To-Improve List
 
-- [x] Rust (Deep Formatting Implemented)
 - [x] Nginx (Deep Formatting Implemented)
 - [x] C (Deep Formatting Implemented)
 - [x] C++ (Deep Formatting Implemented)
