@@ -265,7 +265,17 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                      if (lineContent.length >= minIndent) {
                          lineContent = lineContent.substring(minIndent);
                      }
-                     currentLine = getIndent(indentLevel) + lineContent;
+
+                     // Only indent if it's not the final line containing ONLY """
+                     // Wait, actually the final line contains the """ and dictates the base indentation for the block in Java.
+                     // But we should just re-indent it to current nesting level + 1, OR match the original.
+                     // The Prettier standard for Java text blocks is to align the closing """ with the opening statement's indentation,
+                     // or the current indent level.
+
+                     currentLine = getIndent(indentLevel) + INDENT_STRING + lineContent;
+                     if (k === lines.length - 1 && lineContent.trim() === '"""') {
+                         currentLine = getIndent(indentLevel) + lineContent;
+                     }
                  }
              } else {
                  append(token.text);
@@ -343,7 +353,9 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
             if (foundSwitch || foundRecord || (!foundArrayInit && !foundLambda)) {
                 // Heuristic: If followed by non-closing brace, force newline.
                 if (next && next.text !== '}') {
-                    pushLine();
+                    if (!foundSwitchRule) {
+                        pushLine();
+                    }
                 }
             }
         }
@@ -401,7 +413,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              // If followed by type (Identifier) on same line, it's likely a type annotation or single line annotation
              else if (next && next.type === TokenType.Identifier && parenDepth === 0) {
                  // Heuristic: if next token is on new line, pushLine
-                 const nextIsNewLine = next.line > token.line;
+                 const nextIsNewLine = next.line > token.line + (token.text.match(/\n/g) || []).length;
                  if (nextIsNewLine) {
                      pushLine();
                  } else {
@@ -409,7 +421,7 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                  }
              } else if (next && next.text !== '(') {
                  // Check if next token is on new line
-                 if (next && next.line > token.line) {
+                 if (next && next.line > token.line + (token.text.match(/\n/g) || []).length) {
                      pushLine();
                  } else {
                      append(' ');
@@ -500,16 +512,20 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
              parenDepth = Math.max(0, parenDepth - 1);
 
              let popped = false;
+             let poppedTop = null;
              if (blockStack.length > 0) {
                  const top = blockStack[blockStack.length-1];
                  if (top === 'ANNOTATION_ARGS' || top === 'RECORD_ARGS' || top === 'PAREN_BLOCK') {
+                     poppedTop = top;
                      blockStack.pop();
                      indentLevel--;
                      popped = true;
 
                      if (currentLine.trim() !== '') {
                          // If RECORD_ARGS or ANNOTATION_ARGS, we want closing paren on new line if multiline
-                         if (top === 'RECORD_ARGS' || top === 'ANNOTATION_ARGS') {
+                         if (top === 'RECORD_ARGS') {
+                             if (next && next.text !== '{') pushLine();
+                         } else if (top === 'ANNOTATION_ARGS') {
                              pushLine();
                          } else if (token.line > prev!.line) {
                              pushLine();
@@ -518,9 +534,17 @@ function formatJavaDeepInternal(tokens: Token[], INDENT_STRING: string, getInden
                  }
              }
 
-             if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void'].includes(next.text)) {
-                 pushLine();
+             if (poppedTop === 'RECORD_ARGS') {
+                 if (next && next.text === '{') {
+                     // Space logic handles it
+                 } else {
+                     pushLine();
+                 }
+             } else if (poppedTop === 'ANNOTATION_ARGS') {
+                 // Already pushed in the inner block. We just don't want to fall through to the general public/private pushLine.
              } else if (popped && next && next.type === TokenType.Preprocessor) {
+                 pushLine();
+             } else if (next && ['public', 'private', 'protected', 'class', 'interface', 'enum', 'record', 'void'].includes(next.text)) {
                  pushLine();
              }
         }
