@@ -299,10 +299,10 @@ export function formatCDeep(text: string): string {
             }
             if (token.text === '{') spaceBefore = true;
 
-            // Restrict Handling
-            if (token.text === 'restrict' || token.text === '__restrict' || token.text === '__restrict__') {
+            // Pointer Qualifiers Handling
+            if (['restrict', '__restrict', '__restrict__', 'const', 'volatile'].includes(token.text)) {
                 if (effectivePrev && effectivePrev.text === '*') {
-                    spaceBefore = true;
+                    spaceBefore = false;
                 }
             }
         }
