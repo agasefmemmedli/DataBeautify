@@ -374,6 +374,16 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
                  isBlock = false; // Usually inline
              }
 
+             // No space before ( if it's a function call or method declaration
+             if (token.value === '(' && lastToken && (lastToken.type === 'Identifier' || lastToken.type === 'Keyword' || lastToken.value === ')' || lastToken.value === ']')) {
+                 // But keep space after keywords like if, for, while, switch, catch, return
+                 if (lastToken.type === 'Keyword' && ['if', 'for', 'while', 'switch', 'catch', 'typeof', 'return', 'throw', 'await', 'yield'].includes(lastToken.value)) {
+                     // keep spacePending true
+                 } else {
+                     spacePending = false;
+                 }
+             }
+
              if (newlinePending > 0) {
                 formatted = formatted.trimEnd();
                 formatted += '\n'.repeat(newlinePending) + getIndent(indentLevel);
@@ -384,6 +394,9 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
                 spacePending = false;
              }
 
+             // In Prettier, inside `(` is usually no space
+             // We can strip any trailing space inside formatted that we might have just added? No, handled by spacePending = false.
+
              formatted += token.value;
              if (isBlock) {
                  indentLevel++;
@@ -391,12 +404,18 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
              } else {
                  blockStack.push({ type: 'paren', inline: true });
              }
+
+             spacePending = false; // No space immediately inside ( or [
              continue;
         }
 
         // Close Paren/Bracket
         if (token.value === ')' || token.value === ']') {
              spacePending = false;
+             // Remove any trailing space before ) or ]
+             if (formatted.endsWith(' ')) {
+                 formatted = formatted.trimEnd();
+             }
 
              const block = blockStack.pop();
              if (block && !block.inline) {
@@ -500,10 +519,21 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
             newlinePending = 0;
             spacePending = false;
         } else if (spacePending) {
-             if (formatted.length > 0 && !formatted.endsWith(' ') && !formatted.endsWith('\n') && !formatted.endsWith('\t')) {
+             if (formatted.length > 0 && !formatted.endsWith(' ') && !formatted.endsWith('\n') && !formatted.endsWith('\t') && !formatted.endsWith('(') && !formatted.endsWith('[')) {
                 formatted += ' ';
              }
              spacePending = false;
+        }
+
+        // Before appending `{`, ensure space, except if preceded by `=` in JSX
+        if (token.value === '{') {
+            if (inJSXTag && formatted.endsWith('=')) {
+                // No space after = for JSX attribute
+            } else if (!formatted.endsWith(' ') && !formatted.endsWith('\n') && !formatted.endsWith('(') && !formatted.endsWith('[')) {
+                if (formatted.length > 0) {
+                    formatted += ' ';
+                }
+            }
         }
 
         // Append Token
@@ -566,6 +596,11 @@ export function formatJSDeep(text: string, options: DeepFormatterOptions): strin
                     indentLevel++;
                 }
             }
+        }
+
+        // Inside inline object or block, ensure space before `}`
+        if (token.value === '}' && blockStack.length === 0) {
+            // we already popped it earlier in Dedent before closing brace
         }
 
         if (token.value === 'switch' && token.type === 'Keyword') {
