@@ -452,6 +452,12 @@ export function formatCppDeep(text: string): string {
                 spaceBefore = true;
             }
 
+            if (['const', 'volatile', 'restrict'].includes(token.text)) {
+                if (prev && prev.text === '*') {
+                    spaceBefore = false;
+                }
+            }
+
             if (prev) {
                 if (prev.type === TokenType.Operator) {
                     if (['::', '.', '->', '!', '~'].includes(prev.text)) {
