@@ -137,6 +137,63 @@ export function formatCSharpDeep(text: string): string {
 
         // --- Context Analysis ---
 
+        // --- Fault Tolerance: Missing Semicolons ---
+        if (prev && token.line > prev.line) {
+            // If the previous token was a valid end of an expression and current token is a new statement
+            if ([TokenType.Identifier, TokenType.Number, TokenType.String].includes(prev.type) ||
+                prev.text === ')' || prev.text === ']' || prev.text === 'break' || prev.text === 'continue' || prev.text === 'return' || prev.text === 'true' || prev.text === 'false') {
+
+                const currentIsNewStatement =
+                    ['return', 'break', 'continue', 'var', 'int', 'string', 'bool', 'double', 'float', 'decimal', 'object', 'public', 'private', 'protected', 'internal', 'class', 'struct', 'interface', 'enum', 'record', 'namespace'].includes(token.text) ||
+                    (token.type === TokenType.Identifier && next && next.text === '=');
+
+                // LINQ keywords shouldn't trigger semicolon injection
+                const isLinqContinuation = ['from', 'where', 'select', 'group', 'join', 'let', 'orderby', 'into', 'on', 'equals', 'by', 'ascending', 'descending'].includes(token.text);
+
+                // Check if prev is part of control flow block `if (cond)`, `while(cond)`
+                let isControlFlowEnd = false;
+                if (prev.text === ')') {
+                    // Check backward for `if`, `while`, `for`, `foreach`, `switch`, `catch`
+                    let parenCount = 0;
+                    for (let p = i - 2; p >= 0; p--) {
+                         const pt = meaningfulTokens[p];
+                         if (pt.text === ')') parenCount++;
+                         else if (pt.text === '(') {
+                             if (parenCount === 0) {
+                                 if (p > 0 && ['if', 'while', 'for', 'foreach', 'switch', 'catch', 'using', 'lock', 'fixed'].includes(meaningfulTokens[p-1].text)) {
+                                     isControlFlowEnd = true;
+                                 }
+                                 break;
+                             }
+                             parenCount--;
+                         }
+                         if (pt.text === ';' || pt.text === '{' || pt.text === '}') break;
+                    }
+                }
+
+                if (prev.text === ']') {
+                    // It could be an attribute `[Obsolete]\n public class` -> NO semicolon
+                    // Or array index `arr[0]\n return;` -> MISSING semicolon
+                    // Since it's ambiguous and often an attribute on the previous line, let's err on the side of caution.
+                    // Actually we track `inAttribute` but it might be reset too early or not cover the newline.
+                    isControlFlowEnd = true; // Skip semicolon for `]` to be safe against breaking attributes.
+                }
+
+                // Exclude attributes logic, switch blocks logic, and other specific contexts
+                if (currentIsNewStatement && !isLinqContinuation && !inAttribute && !isControlFlowEnd) {
+                     // Check if it's inside a method definition (e.g. `public void Foo() \n public void Bar()`) -> prev was `)`
+                     let isMethodDef = false;
+                     if (prev.text === ')') {
+                         if (token.text === '{' || token.text === '=>') isMethodDef = true;
+                     }
+
+                     if (!isMethodDef && prev.text !== '{' && prev.text !== '}' && prev.text !== ';' && prev.text !== ':') {
+                         append(';');
+                     }
+                }
+            }
+        }
+
         // Auto-Property detection (get; set;)
         let isCurrentAutoPropStart = false;
         if (token.text === '{') {
@@ -499,6 +556,20 @@ export function formatCSharpDeep(text: string): string {
     }
 
     if (currentLine.trim() !== '') pushLine();
+
+    // --- Fault Tolerance: Unclosed Braces ---
+    while (indentLevel > 0) {
+        indentLevel--;
+        if (switchIndentStack.length > 0) {
+            const wasCaseIndented = switchIndentStack.pop();
+            if (wasCaseIndented) {
+                indentLevel = Math.max(0, indentLevel - 1);
+            }
+        }
+
+        currentLine = getIndent() + '}';
+        pushLine();
+    }
 
     return outputLines.join('\n');
 }
