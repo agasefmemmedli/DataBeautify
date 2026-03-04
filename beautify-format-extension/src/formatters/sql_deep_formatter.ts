@@ -516,6 +516,19 @@ export function formatSQLFallback(text: string): string {
         }
     }
 
+    // Fault Tolerance: Close any unclosed parentheses
+    while (parenStack.length > 0) {
+        const type = parenStack.pop();
+        indentLevel = Math.max(0, indentLevel - 1);
+        pushLine();
+        if (type === 'case') {
+            currentLine = INDENT_STR.repeat(indentLevel) + 'END';
+        } else {
+            currentLine = INDENT_STR.repeat(indentLevel) + ')';
+        }
+        pushLine();
+    }
+
     pushLine();
 
     // Call processSQLDeep for alignment
