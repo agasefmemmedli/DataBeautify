@@ -1,10 +1,10 @@
-
 import { HTMLTokenizer, TokenType, Token } from './html_tokenizer';
 import { formatJSDeep } from './js_deep_formatter';
 import { formatCSSDeep } from './css_deep_formatter';
 import { formatSCSSDeep } from './scss_deep_formatter';
 import { formatLessDeep } from './less_deep_formatter';
 import { formatSassDeep } from './sass_deep_formatter';
+import * as prettier from 'prettier';
 
 interface VueFormattingOptions {
     tabSize?: number;
@@ -13,7 +13,27 @@ interface VueFormattingOptions {
     printWidth?: number;
 }
 
-export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): string {
+export async function formatVueDeep(vue: string, options: VueFormattingOptions = {}): Promise<string> {
+    const tabSize = options.tabSize || 2;
+    const insertSpaces = options.insertSpaces !== false;
+    const printWidth = options.printWidth || 120;
+
+    try {
+        return await prettier.format(vue, {
+            parser: 'vue',
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: printWidth,
+            vueIndentScriptAndStyle: true,
+            singleQuote: false,
+            trailingComma: 'none'
+        });
+    } catch (e) {
+        return formatVueFallback(vue, options);
+    }
+}
+
+export function formatVueFallback(vue: string, options: VueFormattingOptions = {}): string {
     const tabSize = options.tabSize || 2;
     const insertSpaces = options.insertSpaces !== false;
     const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
@@ -176,10 +196,6 @@ export function formatVueDeep(vue: string, options: VueFormattingOptions = {}): 
                      const contentIndentLevel = indentLevel + 1;
 
                      for (const line of lines) {
-                         // Some formatters like formatSCSSDeep add their own indentation.
-                         // Trim lines before prepending indentation unless they are inside blocks?
-                         // Actually, preserving inner indentation from the deep formatters:
-                         // Deep formatter outputs indented code. We just prepend base indent.
                          const hasContent = line.trim().length > 0;
                          if (hasContent) {
                              formattedLines.push(getIndent(contentIndentLevel) + line);
