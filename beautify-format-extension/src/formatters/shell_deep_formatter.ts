@@ -92,13 +92,13 @@ export function formatShellDeep(text: string): string {
         const last = interestingTokens[interestingTokens.length - 1];
 
         // --- Dedent Logic ---
-        const dedentKeywords = new Set(['fi', 'done', 'esac', '}', 'elif', 'else', ']', ']]']);
+        const dedentKeywords = new Set(['fi', 'done', 'esac', '}', 'elif', 'else', ']', ']]', ')']);
         let tempDedent = false;
 
         if (dedentKeywords.has(first.text)) {
             if (first.text === 'elif' || first.text === 'else') {
-                 tempDedent = true;
-            } else if (first.text === 'fi' || first.text === 'done' || first.text === 'esac' || first.text === '}') {
+                 if (indentLevel > 0) indentLevel--;
+            } else if (first.text === 'fi' || first.text === 'done' || first.text === 'esac' || first.text === '}' || (first.text === ')' && lineTokens.length === 1)) {
                 if (indentLevel > 0) indentLevel--;
                 if (first.text === 'esac') {
                     if (contextStack.length > 0 && contextStack[contextStack.length-1] === 'case') {
@@ -119,15 +119,6 @@ export function formatShellDeep(text: string): string {
              if (indentLevel > 0) indentLevel--;
         }
 
-        // Case Pattern Logic (Complex)
-        // If line ends with `)` and context is case, it might be a pattern.
-        // We want patterns at `case_indent + 1`.
-        // `case ... in` puts us at `case_indent + 1`.
-        // So patterns are naturally at `indentLevel`.
-        // But body needs +1.
-        // If we just finished a body with `;;`, we dedented. So we are back at `indentLevel`.
-        // So pattern starts at `indentLevel`.
-
         let printIndent = indentLevel;
         if (tempDedent) printIndent = Math.max(0, printIndent - 1);
 
@@ -137,6 +128,7 @@ export function formatShellDeep(text: string): string {
         for (let j = 0; j < interestingTokens.length; j++) {
             const t = interestingTokens[j];
             const prev = j > 0 ? interestingTokens[j-1] : null;
+            const next = j < interestingTokens.length - 1 ? interestingTokens[j+1] : null;
 
             if (j > 0 && prev) {
                 let space = ' ';
@@ -145,6 +137,24 @@ export function formatShellDeep(text: string): string {
                 const isTest = currentContext === 'test';
 
                 const isAdjacent = (t.col === prev.col + prev.text.length);
+
+                // Preserve original adjacency for specific operators if they were adjacent
+                // to prevent bugs like `- a` instead of `-a`, `/ dev / null`, `>& 2`
+                if (isAdjacent && (t.type === TokenType.Operator || prev.type === TokenType.Operator)) {
+                     // We want to keep adjacent things together if they form unary operators, paths, etc.
+                     // But we must be careful not to glue words together if they shouldn't be.
+                     // Actually, if they are adjacent in the original source, and one is an operator
+                     // like `-`, `/`, `&`, etc., it's usually intentional (e.g., `-z`, `/dev/null`).
+                     // Let's refine this to avoid spaces around `/`, `-`, `~`, `!`, `&`, `|` if they were adjacent
+                     // except for pipes `|` and background `&` which usually have spaces.
+                     if (t.text === '/' || prev.text === '/') space = '';
+                     if (t.text === '-' && isTest) space = ''; // `-z "$arg"`
+                     if (prev.text === '-' && isTest) space = '';
+                     if (t.text === '&' || prev.text === '&') {
+                         if (['>', '<', '2>', '1>'].includes(prev.text) || ['>', '<'].includes(t.text)) space = '';
+                     }
+                     if (t.type === TokenType.Number && ['>&', '<&'].includes(prev.text)) space = '';
+                }
 
                 // 1. Assignments
                 if (t.text === '=' || prev.text === '=') {
@@ -169,8 +179,22 @@ export function formatShellDeep(text: string): string {
                          space = ' ';
                      }
                 } else if (['>', '>>', '<', '<<', '<<-', '&>', '>&'].includes(prev.text)) {
-                     space = ' ';
+                     if (t.type === TokenType.Number && isAdjacent) {
+                         space = ''; // `>&2`
+                     } else {
+                         space = ' ';
+                     }
                 }
+
+                // 2b. Paths and hyphens (fallback if adjacent check didn't catch it)
+                else if (t.text === '/' || prev.text === '/') {
+                    if (isAdjacent) space = '';
+                }
+                else if (t.text === '-' || prev.text === '-') {
+                    if (isAdjacent) space = '';
+                }
+                else if (prev.text === '[' || prev.text === '[[') space = ' ';
+                else if (t.text === ']' || t.text === ']]') space = ' ';
 
                 // 3. Pipes and Logic
                 else if (['|', '||', '&&', ';'].includes(t.text)) {
@@ -282,8 +306,12 @@ export function formatShellDeep(text: string): string {
 
         if (last.text === 'then' || last.text === 'do' || last.text === '{') {
             indentLevel++;
-        } else if (last.text === '(') {
-            indentLevel++;
+        } else if (last.text === '(' && first.text !== '(') {
+            if (first.text !== 'function') {
+                 indentLevel++;
+            }
+        } else if (last.text === '(' && first.text === '(' && lineTokens.length === 1) {
+            indentLevel++; // Open subshell on its own line
         } else if (last.text === 'else' || last.text === 'elif') {
              indentLevel++;
         }
@@ -301,16 +329,16 @@ export function formatShellDeep(text: string): string {
 
         // Case Patterns: `pattern)`
         if (last.text === ')' && contextStack.length > 0 && contextStack[contextStack.length-1] === 'case') {
-             // Check if it's a subshell inside case?
-             // `(cmd)` on one line.
-             // If line starts with `(`, it might be `(pat)` or `(cmd)`.
-             // But valid pattern is `pat)` or `(pat)`.
-             // If line contains `;;`, it's a one-liner case, don't indent.
              if (!interestingTokens.some(t => t.text === ';;')) {
-                 // Check if it looks like a command?
-                 // Heuristic: if it ends with `)`, it's likely a pattern start in `case` block.
-                 indentLevel++;
+                 if (first.type === TokenType.String || first.type === TokenType.Identifier || first.text === '*' || first.text === '(' || first.text === ')') {
+                     indentLevel++;
+                 }
              }
+        }
+
+        // Dedent after single-line case patterns or at the end of case blocks
+        if (last.text === ';;' && first.text !== ';;') {
+            if (indentLevel > 0) indentLevel--;
         }
     }
 
