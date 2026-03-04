@@ -3,10 +3,10 @@ const path = require('path');
 
 async function runTests() {
     console.log('Running Vue Deep Formatting (Fallback) Verification...');
-    let formatVueDeep;
+    let formatVueFallback;
     try {
         const module = require('./out/formatters/vue_deep_formatter');
-        formatVueDeep = module.formatVueDeep;
+        formatVueFallback = module.formatVueFallback;
     } catch (e) {
         console.error('Could not load vue_deep_formatter. Make sure to run "npm run compile" first.');
         console.error(e);
@@ -24,7 +24,7 @@ async function runTests() {
     console.log(`Formatting ${testFile}...`);
     let formatted = '';
     try {
-        formatted = formatVueDeep(content, {
+        formatted = formatVueFallback(content, {
             tabSize: 2,
             insertSpaces: true,
             printWidth: 120,
@@ -34,16 +34,6 @@ async function runTests() {
         console.error('Formatting failed:', e);
         process.exit(1);
     }
-
-    // verification checks
-    // Note: formatVueDeep indents top-level tags inside template? No, formatHTMLDeep handles indentation from level 0.
-    // If <template> is at level 0, its children are at level 1.
-    // If <script> is at level 0, its content is at level 0 (but indented by logic?)
-    // In my implementation:
-    // formattedLines.push(getIndent(indentLevel) + line);
-    // So script content is indented by current indentLevel.
-
-    // Let's check expected output based on implementation logic.
 
     const expectedContains = [
         '<template>',
