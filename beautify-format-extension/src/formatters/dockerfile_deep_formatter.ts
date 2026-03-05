@@ -161,6 +161,78 @@ export function formatDockerfileDeep(text: string): string {
                  }
 
                  if (!processed) {
+                     // Handle ENV and LABEL alignment
+                     if (keyword === 'ENV' || keyword === 'LABEL') {
+                         let hasEquals = false;
+                         for (let k = 0; k < newInstructionLines.length; k++) {
+                             if (k === 0) {
+                                 // Check first line args for equal sign
+                                 const args = newInstructionLines[0].substring(keyword.length).trim();
+                                 if (args.includes('=')) hasEquals = true;
+                             } else {
+                                 if (newInstructionLines[k].includes('=')) hasEquals = true;
+                             }
+                         }
+
+                         if (hasEquals) {
+                             const parsedLines: { beforeEq: string, afterEq: string, isComment: boolean, isLast: boolean, originalLine: string }[] = [];
+                             let maxKeyLen = 0;
+
+                             for (let k = 0; k < newInstructionLines.length; k++) {
+                                 const line = newInstructionLines[k];
+                                 const trimmed = line.trim();
+
+                                 if (trimmed.startsWith('#')) {
+                                     parsedLines.push({ beforeEq: '', afterEq: '', isComment: true, isLast: k === newInstructionLines.length - 1, originalLine: line });
+                                     continue;
+                                 }
+
+                                 let cleanLine = line.replace(/\\$/, '').trimEnd();
+                                 let content = k === 0 ? cleanLine.substring(keyword.length).trim() : cleanLine.trim();
+
+                                 // Support multiple key=value pairs on a single line
+                                 // For deep formatting we might just align what's there if it's a single key=value per line,
+                                 // but to keep it safe, if there are multiple pairs in one line without backslashes, we leave it alone or just align the first.
+                                 // Let's align the first `=` if it's a continuation line or if it's the first line.
+                                 const eqIndex = content.indexOf('=');
+                                 if (eqIndex !== -1) {
+                                     const keyPart = content.substring(0, eqIndex).trim();
+                                     const valPart = content.substring(eqIndex + 1).trim();
+                                     maxKeyLen = Math.max(maxKeyLen, keyPart.length);
+                                     parsedLines.push({ beforeEq: keyPart, afterEq: valPart, isComment: false, isLast: k === newInstructionLines.length - 1, originalLine: line });
+                                 } else {
+                                     parsedLines.push({ beforeEq: content, afterEq: '', isComment: false, isLast: k === newInstructionLines.length - 1, originalLine: line });
+                                 }
+                             }
+
+                             const alignedPairs: string[] = [];
+                             for (let k = 0; k < parsedLines.length; k++) {
+                                 const p = parsedLines[k];
+                                 if (p.isComment) {
+                                     alignedPairs.push(p.originalLine);
+                                 } else {
+                                     if (k === 0) {
+                                         if (p.afterEq !== '') {
+                                             const pad = ' '.repeat(Math.max(0, maxKeyLen - p.beforeEq.length));
+                                             alignedPairs.push(`${keyword} ${p.beforeEq}${pad}=${p.afterEq}${p.isLast ? '' : ' \\'}`);
+                                         } else {
+                                             alignedPairs.push(`${keyword} ${p.beforeEq}${p.isLast ? '' : ' \\'}`);
+                                         }
+                                     } else {
+                                         if (p.afterEq !== '') {
+                                             const pad = ' '.repeat(Math.max(0, maxKeyLen - p.beforeEq.length));
+                                             alignedPairs.push(`${indent}${p.beforeEq}${pad}=${p.afterEq}${p.isLast ? '' : ' \\'}`);
+                                         } else {
+                                             alignedPairs.push(`${indent}${p.beforeEq}${p.isLast ? '' : ' \\'}`);
+                                         }
+                                     }
+                                 }
+                             }
+                             newInstructionLines.length = 0;
+                             newInstructionLines.push(...alignedPairs);
+                         }
+                     }
+
                      // Align Backslashes
                      let maxLen = 0;
                      for (const l of newInstructionLines) {
