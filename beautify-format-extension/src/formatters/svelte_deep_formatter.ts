@@ -100,7 +100,27 @@ export interface SvelteFormattingOptions {
 
 // --- Main Function ---
 
-export function formatSvelteDeep(text: string, options: SvelteFormattingOptions = {}): string {
+export async function formatSvelteDeep(text: string, options: SvelteFormattingOptions = {}): Promise<string> {
+    const tabSize = options.tabSize || 2;
+    const insertSpaces = options.insertSpaces !== false;
+    const printWidth = options.printWidth || 80;
+
+    try {
+        const prettier = require('prettier');
+        const prettierPluginSvelte = require('prettier-plugin-svelte');
+        return await prettier.format(text, {
+            parser: 'svelte',
+            plugins: [prettierPluginSvelte],
+            tabWidth: tabSize,
+            useTabs: !insertSpaces,
+            printWidth: printWidth,
+        });
+    } catch (e) {
+        return formatSvelteFallback(text, options);
+    }
+}
+
+export function formatSvelteFallback(text: string, options: SvelteFormattingOptions = {}): string {
     const tabSize = options.tabSize || 2;
     const insertSpaces = options.insertSpaces !== false;
 
