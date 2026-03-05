@@ -819,7 +819,7 @@ export async function handleSvelte(editor: vscode.TextEditor, text: string) {
     } catch (prettierError: any) {
         // Fallback to custom Deep Formatter (Fault Tolerant)
         try {
-            formatted = formatSvelteDeep(text, {
+            formatted = await formatSvelteDeep(text, {
                 tabSize: tabSize || 2,
                 insertSpaces: insertSpaces,
                 printWidth: 120

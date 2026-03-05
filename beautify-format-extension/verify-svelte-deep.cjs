@@ -29,9 +29,10 @@ const input = `
 </button>
 `;
 
+(async () => {
 try {
     console.log('Testing Svelte Deep Formatter...');
-    const formatted = formatSvelteDeep(input, { tabSize: 2, insertSpaces: true });
+    const formatted = await formatSvelteDeep(input, { tabSize: 2, insertSpaces: true });
 
     console.log('Formatted Output:\n', formatted);
 
@@ -53,3 +54,4 @@ try {
     console.error('❌ Svelte Deep Formatter Verification Failed:', e);
     process.exit(1);
 }
+})();
