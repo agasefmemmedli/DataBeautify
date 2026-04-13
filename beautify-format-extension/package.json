@@ -2,7 +2,7 @@
   "name": "beautify-format",
   "displayName": "Beautify Format",
   "description": "Beautify and format JSON, JSONC, XML, SVG, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown and LaTeX files with keyboard shortcuts and context menu",
-  "version": "0.31.7",
+  "version": "0.31.9",
   "publisher": "DataBeautify",
   "icon": "images/icon.png",
   "galleryBanner": {
