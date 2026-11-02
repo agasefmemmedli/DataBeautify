@@ -1,0 +1,46 @@
+installation:
+  version: 6.3.0
+  installDate: 2026-04-16T11:36:03.334Z
+  lastUpdated: 2026-04-22T16:27:34.018Z
+modules:
+  - name: core
+    version: 6.3.0
+    installDate: 2026-04-16T11:35:50.751Z
+    lastUpdated: 2026-04-22T16:27:33.626Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmm
+    version: 6.3.0
+    installDate: 2026-04-16T11:35:51.037Z
+    lastUpdated: 2026-04-22T16:27:33.628Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmb
+    version: 1.6.0
+    installDate: 2026-04-16T11:35:52.493Z
+    lastUpdated: 2026-04-22T16:27:33.857Z
+    source: external
+    npmPackage: bmad-builder
+    repoUrl: https://github.com/bmad-code-org/bmad-builder
+  - name: cis
+    version: 0.2.0
+    installDate: 2026-04-16T11:35:55.125Z
+    lastUpdated: 2026-04-22T16:27:33.936Z
+    source: external
+    npmPackage: bmad-creative-intelligence-suite
+    repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
+  - name: tea
+    version: 1.13.0
+    installDate: 2026-04-16T11:35:58.281Z
+    lastUpdated: 2026-04-22T16:27:34.018Z
+    source: external
+    npmPackage: bmad-method-test-architecture-enterprise
+    repoUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise
+ides:
+  - claude-code
+  - gemini
+  - github-copilot
+  - roo
+  - cursor
