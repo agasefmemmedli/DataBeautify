@@ -1,7 +1,7 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, SVG, HTML, CSS, SCSS, SASS, LESS, JavaScript, TypeScript, JSX, TSX, Vue, Svelte, PHP, YAML, TOML, INI, ENV, CSV, GraphQL, Python, Java, Kotlin, C#, C++, Go, Rust, Ruby, Swift, Dart, Dockerfile, Shell Script, PowerShell, Terraform/HCL, Makefile, Nginx, SQL, Prisma, MongoDB Shell, Markdown and LaTeX files with keyboard shortcuts and context menu",
+  "description": "Beautify and format JSON, JSONC and XML with a keyboard shortcut. Fixes common syntax errors safely and never writes a result that changes your data.",
   "version": "0.31.9",
   "publisher": "DataBeautify",
   "icon": "images/icon.png",
@@ -13,31 +13,25 @@
     "name": "Aghasaf Mammadli"
   },
   "license": "MIT",
-  "homepage": "https://github.com/agasefmemmedli",
+  "homepage": "https://github.com/agasefmemmedli/DataBeautify/tree/main/beautify-format-extension#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agasefmemmedli"
+    "url": "https://github.com/agasefmemmedli/DataBeautify.git",
+    "directory": "beautify-format-extension"
   },
   "bugs": {
-    "url": "https://github.com/agasefmemmedli"
+    "url": "https://github.com/agasefmemmedli/DataBeautify/issues"
   },
   "keywords": [
     "beautify",
     "format",
     "formatter",
     "json",
+    "jsonc",
     "xml",
-    "html",
-    "css",
-    "scss",
-    "sass",
-    "less",
-    "typescript",
-    "svelte",
-    "php",
-    "go",
     "prettify",
-    "indent"
+    "indent",
+    "repair"
   ],
   "engines": {
     "vscode": "^1.74.0"
@@ -45,25 +39,8 @@
   "categories": [
     "Formatters"
   ],
-  "activationEvents": [
-    "onCommand:beautify-format.beautify",
-    "onCommand:beautify-format.formatJSON",
-    "onCommand:beautify-format.formatXML",
-    "onCommand:beautify-format.formatJSONC",
-    "onLanguage:json",
-    "onLanguage:jsonc",
-    "onLanguage:xml"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
-    "languages": [
-      {
-        "id": "editorconfig",
-        "extensions": [
-          ".editorconfig"
-        ]
-      }
-    ],
     "commands": [
       {
         "command": "beautify-format.beautify",
@@ -98,6 +75,16 @@
           "group": "1_modification"
         }
       ]
+    },
+    "configuration": {
+      "title": "Beautify Format",
+      "properties": {
+        "beautifyFormat.xml.sortAttributes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort XML attributes (id, class, name, src, href, type first, then alphabetically). Off by default to keep diffs small."
+        }
+      }
     }
   },
   "scripts": {
@@ -105,66 +92,27 @@
     "compile": "tsc -p ./",
     "bundle": "node esbuild.cjs",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "mocha \"out/test/unit/**/*.test.js\"",
+    "test:corpus": "npm run compile && node scripts/corpus-check.cjs"
   },
   "devDependencies": {
-    "@types/acorn": "^4.0.6",
-    "@types/css": "^0.0.38",
-    "@types/glob": "^8.1.0",
-    "@types/htmlhint": "^1.1.5",
-    "@types/ini": "^4.1.1",
-    "@types/js-beautify": "^1.14.3",
-    "@types/less": "^3.0.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^16.18.126",
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
-    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^2.x.x",
     "esbuild": "^0.27.3",
     "eslint": "^8.28.0",
-    "glob": "^13.0.4",
     "mocha": "^11.7.5",
     "typescript": "^5.7.3"
   },
   "dependencies": {
-    "@prettier/plugin-php": "^0.24.0",
-    "@prettier/plugin-ruby": "^4.0.4",
-    "@sanderjn/prettier-plugin-twig-melody": "^2.2.2",
-    "@shopify/prettier-plugin-liquid": "^1.10.0",
-    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
-    "acorn": "^8.15.0",
-    "antlr4ts": "^0.5.0-alpha.4",
-    "css": "^3.0.0",
     "fast-xml-parser": "^5.3.6",
-    "graphql": "^16.12.0",
-    "htmlhint": "^1.9.1",
-    "ini": "^6.0.0",
-    "java-ast": "^0.4.1",
-    "js-beautify": "^1.15.4",
     "jsonc-parser": "^3.3.1",
     "jsonrepair": "^3.13.2",
-    "less": "^4.5.1",
-    "php-parser": "^3.2.5",
-    "prettier": "^3.8.1",
-    "prettier-plugin-astro": "^0.14.1",
-    "prettier-plugin-java": "^2.8.1",
-    "prettier-plugin-kotlin": "^2.1.0",
-    "prettier-plugin-powershell": "^2.0.11",
-    "prettier-plugin-prisma": "^5.0.0",
-    "prettier-plugin-sh": "^0.18.0",
-    "prettier-plugin-svelte": "^3.5.1",
-    "prettier-plugin-toml": "^2.0.6",
-    "python-ast": "^0.1.0",
-    "sass": "^1.97.3",
-    "sass-formatter": "^0.8.0",
-    "smol-toml": "^1.6.0",
-    "sql-formatter": "^15.7.2",
-    "svelte": "^5.51.1",
-    "xml-formatter": "^3.6.0",
-    "yaml": "^2.8.2"
+    "xml-formatter": "^3.6.0"
   }
 }

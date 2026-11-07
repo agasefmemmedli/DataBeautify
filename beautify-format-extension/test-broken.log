@@ -1,8 +1,0 @@
-This line has no timestamp.
-But this one does:
-2023-10-27 10:00:00 INFO valid log
-Another line without timestamp.
-10:00:01 ERROR another log
-    already indented line
-        more indentation
-2023-10-27 10:00:02 WARN last line

@@ -1,5 +1,0 @@
-# Broken TOML
-title = "Broken"
-invalid =
-[unclosed
-key = "value"

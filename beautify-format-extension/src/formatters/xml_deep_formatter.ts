@@ -27,18 +27,12 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
     const normalizeAttributeValue = (val: string): string => {
         let content = val;
         // Strip outer quotes if present
-        if ((content.startsWith('"') && content.endsWith('"')) || (content.startsWith("'") && content.endsWith("'"))) {
+        if (content.length >= 2 && ((content.startsWith('"') && content.endsWith('"')) || (content.startsWith("'") && content.endsWith("'")))) {
             content = content.substring(1, content.length - 1);
         }
 
-        // Unescape &quot; to " temporarily if we want to re-escape properly?
-        // Actually, if input is `attr="escaped \"value\""`, the tokenizer returns `"escaped \"value\""`.
-        // We strip quotes: `escaped \"value\"`.
-        // We need to handle the escaped quotes inside.
-        // Replace `\"` with `"` then `"` with `&quot;`.
-        content = content.replace(/\\"/g, '"').replace(/\\'/g, "'");
-
-        // Escape " to &quot;
+        // Values are always printed in double quotes, so a literal " (possible
+        // inside a single-quoted value) must become &quot;. Backslashes are kept as is.
         content = content.replace(/"/g, '&quot;');
 
         return `"${content}"`;
@@ -83,18 +77,15 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
             } else if (t.type === TokenType.TagClose) {
                 buffer += t.text;
             } else if (t.type === TokenType.Text) {
-                // Check if text has multiple lines. If it does, we shouldn't format it inline.
-                if (t.text.includes('\n')) {
-                    // Check if the lines are purely whitespace
-                    if (t.text.trim() !== '') {
-                        return null;
-                    } else {
-                        // Empty lines of whitespace, can be collapsed
-                        buffer += t.text.replace(/\s+/g, ' ');
-                    }
-                } else {
-                    buffer += t.text.replace(/\s+/g, ' ');
+                // Whitespace-only text is layout and is dropped, just like in block mode
+                if (t.text.trim() === '') {
+                    continue;
                 }
+                // Text spanning several lines is not formatted inline
+                if (t.text.includes('\n')) {
+                    return null;
+                }
+                buffer += t.text.replace(/\s+/g, ' ');
             } else if (t.type === TokenType.Comment || t.type === TokenType.CDATA) {
                 buffer += t.text;
             }
@@ -172,7 +163,7 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                 while (k < tokens.length) {
                     const t = tokens[k];
                     if (t.type === TokenType.TagOpen) depth++;
-                    else if (t.type === TokenType.TagSelfClose) { /* no depth change */ }
+                    else if (t.type === TokenType.TagSelfClose) depth--; // <child/> opened and closed
                     else if (t.type === TokenType.TagClose) {
                         if (depth === 0) {
                             // Check name match
@@ -193,12 +184,23 @@ export function formatXMLDeep(xml: string, options: XMLFormattingOptions = {}): 
                     const potentialInline = tryFormatInline(j + 1, closingTagIndex);
                     if (potentialInline !== null) {
                         const totalLen = (getIndent(indentLevel) + tagStart + attrStrSingle + closingSingle + potentialInline + tokens[closingTagIndex].text).length;
-                        if (totalLen <= printWidth) {
+                        // An empty element always stays as <tag ...></tag>
+                        if (totalLen <= printWidth || potentialInline === '') {
                             isInline = true;
                             inlineContent = potentialInline;
                         }
                     }
                 }
+            }
+
+            // xml:space="preserve": whitespace inside is significant, copy the content verbatim
+            const preserveSpace = attributes.some(a => a.name === 'xml:space' && a.value === '"preserve"');
+            if (preserveSpace && !selfClosing && closingTagIndex !== -1) {
+                const contentStart = tokens[j].pos + tokens[j].text.length;
+                const rawContent = xml.slice(contentStart, tokens[closingTagIndex].pos);
+                formattedLines.push(`${getIndent(indentLevel)}${tagStart}${attrStrSingle}${closingSingle}${rawContent}${tokens[closingTagIndex].text}`);
+                i = closingTagIndex;
+                continue;
             }
 
             // Decide on Attribute Wrapping

@@ -11,16 +11,16 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "node",
+      "mocha"
+    ]
   },
   "exclude": [
-    "node_modules",
-    ".vscode-test",
-    "test*.ts",
-    "test*.tsx",
-    "test*.js",
-    "src/test",
-    "test",
-    "src/verify-*.ts"
+    "node_modules"
+  ],
+  "include": [
+    "src"
   ]
 }

@@ -1,17 +1,8 @@
-.vscode/**
-.vscode-test/**
-src/**
-out/**
-node_modules/**
-.gitignore
-.yarnrc
-vsc-extension-quickstart.md
-**/tsconfig.json
-**/.eslintrc.json
-**/.eslintrc.js
-**/*.map
-**/*.ts
-package-lock.json
-test.*
-test-broken.*
-esbuild.js
+# Whitelist: ship only what the extension needs at runtime.
+# vsce always adds package.json, README.md and LICENSE.
+**
+!dist/extension.js
+!images/icon.png
+!README.md
+!LICENSE
+!CHANGELOG.md

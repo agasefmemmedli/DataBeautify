@@ -19,6 +19,8 @@ export interface Token {
     text: string;
     line: number;
     col: number;
+    // Offset of the token in the source text
+    pos: number;
 }
 
 export class XMLTokenizer {
@@ -60,6 +62,7 @@ export class XMLTokenizer {
     private readComment(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
         while (this.pos < this.input.length) {
             if (this.input.startsWith('-->', this.pos)) {
@@ -70,12 +73,13 @@ export class XMLTokenizer {
             text += this.input[this.pos];
             this.advance(1);
         }
-        return { type: TokenType.Comment, text, line: startLine, col: startCol };
+        return { type: TokenType.Comment, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private readCDATA(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
         while (this.pos < this.input.length) {
             if (this.input.startsWith(']]>', this.pos)) {
@@ -86,12 +90,13 @@ export class XMLTokenizer {
             text += this.input[this.pos];
             this.advance(1);
         }
-        return { type: TokenType.CDATA, text, line: startLine, col: startCol };
+        return { type: TokenType.CDATA, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private readDoctype(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
         let depth = 0;
 
@@ -109,12 +114,13 @@ export class XMLTokenizer {
                 }
             }
         }
-        return { type: TokenType.Doctype, text, line: startLine, col: startCol };
+        return { type: TokenType.Doctype, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private readPI(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
         while (this.pos < this.input.length) {
             if (this.input.startsWith('?>', this.pos)) {
@@ -125,12 +131,13 @@ export class XMLTokenizer {
             text += this.input[this.pos];
             this.advance(1);
         }
-        return { type: TokenType.PI, text, line: startLine, col: startCol };
+        return { type: TokenType.PI, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private readTagClose(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
 
         // Consume </
@@ -151,13 +158,14 @@ export class XMLTokenizer {
             if (char === '>') break;
         }
 
-        return { type: TokenType.TagClose, text, line: startLine, col: startCol };
+        return { type: TokenType.TagClose, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private readTagOpen(): Token[] {
         const tokens: Token[] = [];
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
 
         // Consume <
@@ -170,7 +178,7 @@ export class XMLTokenizer {
             this.advance(1);
         }
 
-        tokens.push({ type: TokenType.TagOpen, text, line: startLine, col: startCol });
+        tokens.push({ type: TokenType.TagOpen, text, line: startLine, col: startCol, pos: startPos });
 
         // Read Attributes
         while (this.pos < this.input.length) {
@@ -178,17 +186,18 @@ export class XMLTokenizer {
             const char = this.input[this.pos];
 
             if (char === '>') {
-                tokens.push({ type: TokenType.TagEnd, text: '>', line: this.line, col: this.col });
+                tokens.push({ type: TokenType.TagEnd, text: '>', line: this.line, col: this.col, pos: this.pos });
                 this.advance(1);
                 break;
             } else if (this.input.startsWith('/>', this.pos)) {
-                 tokens.push({ type: TokenType.TagSelfClose, text: '/>', line: this.line, col: this.col });
+                 tokens.push({ type: TokenType.TagSelfClose, text: '/>', line: this.line, col: this.col, pos: this.pos });
                  this.advance(2);
                  break;
             } else {
                 // Attribute Name (Relaxed regex)
                 const attrLine = this.line;
                 const attrCol = this.col;
+                const attrPos = this.pos;
                 let attrName = '';
                 while (this.pos < this.input.length && /[^<>\s/="'=]/.test(this.input[this.pos])) {
                     attrName += this.input[this.pos];
@@ -196,7 +205,7 @@ export class XMLTokenizer {
                 }
 
                 if (attrName) {
-                    tokens.push({ type: TokenType.AttributeName, text: attrName, line: attrLine, col: attrCol });
+                    tokens.push({ type: TokenType.AttributeName, text: attrName, line: attrLine, col: attrCol, pos: attrPos });
 
                     this.skipWhitespace();
                     if (this.input[this.pos] === '=') {
@@ -206,32 +215,19 @@ export class XMLTokenizer {
                         // Value
                         const valLine = this.line;
                         const valCol = this.col;
+                        const valPos = this.pos;
                         const quote = this.input[this.pos];
                         let val = '';
                         if (quote === '"' || quote === "'") {
                             val = quote;
                             this.advance(1);
+                            // In XML a backslash is an ordinary character, so the value
+                            // simply ends at the next matching quote (e.g. path="C:\temp\").
                             while (this.pos < this.input.length) {
                                 const c = this.input[this.pos];
-
-                                // Handle escaped quotes for resilience (e.g. \" inside attribute)
-                                let isEscaped = false;
-                                if (c === quote && this.pos > 0 && this.input[this.pos - 1] === '\\') {
-                                    // Check for even number of backslashes (e.g. \\" is not escaped quote)
-                                    let backslashCount = 0;
-                                    let k = this.pos - 1;
-                                    while (k >= 0 && this.input[k] === '\\') {
-                                        backslashCount++;
-                                        k--;
-                                    }
-                                    if (backslashCount % 2 !== 0) {
-                                        isEscaped = true;
-                                    }
-                                }
-
                                 val += c;
                                 this.advance(1);
-                                if (c === quote && !isEscaped) break;
+                                if (c === quote) break;
                             }
                         } else {
                              // Unquoted?
@@ -240,7 +236,7 @@ export class XMLTokenizer {
                                  this.advance(1);
                              }
                         }
-                        tokens.push({ type: TokenType.AttributeValue, text: val, line: valLine, col: valCol });
+                        tokens.push({ type: TokenType.AttributeValue, text: val, line: valLine, col: valCol, pos: valPos });
                     }
                 } else {
                     // unexpected char? just consume to avoid loop and data loss
@@ -259,12 +255,13 @@ export class XMLTokenizer {
     private readText(): Token {
         const startLine = this.line;
         const startCol = this.col;
+        const startPos = this.pos;
         let text = '';
         while (this.pos < this.input.length && this.input[this.pos] !== '<') {
             text += this.input[this.pos];
             this.advance(1);
         }
-        return { type: TokenType.Text, text, line: startLine, col: startCol };
+        return { type: TokenType.Text, text, line: startLine, col: startCol, pos: startPos };
     }
 
     private advance(n: number) {

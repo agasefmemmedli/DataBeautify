@@ -1,9 +1,0 @@
-2023-10-27 10:00:00 info starting service
-2023-10-27 10:00:01 error failed to start service
-connection refused
-at socket.connect (net.js:123)
-at bootstrap (index.js:45)
-2023-10-27 10:00:02 warn retrying in 5s
-[2023-10-27 10:00:07] debug re-attempting connection
-Oct 27 10:00:08 INFO success
-10:00:09 TRACE shutting down

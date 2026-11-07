@@ -62,7 +62,7 @@ export class JSONTokenizer {
                 tokens.push(this.readComment());
             } else if (/[0-9]/.test(char) || (char === '-' && /[0-9]/.test(this.input[this.pos + 1]))) {
                 tokens.push(this.readNumber());
-            } else if (/[a-zA-Z_$]/.test(char)) {
+            } else if (/[\p{L}_$]/u.test(char)) {
                 tokens.push(this.readIdentifier());
             } else {
                 tokens.push({ type: TokenType.Unknown, text: char, line: this.line, col: this.col });
@@ -156,7 +156,7 @@ export class JSONTokenizer {
         while (this.pos < this.input.length) {
             const char = this.input[this.pos];
             // Allow hyphens in identifiers for kebab-case unquoted keys
-            if (/[a-zA-Z0-9_$\-]/.test(char)) {
+            if (/[\p{L}\p{N}_$\-]/u.test(char)) {
                 text += char;
                 this.advance(1);
             } else {

@@ -1,82 +1,47 @@
 import * as vscode from 'vscode';
 import { detectFormat } from './detector';
-import { detectDelimiter } from './utils';
-
-// Import formatters
 import * as Web from './formatters/web';
 import * as JsTs from './formatters/js_ts';
 
-/**
- * This method is called when the extension is activated
- */
+type SupportedFormat = 'json' | 'jsonc' | 'xml';
+
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Beautify Format extension is now active!');
-
-    // Register unified beautify command
-    let beautifyCommand = vscode.commands.registerCommand('beautify-format.beautify', () => {
-        beautify();
-    });
-
-    context.subscriptions.push(beautifyCommand);
-
-    const register = (cmd: string, format: string) => {
-        context.subscriptions.push(vscode.commands.registerCommand(cmd, () => beautify(format as any)));
+    const register = (cmd: string, format?: SupportedFormat) => {
+        context.subscriptions.push(vscode.commands.registerCommand(cmd, () => beautify(format)));
     };
 
-    // Web
-    register('beautify-format.formatXML', 'xml');
-
-    // JS/TS
+    register('beautify-format.beautify');
     register('beautify-format.formatJSON', 'json');
     register('beautify-format.formatJSONC', 'jsonc');
+    register('beautify-format.formatXML', 'xml');
 }
 
-export async function beautify(forcedFormat?: 'json' | 'jsonc' | 'xml') {
+export async function beautify(forcedFormat?: SupportedFormat) {
     const editor = vscode.window.activeTextEditor;
-    
     if (!editor) {
         vscode.window.showErrorMessage('No active editor found');
         return;
     }
 
-    const document = editor.document;
-    const text = document.getText();
-
+    const text = editor.document.getText();
     if (text.trim().length === 0) {
         vscode.window.showWarningMessage('Document is empty');
         return;
     }
 
-    const format = forcedFormat || detectFormat(text, document.languageId);
+    const format = forcedFormat || detectFormat(text, editor.document.languageId);
 
-    // Web
-    if (format === 'xml') await Web.handleXML(editor, text);
-
-    // JS/TS
-    else if (format === 'json') await JsTs.handleJSON(editor, text);
-    else if (format === 'jsonc') await JsTs.handleJSONC(editor, text);
-
-    else {
-        // If unknown, try JSON first then XML
-        try {
-            const { jsonrepair } = require('jsonrepair');
-            jsonrepair(text);
-            await JsTs.handleJSON(editor, text);
-        } catch (e) {
-            const trimmed = text.trim();
-            if (trimmed.startsWith('<')) {
-                await Web.handleXML(editor, text);
-            } else {
-                vscode.window.showErrorMessage('Could not detect format (JSON, XML). Please ensure your file starts with {, [, <');
-            }
-        }
+    if (format === 'xml') {
+        await Web.handleXML(editor, text);
+    } else if (format === 'json') {
+        await JsTs.handleJSON(editor, text);
+    } else if (format === 'jsonc') {
+        await JsTs.handleJSONC(editor, text);
+    } else {
+        vscode.window.showErrorMessage('Beautify Format supports JSON, JSONC and XML. Could not detect any of them in this file.');
     }
 }
 
-// Re-export detectFormat for compatibility
 export { detectFormat };
 
-/**
- * This method is called when the extension is deactivated
- */
 export function deactivate() {}

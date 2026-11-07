@@ -1,5 +1,0 @@
-use test
-db.collection.insert({
-  a: 1
-  b: 2 // Missing comma
-})

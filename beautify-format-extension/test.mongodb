@@ -1,6 +1,0 @@
-use admin
-db.users.find({
-"name": "Jules"
-}).sort({createdAt: -1})
-show collections
-it

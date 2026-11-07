@@ -1,9 +1,0 @@
-[user]
-    name = John Doe
-    email = "john@example.com
-[core]
-    editor = code
-    autocrlf = input
-[remote "origin"
-    url = https://github.com/user/repo.git
-    fetch = +refs/heads/*:refs/remotes/origin/*

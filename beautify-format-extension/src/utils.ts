@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
+import { FormatError, FormatResult, IndentOptions } from './formatters/result';
 
 /**
- * Apply the formatted text to the editor
+ * Replace the whole document with the formatted text
  */
 export async function applyEdit(editor: vscode.TextEditor, newText: string) {
     const document = editor.document;
@@ -14,185 +15,60 @@ export async function applyEdit(editor: vscode.TextEditor, newText: string) {
     });
 }
 
-/**
- * Parse CSV text into 2D array
- */
-export function parseCSV(text: string, delimiter: string): string[][] {
-    const rows: string[][] = [];
-    let currentRow: string[] = [];
-    let currentField = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const nextChar = text[i + 1];
-
-        if (inQuotes) {
-            if (char === '"') {
-                if (nextChar === '"') {
-                    // Escaped quote
-                    currentField += '"';
-                    i++; // Skip next quote
-                } else {
-                    // End of quote
-                    inQuotes = false;
-                }
-            } else {
-                currentField += char;
-            }
-        } else {
-            if (char === '"') {
-                inQuotes = true;
-            } else if (char === delimiter) {
-                currentRow.push(currentField);
-                currentField = '';
-            } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
-                currentRow.push(currentField);
-                rows.push(currentRow);
-                currentRow = [];
-                currentField = '';
-                if (char === '\r') i++; // Skip \n
-            } else if (char === '\r') {
-                // Carriage return only
-                currentRow.push(currentField);
-                rows.push(currentRow);
-                currentRow = [];
-                currentField = '';
-            } else {
-                currentField += char;
-            }
-        }
-    }
-
-    // Push last field/row if any
-    if (currentRow.length > 0 || currentField.length > 0 || rows.length === 0) {
-        currentRow.push(currentField);
-        rows.push(currentRow);
-    } else if (text.length > 0 && text.endsWith('\n')) {
-         // If text ends with newline, we usually have an empty row or just finished the last row.
-         // With current logic, encountering \n pushes the row.
-         // If text is "a,b\n", we process \n, push row [a,b], reset currentRow.
-         // Then loop ends. currentRow is empty.
-         // We shouldn't push an empty row unless strict?
-         // RFC 4180 says "The last record in the file may or may not have an ending line break."
-         // If we have "a,b\n", we have 1 row.
-         // If we have "a,b\n\n", we have 2 rows (second is empty).
-         // My logic:
-         // "a,b\n"
-         // ...
-         // \n: push [a,b]. rows=[[a,b]]. currentRow=[]. currentField=''.
-         // Loop ends.
-         // Check: currentRow length is 0, currentField is 0.
-         // Do not push.
-         // Result: [[a,b]]. Correct.
-
-         // "a,b"
-         // Loop ends. currentRow=[a]. currentField='b'.
-         // Check: currentRow length > 0.
-         // Push. Result: [[a,b]]. Correct.
-
-         // "" (Empty string)
-         // Loop ends. currentRow=[], currentField=''.
-         // Check... text.length > 0? No.
-         // Should return [[]] or []?
-         // RFC: Empty file -> 0 records? Or 1 empty record?
-         // Usually [] is better for empty file.
-         // If text is "", loop doesn't run.
-         // Check if condition: currentRow=0, currentField=0, rows=0.
-         // if rows=0, push [""].
-         // Wait, `currentField` init is ''.
-         // So it pushes [''].
-         // This is fine.
-    }
-
-    return rows;
+export function getIndentOptions(editor: vscode.TextEditor): IndentOptions {
+    return {
+        tabSize: Number(editor.options.tabSize) || 2,
+        insertSpaces: editor.options.insertSpaces !== false,
+    };
 }
 
 /**
- * Detect CSV delimiter
+ * Ask before applying a fix that may change values. "Preview" opens a diff and applies nothing.
  */
-export function detectDelimiter(text: string): string {
-    const delimiters = [',', ';', '\t', '|'];
+async function confirmFix(editor: vscode.TextEditor, label: string, result: FormatResult): Promise<boolean> {
+    const apply = 'Apply Fix';
+    const preview = 'Preview';
+    const comments = result.commentsRemoved ? ' Comments will be removed.' : '';
+    const choice = await vscode.window.showWarningMessage(
+        `${label}: the file has a syntax error (${result.issue}).`,
+        { modal: true, detail: `The automatic fix is a guess and may change values.${comments} Check it before applying.` },
+        apply,
+        preview
+    );
 
-    // Take a sample of text (first 5KB should be enough to find delimiter)
-    const sample = text.length > 5000 ? text.substring(0, 5000) : text;
-
-    let bestDelimiter = ',';
-    let bestScore = -1;
-
-    for (const d of delimiters) {
-        try {
-            const rows = parseCSV(sample, d);
-
-            // Heuristic: valid CSV usually has consistent column counts.
-            if (rows.length < 2) {
-                // If only 1 row, we can't judge consistency.
-                // Prefer the one that splits into >1 columns?
-                if (rows.length === 1 && rows[0].length > 1) {
-                    // Give some score based on column count?
-                    // If we have "a,b,c", comma gives 3 cols. Semicolon gives 1.
-                    // Prefer comma.
-                    if (bestScore < 0.5) { // Weak score
-                         bestScore = 0.5;
-                         bestDelimiter = d;
-                    }
-                }
-                continue;
-            }
-
-            const colCounts = rows.map(r => r.length);
-            // Filter out empty rows (which parseCSV might produce for trailing newlines if not careful,
-            // but my logic handles trailing newline correctly.
-            // But completely empty lines "split" into [''].
-            const meaningfulRows = rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
-
-            if (meaningfulRows.length === 0) continue;
-
-            const counts = meaningfulRows.map(r => r.length);
-            const mostFrequentCount = getMode(counts);
-
-            if (mostFrequentCount <= 1) continue; // If mostly 1 column, it's likely not the delimiter
-
-            // Calculate consistency score: percentage of rows with mode count
-            const consistentRows = counts.filter(c => c === mostFrequentCount).length;
-            const score = consistentRows / counts.length;
-
-            // Prefer comma if scores are equal (standard)
-            if (score > bestScore) {
-                bestScore = score;
-                bestDelimiter = d;
-            } else if (score === bestScore && d === ',') {
-                bestDelimiter = d;
-            }
-        } catch (e) {
-            continue;
-        }
+    if (choice === preview) {
+        const fixed = await vscode.workspace.openTextDocument({ content: result.text, language: editor.document.languageId });
+        await vscode.commands.executeCommand('vscode.diff', editor.document.uri, fixed.uri, `${label}: original ↔ suggested fix`);
     }
-
-    return bestDelimiter;
-}
-
-function getMode(arr: number[]): number {
-    if (arr.length === 0) return 0;
-    const counts: {[key: number]: number} = {};
-    let maxFreq = 0;
-    let mode = arr[0];
-    for (const item of arr) {
-        counts[item] = (counts[item] || 0) + 1;
-        if (counts[item] > maxFreq) {
-            maxFreq = counts[item];
-            mode = item;
-        }
-    }
-    return mode;
+    return choice === apply;
 }
 
 /**
- * Split CSV line by delimiter respecting quotes
- * @deprecated Use parseCSV instead
+ * Run a formatter and apply its result. Nothing is written if the formatter
+ * cannot produce a safe result; auto-fixes are always reported to the user.
  */
-export function splitCSVLine(line: string, delimiter: string): string[] {
-    const rows = parseCSV(line, delimiter);
-    return rows.length > 0 ? rows[0] : [];
-}
+export async function runFormatter(editor: vscode.TextEditor, label: string, format: () => FormatResult) {
+    let result: FormatResult;
+    try {
+        result = format();
+    } catch (e: any) {
+        const message = e instanceof FormatError ? e.message : `Unexpected error: ${e?.message ?? e}. The file was not changed.`;
+        vscode.window.showErrorMessage(`${label}: ${message}`);
+        return;
+    }
 
+    if (result.needsConfirmation && !(await confirmFix(editor, label, result))) {
+        return;
+    }
+
+    if (result.text !== editor.document.getText()) {
+        await applyEdit(editor, result.text);
+    }
+
+    if (result.repaired && !result.needsConfirmation) {
+        const comments = result.commentsRemoved ? ' Comments were removed because JSON does not allow them.' : '';
+        vscode.window.showWarningMessage(
+            `${label}: the file had a syntax error (${result.issue}) and was auto-fixed.${comments} Press Ctrl+Z to undo.`
+        );
+    }
+}

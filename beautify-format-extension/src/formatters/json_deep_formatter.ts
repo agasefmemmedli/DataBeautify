@@ -4,12 +4,15 @@ export interface JSONFormatOptions {
     tabSize?: number;
     insertSpaces?: boolean;
     isJSONC?: boolean;
+    // Add trailing commas in expanded objects/arrays (defaults to isJSONC)
+    trailingCommas?: boolean;
 }
 
+// inlineComment: a comment at the end of the line where the value ends, e.g. `"a": 1, // note`
 type ASTNode =
-    | { type: 'Object', properties: Property[], comments?: string[], trailingComments?: string[] }
-    | { type: 'Array', items: ASTNode[], comments?: string[], trailingComments?: string[] }
-    | { type: 'Literal', value: string, tokenType: TokenType, comments?: string[] };
+    | { type: 'Object', properties: Property[], comments?: string[], trailingComments?: string[], inlineComment?: string }
+    | { type: 'Array', items: ASTNode[], comments?: string[], trailingComments?: string[], inlineComment?: string }
+    | { type: 'Literal', value: string, tokenType: TokenType, comments?: string[], inlineComment?: string };
 
 interface Property {
     key: string;
@@ -26,6 +29,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
     const tabSize = options?.tabSize || 2;
     const insertSpaces = options?.insertSpaces !== false;
     const isJSONC = options?.isJSONC || false;
+    const trailingCommas = options?.trailingCommas ?? isJSONC;
     const indentString = insertSpaces ? ' '.repeat(tabSize) : '\t';
 
     // Phase 1: Sanitize / Repair Stream
@@ -68,7 +72,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
                 const processed = inner.replace(/\\'/g, "'").replace(/"/g, '\\"');
                 processedToken.text = `"${processed}"`;
             }
-        } else if (token.type === TokenType.Unknown && /^[a-zA-Z_$][a-zA-Z0-9_$\-]*$/.test(token.text)) {
+        } else if (token.type === TokenType.Unknown && /^[\p{L}_$][\p{L}\p{N}_$\-]*$/u.test(token.text)) {
              // Unquoted key
              processedToken.type = TokenType.String;
              processedToken.text = `"${token.text}"`;
@@ -79,6 +83,28 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
 
     // Phase 2: Build AST (Simple Recursive Descent)
     let current = 0;
+
+    const endLine = (t: Token) => t.line + (t.text.match(/\n/g)?.length ?? 0);
+
+    // Attach comments that follow a value (after an optional comma) on the same line
+    // and end that line. A comment followed by more code on its line belongs to that code.
+    function attachInlineComment(node: ASTNode) {
+        if (current === 0) return;
+        const valueLine = endLine(tokens[current - 1]);
+        let k = current;
+        if (k < tokens.length && tokens[k].type === TokenType.Comma) k++;
+        const parts: string[] = [];
+        while (k < tokens.length && tokens[k].type === TokenType.Comment && tokens[k].line === valueLine) {
+            const next = tokens[k + 1];
+            if (next && next.type !== TokenType.Comment && next.line === endLine(tokens[k])) break;
+            parts.push(tokens[k].text);
+            k++;
+        }
+        if (parts.length > 0) {
+            node.inlineComment = parts.join(' ');
+            current = k;
+        }
+    }
 
     function parseValue(): ASTNode | null {
         if (current >= tokens.length) return null;
@@ -132,6 +158,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
                 // Value
                 const value = parseValue();
                 if (value) {
+                    attachInlineComment(value);
                     properties.push({ key, value, comments: keyComments }); // attach comments to property
                 } else {
                      break;
@@ -169,6 +196,7 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
 
                 const val = parseValue();
                 if (val) {
+                    attachInlineComment(val);
                     items.push(val);
                 } else {
                     if (tokens[current].type === TokenType.BracketClose) break;
@@ -189,15 +217,25 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
     }
 
     const roots: ASTNode[] = [];
+    const endComments: string[] = [];
     while (current < tokens.length) {
         // Skip trailing commas at root level
         if (tokens[current].type === TokenType.Comma) {
             current++;
             continue;
         }
+        // Comments at the end of the file have no value to attach to
+        if (tokens.slice(current).every(t => t.type === TokenType.Comment)) {
+            endComments.push(...tokens.slice(current).map(t => t.text));
+            break;
+        }
         const root = parseValue();
-        if (root) roots.push(root);
-        else current++;
+        if (root) {
+            attachInlineComment(root);
+            roots.push(root);
+        } else {
+            current++;
+        }
     }
 
     // Phase 3: Print
@@ -233,10 +271,10 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
 
         if (node.type === 'Literal') return false;
         if (node.type === 'Array') {
-            return node.items.some(isComplex);
+            return node.items.some(i => isComplex(i) || !!i.inlineComment);
         }
         if (node.type === 'Object') {
-             return node.properties.some(p => isComplex(p.value) || (p.comments && p.comments.length > 0));
+             return node.properties.some(p => isComplex(p.value) || !!p.value.inlineComment || (p.comments && p.comments.length > 0));
         }
         return false;
     }
@@ -272,13 +310,9 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
         if (node.type === 'Array') {
             if (node.items.length === 0 && (!node.trailingComments || node.trailingComments.length === 0)) return commentStr + space + '[]';
 
-            const itemLines = node.items.map(item => print(item, indent + 1));
-            let content = itemLines.join(',\n');
-
-            // Trailing Comma for JSONC
-            if (isJSONC && itemLines.length > 0) {
-                content += ',';
-            }
+            const itemLines = node.items.map((item, idx) =>
+                withSeparator(print(item, indent + 1), idx === node.items.length - 1, item.inlineComment));
+            let content = itemLines.join('\n');
 
             if (node.trailingComments && node.trailingComments.length > 0) {
                 const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
@@ -290,29 +324,9 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
         } else if (node.type === 'Object') {
             if (node.properties.length === 0 && (!node.trailingComments || node.trailingComments.length === 0)) return commentStr + space + '{}';
 
-            const propLines = node.properties.map(p => {
-                let pComment = '';
-                if (p.comments) {
-                    for (const c of p.comments) {
-                        pComment += indentString.repeat(indent + 1) + c + '\n';
-                    }
-                }
-
-                let valStr = print(p.value, indent + 1);
-                // If value has comments attached to it (not property), force newline
-                if (p.value.comments && p.value.comments.length > 0) {
-                     return pComment + indentString.repeat(indent + 1) + `${p.key}:\n${valStr}`;
-                } else {
-                     return pComment + indentString.repeat(indent + 1) + `${p.key}: ${valStr.trimStart()}`;
-                }
-            });
-
-            let content = propLines.join(',\n');
-
-            // Trailing Comma for JSONC
-            if (isJSONC && propLines.length > 0) {
-                content += ',';
-            }
+            const propLines = node.properties.map((p, idx) =>
+                withSeparator(printProperty(p, indent), idx === node.properties.length - 1, p.value.inlineComment));
+            let content = propLines.join('\n');
 
             if (node.trailingComments && node.trailingComments.length > 0) {
                 const trailingStr = node.trailingComments.map(c => indentString.repeat(indent + 1) + c).join('\n');
@@ -326,5 +340,30 @@ export function formatJSONDeep(text: string, options?: JSONFormatOptions): strin
         return '';
     }
 
-    return roots.map(r => print(r, 0)).join('\n');
+    // Comma (unless it is the last entry without trailing commas), then the inline comment
+    function withSeparator(line: string, isLast: boolean, inlineComment?: string): string {
+        let out = line;
+        if (!isLast || trailingCommas) out += ',';
+        if (inlineComment) out += ' ' + inlineComment;
+        return out;
+    }
+
+    function printProperty(p: Property, indent: number): string {
+        let pComment = '';
+        if (p.comments) {
+            for (const c of p.comments) {
+                pComment += indentString.repeat(indent + 1) + c + '\n';
+            }
+        }
+
+        const valStr = print(p.value, indent + 1);
+        // If value has comments attached to it (not property), force newline
+        if (p.value.comments && p.value.comments.length > 0) {
+            return pComment + indentString.repeat(indent + 1) + `${p.key}:\n${valStr}`;
+        }
+        return pComment + indentString.repeat(indent + 1) + `${p.key}: ${valStr.trimStart()}`;
+    }
+
+    const lines = roots.map(r => print(r, 0) + (r.inlineComment ? ' ' + r.inlineComment : ''));
+    return [...lines, ...endComments].join('\n');
 }

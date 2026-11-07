@@ -1,9 +1,0 @@
-id,name,description,notes
-1,Apple,A red fruit,"Tasty, sweet, and crunchy"
-2,Banana,A yellow fruit,"Curved
-and long"
-3,Cherry,"Small, red","Contains a pit ""stone"""
-4,Date,Dried fruit,
-5,,Empty name,
-6,"Quoted ""ID""",Special case,
-7,Pipe|Delimited,Uses pipe char,Check delimiter detection

@@ -11,11 +11,10 @@ async function build() {
             outfile: 'dist/extension.js',
             external: ['vscode'],
             sourcemap: true,
-            format: 'esm',
-            mainFields: ['module', 'main'], // Prefer ESM to avoid UMD issues
-            banner: {
-                js: "import { createRequire } from 'module';const require = createRequire(import.meta.url);",
-            },
+            // CommonJS works in every VS Code version allowed by "engines" (1.74+)
+            format: 'cjs',
+            // jsonc-parser's UMD build uses dynamic require(), so prefer ESM entry points
+            mainFields: ['module', 'main'],
         });
         console.log('Build complete');
     } catch (e) {
