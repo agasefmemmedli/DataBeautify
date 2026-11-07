@@ -2,7 +2,7 @@
   "name": "beautify-format",
   "displayName": "Beautify Format",
   "description": "Beautify and format JSON, JSONC and XML with a keyboard shortcut. Fixes common syntax errors safely and never writes a result that changes your data.",
-  "version": "0.31.9",
+  "version": "1.0.0",
   "publisher": "DataBeautify",
   "icon": "images/icon.png",
   "galleryBanner": {
