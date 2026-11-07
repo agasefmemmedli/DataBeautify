@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Fixed the version and installs badges on the Marketplace page (the old badge service was retired).
+
 ## 1.0.0
 
 Formatting is now safe: your data is never changed silently. SQL and PL/SQL are supported.

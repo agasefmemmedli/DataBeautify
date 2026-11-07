@@ -3,8 +3,8 @@
   # Beautify Format
   **Safe, fault-tolerant formatting for JSON, JSONC, XML, SQL and PL/SQL**
 
-  [![VS Code Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/DataBeautify.beautify-format?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
-  [![Installs](https://img.shields.io/visual-studio-marketplace/i/DataBeautify.beautify-format?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
+  [![VS Code Marketplace Version](https://vsmarketplacebadges.dev/version-short/DataBeautify.beautify-format.svg?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
+  [![Installs](https://vsmarketplacebadges.dev/installs-short/DataBeautify.beautify-format.svg?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
   [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 </div>
 
