@@ -11,7 +11,7 @@ function walk(dir, out) {
     for (const e of entries) {
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p, out);
-        else if (/\.(json|jsonc|code-snippets|xml|svg|manifest)$/i.test(e.name)) {
+        else if (/\.(json|jsonc|code-snippets|xml|svg|manifest|sql|pls|pks|pkb)$/i.test(e.name)) {
             try { if (fs.statSync(p).size < 300000) out.push(p); } catch { /* unreadable */ }
         }
     }
@@ -23,6 +23,8 @@ const files = (dirs.length ? dirs : [path.join(root, 'node_modules')]).flatMap(d
 const { formatJSON, formatJSONC, extractComments } = require(root + '/out/formatters/json_core.js');
 const { formatXML, sameXML } = require(root + '/out/formatters/xml_core.js');
 const { FormatError } = require(root + '/out/formatters/result.js');
+const { formatSQL, resolveDialect, sameTokens } = require(root + '/out/formatters/sql_core.js');
+const sqlDialect = t => resolveDialect('auto', 'sql', t);
 const { parse: jsoncParse } = require('jsonc-parser');
 const { XMLValidator } = require('fast-xml-parser');
 
@@ -38,6 +40,9 @@ const kinds = {
     json: { fmt: t => formatJSON(t, opts), valid: strictOk, same: (a, b) => JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b)) },
     jsonc: { fmt: t => formatJSONC(t, opts), valid: t => jsoncErrs(t) === 0, same: jsoncSame },
     jsonInJsonFile: { fmt: t => formatJSON(t, opts), valid: t => jsoncErrs(t) === 0, same: jsoncSame },
+    // SQL has no validator: refusals are allowed, but a result must keep every token
+    sql: { fmt: t => formatSQL(t, { ...opts, keywordCase: 'preserve', dialect: sqlDialect(t) }), valid: () => true, mayRefuse: true,
+        same: (a, b) => sameTokens(a, b, sqlDialect(a) === 'auto' ? 'sql' : sqlDialect(a), false) },
     xml: { fmt: t => formatXML(t, { ...opts, sortAttributes: false }), valid: xmlOk, same: sameXML },
 };
 
@@ -57,7 +62,7 @@ function check(kind, file, text, mutated) {
     } catch (e) {
         if (e instanceof FormatError) {
             s.refused++;
-            if (!mutated) problems.push(`[${kind}] valid file refused: ${file}: ${e.message}`);
+            if (!mutated && !k.mayRefuse) problems.push(`[${kind}] valid file refused: ${file}: ${e.message}`);
             return;
         }
         problems.push(`[${kind}] CRASH ${mutated ? '(broken) ' : ''}${file}: ${e.stack.split('\n').slice(0, 2).join(' ')}`);
@@ -79,7 +84,7 @@ function check(kind, file, text, mutated) {
 }
 
 function mutate(text, kind) {
-    const chars = kind === 'xml' ? '<>/"=\' ' : '{}[],:"\' ';
+    const chars = kind === 'sql' ? "();'\"/-*\n " : kind === 'xml' ? '<>/"=\' ' : '{}[],:"\' ';
     let t = text;
     for (let i = 0; i < 1 + rnd(3); i++) {
         const p = rnd(t.length);
@@ -96,7 +101,9 @@ for (const file of files) {
     if (!text.trim()) continue;
 
     let kind;
-    if (/\.(json|jsonc|code-snippets)$/i.test(file)) {
+    if (/\.(sql|pls|pks|pkb)$/i.test(file)) {
+        kind = 'sql';
+    } else if (/\.(json|jsonc|code-snippets)$/i.test(file)) {
         if (strictOk(text)) kind = 'json';
         else if (jsoncErrs(text) === 0) kind = 'jsonc';
         else continue; // not JSON at all (templates etc.)
@@ -109,7 +116,7 @@ for (const file of files) {
     if (kind === 'jsonc') check('jsonInJsonFile', file, text, false);
     if (rnd(4) === 0) {
         const broken = mutate(text, kind);
-        if (kind === 'xml' ? !xmlOk(broken) : jsoncErrs(broken) > 0) check(kind, file, broken, true);
+        if (kind === 'sql' || (kind === 'xml' ? !xmlOk(broken) : jsoncErrs(broken) > 0)) check(kind, file, broken, true);
     }
 }
 

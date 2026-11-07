@@ -1,7 +1,7 @@
 <div align="center">
 
   # Beautify Format
-  **Safe, fault-tolerant formatting for JSON, JSONC and XML**
+  **Safe, fault-tolerant formatting for JSON, JSONC, XML, SQL and PL/SQL**
 
   [![VS Code Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/DataBeautify.beautify-format?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
   [![Installs](https://img.shields.io/visual-studio-marketplace/i/DataBeautify.beautify-format?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
@@ -26,8 +26,18 @@ Most formatters give up on a file with a syntax error. Beautify Format fixes com
 | **JSON** | `json` (`.json`) | missing or extra commas, unquoted keys, single quotes, trailing commas. After confirmation: missing colons, unclosed or extra brackets, bare words such as `NaN`. Comments are kept; if a broken file can only be fixed by dropping them, the warning says so. |
 | **JSONC** | `jsonc` (`.jsonc`, `tsconfig.json`, VS Code settings) | missing commas. Comments are always kept, trailing commas are added. |
 | **XML** | `xml`, `xsl` (`.xml`, `.svg`, …) | unclosed and mismatched tags (after confirmation) |
+| **SQL** | `sql` and SQL extensions' modes (`pgsql`, `mysql`, `tsql`, …) | nothing: only layout changes. SQL that cannot be parsed is left untouched. |
+| **PL/SQL** | `plsql` (`.pls`, `.plsql`, `.pks`, `.pkb`, `.pck`, `.prc`, `.fnc`, `.trg`, `.tps`, `.tpb`), or PL/SQL code in a `.sql` file | nothing: only layout changes |
 
-For files in other language modes the format is detected from the content: `{` or `[` means JSON, `<` means XML.
+For files in other language modes the format is detected from the content: `{` or `[` means JSON, `<` means XML, a statement such as `SELECT` or `CREATE` means SQL.
+
+### SQL and PL/SQL
+
+- Every token (keywords, names, strings, numbers, comments) is kept in the same order; only spaces and line breaks change. Keyword case changes only if you ask for it.
+- Queries and DML (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, DDL) are laid out by [sql-formatter](https://github.com/sql-formatter-org/sql-formatter); 20 dialects are supported.
+- PL/SQL blocks are indented: `CREATE PROCEDURE / FUNCTION / PACKAGE [BODY] / TRIGGER / TYPE BODY`, `DECLARE`, `BEGIN`, `EXCEPTION`, `IF / ELSIF / ELSE`, `LOOP`, `WHILE`, `FOR`, `CASE`, labels. SQL inside blocks (including `CURSOR … IS SELECT`, `FOR r IN (SELECT …) LOOP`, `FORALL`) is formatted too, and long calls get one argument per line.
+- SQL*Plus commands (`/`, `SET …`, `SHOW ERRORS`, `PROMPT`, `SPOOL`, `WHENEVER`, `@script`, `EXIT`, …) stay on their own lines exactly as written. Inside a PL/SQL block, `EXIT;` and `EXECUTE IMMEDIATE` are treated as code, as SQL*Plus does.
+- Oracle `q'[…]'` strings, `:new`/`:old`, bind variables and `&substitution` variables are kept intact.
 
 ### Formatting rules
 
@@ -41,14 +51,16 @@ For files in other language modes the format is detected from the content: `{` o
 | Action | How |
 | :--- | :--- |
 | Format the current file | `Ctrl+Alt+B` (`Cmd+Alt+B` on macOS) |
-| Command Palette | `Beautify Format`, `Beautify JSON`, `Beautify JSONC`, `Beautify XML` |
-| Context menu | right-click in a JSON, JSONC or XML file → **Beautify Format** |
+| Command Palette | `Beautify Format`, `Beautify JSON`, `Beautify JSONC`, `Beautify XML`, `Beautify SQL` |
+| Context menu | right-click in a JSON, JSONC, XML, SQL or PL/SQL file → **Beautify Format** |
 
 ## Settings
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | `beautifyFormat.xml.sortAttributes` | `false` | Sort XML attributes (`id`, `class`, `name`, `src`, `href`, `type` first, then alphabetically). |
+| `beautifyFormat.sql.dialect` | `auto` | SQL dialect (`plsql`, `postgresql`, `mysql`, `transactsql`, `sqlite`, …). `auto` uses the language mode, recognizes PL/SQL, and otherwise tries standard SQL, PostgreSQL, MySQL, T-SQL and PL/SQL. |
+| `beautifyFormat.sql.keywordCase` | `preserve` | `preserve`, `upper` or `lower`. |
 
 ## Requirements
 
@@ -59,6 +71,7 @@ For files in other language modes the format is detected from the content: `{` o
 ```bash
 npm install
 npm test          # compiles and runs the unit tests
+npm run test:corpus -- <folder>   # formats every JSON/XML/SQL file in a folder and checks the safety rules
 npm run bundle    # builds dist/extension.js
 npx vsce package  # builds the .vsix
 ```

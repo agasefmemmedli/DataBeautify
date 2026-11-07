@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { detectFormat } from './detector';
 import * as Web from './formatters/web';
 import * as JsTs from './formatters/js_ts';
+import * as Sql from './formatters/sql';
 
-type SupportedFormat = 'json' | 'jsonc' | 'xml';
+type SupportedFormat = 'json' | 'jsonc' | 'xml' | 'sql';
 
 export function activate(context: vscode.ExtensionContext) {
     const register = (cmd: string, format?: SupportedFormat) => {
@@ -14,6 +15,7 @@ export function activate(context: vscode.ExtensionContext) {
     register('beautify-format.formatJSON', 'json');
     register('beautify-format.formatJSONC', 'jsonc');
     register('beautify-format.formatXML', 'xml');
+    register('beautify-format.formatSQL', 'sql');
 }
 
 export async function beautify(forcedFormat?: SupportedFormat) {
@@ -37,8 +39,10 @@ export async function beautify(forcedFormat?: SupportedFormat) {
         await JsTs.handleJSON(editor, text);
     } else if (format === 'jsonc') {
         await JsTs.handleJSONC(editor, text);
+    } else if (format === 'sql') {
+        await Sql.handleSQL(editor, text);
     } else {
-        vscode.window.showErrorMessage('Beautify Format supports JSON, JSONC and XML. Could not detect any of them in this file.');
+        vscode.window.showErrorMessage('Beautify Format supports JSON, JSONC, XML, SQL and PL/SQL. Could not detect any of them in this file.');
     }
 }
 

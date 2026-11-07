@@ -6,17 +6,21 @@ import { XMLValidator } from 'fast-xml-parser';
 import { extractComments, formatJSON, formatJSONC } from '../../formatters/json_core';
 import { formatXML, sameXML } from '../../formatters/xml_core';
 import { FormatError, FormatResult } from '../../formatters/result';
+import { formatSQL, resolveDialect, sameTokens } from '../../formatters/sql_core';
 
 // Runs every file in test/fixtures through the formatter and checks the safety rules:
 // valid files keep their data, results are valid, and formatting twice changes nothing.
 const fixturesDir = path.resolve(__dirname, '../../../test/fixtures');
 const opts = { tabSize: 2, insertSpaces: true };
+const SQL_EXT = /\.(sql|pls|pks|pkb)$/i;
+const sqlDialect = (file: string, text: string) => resolveDialect('auto', /\.(pls|pks|pkb)$/i.test(file) ? 'plsql' : 'sql', text);
 
 function run(file: string, text: string): FormatResult | FormatError {
     const ext = path.extname(file);
     try {
         if (ext === '.json') return formatJSON(text, opts);
         if (ext === '.jsonc') return formatJSONC(text, opts);
+        if (SQL_EXT.test(file)) return formatSQL(text, { ...opts, dialect: sqlDialect(file, text), keywordCase: 'preserve' });
         return formatXML(text, { ...opts, sortAttributes: false });
     } catch (e) {
         assert.ok(e instanceof FormatError, `${file}: unexpected error ${e}`);
@@ -26,6 +30,7 @@ function run(file: string, text: string): FormatResult | FormatError {
 
 function isValid(file: string, text: string): boolean {
     const ext = path.extname(file);
+    if (SQL_EXT.test(file)) return true; // SQL fixtures are valid by construction
     if (ext === '.json') {
         try { JSON.parse(text); return true; } catch { return false; }
     }
@@ -38,6 +43,10 @@ function isValid(file: string, text: string): boolean {
 }
 
 function sameData(file: string, a: string, b: string): boolean {
+    if (SQL_EXT.test(file)) {
+        const d = sqlDialect(file, a);
+        return sameTokens(a, b, d === 'auto' ? 'sql' : d, false);
+    }
     if (path.extname(file) === '.json') return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
     if (path.extname(file) === '.jsonc') {
         const value = (t: string) => JSON.stringify(jsoncParse(t, [], { allowTrailingComma: true }));

@@ -1,7 +1,7 @@
 {
   "name": "beautify-format",
   "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC and XML with a keyboard shortcut. Fixes common syntax errors safely and never writes a result that changes your data.",
+  "description": "Beautify and format JSON, JSONC, XML, SQL and PL/SQL with a keyboard shortcut. Fixes common syntax errors safely and never writes a result that changes your data or code.",
   "version": "1.0.0",
   "publisher": "DataBeautify",
   "icon": "images/icon.png",
@@ -29,9 +29,10 @@
     "json",
     "jsonc",
     "xml",
-    "prettify",
-    "indent",
-    "repair"
+    "sql",
+    "plsql",
+    "oracle",
+    "prettify"
   ],
   "engines": {
     "vscode": "^1.74.0"
@@ -57,6 +58,10 @@
       {
         "command": "beautify-format.formatJSONC",
         "title": "Beautify JSONC"
+      },
+      {
+        "command": "beautify-format.formatSQL",
+        "title": "Beautify SQL"
       }
     ],
     "keybindings": [
@@ -71,7 +76,7 @@
       "editor/context": [
         {
           "command": "beautify-format.beautify",
-          "when": "editorLangId == json || editorLangId == jsonc || editorLangId == xml",
+          "when": "editorLangId =~ /^(json|jsonc|xml|xsl|sql|plsql|oraclesql|pgsql|mysql|tsql|mssql|sqlite)$/",
           "group": "1_modification"
         }
       ]
@@ -83,9 +88,68 @@
           "type": "boolean",
           "default": false,
           "description": "Sort XML attributes (id, class, name, src, href, type first, then alphabetically). Off by default to keep diffs small."
+        },
+        "beautifyFormat.sql.dialect": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "sql",
+            "plsql",
+            "postgresql",
+            "mysql",
+            "mariadb",
+            "transactsql",
+            "sqlite",
+            "bigquery",
+            "snowflake",
+            "redshift",
+            "db2",
+            "db2i",
+            "hive",
+            "spark",
+            "trino",
+            "n1ql",
+            "singlestoredb",
+            "tidb",
+            "duckdb",
+            "clickhouse"
+          ],
+          "default": "auto",
+          "description": "SQL dialect. \"auto\" uses the language mode (e.g. plsql) or recognizes PL/SQL code, otherwise tries standard SQL, PostgreSQL, MySQL, T-SQL and PL/SQL."
+        },
+        "beautifyFormat.sql.keywordCase": {
+          "type": "string",
+          "enum": [
+            "preserve",
+            "upper",
+            "lower"
+          ],
+          "default": "preserve",
+          "description": "Case of SQL keywords."
         }
       }
-    }
+    },
+    "languages": [
+      {
+        "id": "plsql",
+        "aliases": [
+          "PL/SQL",
+          "plsql"
+        ],
+        "extensions": [
+          ".pls",
+          ".plsql",
+          ".pks",
+          ".pkb",
+          ".pck",
+          ".prc",
+          ".fnc",
+          ".trg",
+          ".tps",
+          ".tpb"
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle",
@@ -113,6 +177,7 @@
     "fast-xml-parser": "^5.3.6",
     "jsonc-parser": "^3.3.1",
     "jsonrepair": "^3.13.2",
+    "sql-formatter": "^15.9.0",
     "xml-formatter": "^3.6.0"
   }
 }
