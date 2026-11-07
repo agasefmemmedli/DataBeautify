@@ -5,10 +5,12 @@
 
   [![VS Code Marketplace Version](https://vsmarketplacebadges.dev/version-short/DataBeautify.beautify-format.svg?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
   [![Installs](https://vsmarketplacebadges.dev/installs-short/DataBeautify.beautify-format.svg?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=DataBeautify.beautify-format)
-  [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+  [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](https://github.com/agasefmemmedli/DataBeautify/blob/main/beautify-format-extension/LICENSE)
 </div>
 
 ---
+
+![PL/SQL before and after formatting](https://raw.githubusercontent.com/agasefmemmedli/DataBeautify/main/beautify-format-extension/images/demo-plsql.png)
 
 ## Why Beautify Format?
 
@@ -50,9 +52,30 @@ For files in other language modes the format is detected from the content: `{` o
 
 | Action | How |
 | :--- | :--- |
-| Format the current file | `Ctrl+Alt+B` (`Cmd+Alt+B` on macOS) |
+| Format the current file | `Ctrl+Alt+B` (`Cmd+Alt+B` on macOS), or **Format Document** (`Shift+Alt+F`) |
+| Format a selection | **Format Selection** (`Ctrl+K Ctrl+F`): the selected lines keep their indentation |
+| Format on save | see below |
 | Command Palette | `Beautify Format`, `Beautify JSON`, `Beautify JSONC`, `Beautify XML`, `Beautify SQL` |
 | Context menu | right-click in a JSON, JSONC, XML, SQL or PL/SQL file → **Beautify Format** |
+
+### Use it as the default formatter and format on save
+
+Beautify Format is a regular VS Code formatter. To use it for SQL and PL/SQL (or any other supported language) every time you save, add to your `settings.json`:
+
+```json
+"[sql]": {
+  "editor.defaultFormatter": "DataBeautify.beautify-format",
+  "editor.formatOnSave": true
+},
+"[plsql]": {
+  "editor.defaultFormatter": "DataBeautify.beautify-format",
+  "editor.formatOnSave": true
+}
+```
+
+Or run **Format Document With… → Configure Default Formatter…** in a file. On save, only safe changes are applied: a fix that needs your review is never applied silently, you get a message with a **Review Fix** button instead.
+
+Works in desktop VS Code, in the browser (vscode.dev, github.dev), in Restricted Mode, and in VS Code based editors.
 
 ## Settings
 
@@ -74,6 +97,8 @@ npm test          # compiles and runs the unit tests
 npm run test:corpus -- <folder>   # formats every JSON/XML/SQL file in a folder and checks the safety rules
 npm run bundle    # builds dist/extension.js
 npx vsce package  # builds the .vsix
+npx vsce publish  # publishes to the VS Code Marketplace (token in VSCE_PAT)
+npm run publish:ovsx -- -p <token>  # publishes to Open VSX (VSCodium, Cursor, Windsurf, Gitpod)
 ```
 
 ## License

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- Beautify Format is now a regular VS Code formatter: **Format Document** (Shift+Alt+F), **Format Selection** and **Format on Save** work for JSON, JSONC, XML, SQL and PL/SQL. A fix that needs review is never applied on save.
+- Works in the browser (vscode.dev, github.dev) and in Restricted Mode.
+- PL/SQL: spaces around `:=`, comparison operators, `=>` and `||`, and after commas.
+- New before/after picture on the Marketplace page.
+- After many successful formats, the extension asks once whether you want to rate it.
+
 ## 1.0.1
 
 - Fixed the version and installs badges on the Marketplace page (the old badge service was retired).

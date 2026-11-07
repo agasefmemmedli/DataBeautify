@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
-import { detectFormat } from './detector';
-import * as Web from './formatters/web';
-import * as JsTs from './formatters/js_ts';
-import * as Sql from './formatters/sql';
+import { detectFormat, FORMAT_LABELS, formatText } from './engine';
+import { registerFormatter } from './provider';
+import { recordSuccess } from './rating';
+import { getIndentOptions, getSettings, runFormatter } from './utils';
 
 type SupportedFormat = 'json' | 'jsonc' | 'xml' | 'sql';
 
 export function activate(context: vscode.ExtensionContext) {
     const register = (cmd: string, format?: SupportedFormat) => {
-        context.subscriptions.push(vscode.commands.registerCommand(cmd, () => beautify(format)));
+        context.subscriptions.push(vscode.commands.registerCommand(cmd, () => beautify(context, format)));
     };
 
     register('beautify-format.beautify');
@@ -16,9 +16,11 @@ export function activate(context: vscode.ExtensionContext) {
     register('beautify-format.formatJSONC', 'jsonc');
     register('beautify-format.formatXML', 'xml');
     register('beautify-format.formatSQL', 'sql');
+
+    registerFormatter(context);
 }
 
-export async function beautify(forcedFormat?: SupportedFormat) {
+export async function beautify(context: vscode.ExtensionContext, forcedFormat?: SupportedFormat) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showErrorMessage('No active editor found');
@@ -32,18 +34,14 @@ export async function beautify(forcedFormat?: SupportedFormat) {
     }
 
     const format = forcedFormat || detectFormat(text, editor.document.languageId);
-
-    if (format === 'xml') {
-        await Web.handleXML(editor, text);
-    } else if (format === 'json') {
-        await JsTs.handleJSON(editor, text);
-    } else if (format === 'jsonc') {
-        await JsTs.handleJSONC(editor, text);
-    } else if (format === 'sql') {
-        await Sql.handleSQL(editor, text);
-    } else {
+    if (format === 'unknown') {
         vscode.window.showErrorMessage('Beautify Format supports JSON, JSONC, XML, SQL and PL/SQL. Could not detect any of them in this file.');
+        return;
     }
+
+    const formatted = await runFormatter(editor, FORMAT_LABELS[format], () =>
+        formatText(format, text, getIndentOptions(editor), editor.document.languageId, getSettings(editor.document)));
+    if (formatted) recordSuccess(context);
 }
 
 export { detectFormat };

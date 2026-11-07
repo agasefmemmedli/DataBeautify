@@ -1,8 +1,8 @@
 {
   "name": "beautify-format",
-  "displayName": "Beautify Format",
-  "description": "Beautify and format JSON, JSONC, XML, SQL and PL/SQL with a keyboard shortcut. Fixes common syntax errors safely and never writes a result that changes your data or code.",
-  "version": "1.0.1",
+  "displayName": "Beautify Format – PL/SQL, SQL, JSON & XML Formatter",
+  "description": "Safe formatter for PL/SQL, SQL (20 dialects), JSON, JSONC and XML. Works with Format Document and Format on Save, repairs broken JSON and never changes your data or code.",
+  "version": "1.1.0",
   "publisher": "DataBeautify",
   "icon": "images/icon.png",
   "galleryBanner": {
@@ -23,24 +23,46 @@
     "url": "https://github.com/agasefmemmedli/DataBeautify/issues"
   },
   "keywords": [
-    "beautify",
-    "format",
-    "formatter",
-    "json",
-    "jsonc",
-    "xml",
-    "sql",
-    "plsql",
+    "plsql formatter",
+    "sql formatter",
     "oracle",
-    "prettify"
+    "plsql",
+    "sql",
+    "json formatter",
+    "json repair",
+    "fix json",
+    "xml formatter",
+    "format on save"
   ],
   "engines": {
     "vscode": "^1.74.0"
   },
   "categories": [
-    "Formatters"
+    "Formatters",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:json",
+    "onLanguage:jsonc",
+    "onLanguage:xml",
+    "onLanguage:xsl",
+    "onLanguage:sql",
+    "onLanguage:plsql",
+    "onLanguage:oraclesql",
+    "onLanguage:pgsql",
+    "onLanguage:mysql",
+    "onLanguage:tsql",
+    "onLanguage:mssql",
+    "onLanguage:sqlite"
   ],
   "main": "./dist/extension.js",
+  "browser": "./dist/web/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
   "contributes": {
     "commands": [
       {
@@ -159,7 +181,8 @@
     "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
     "test": "mocha \"out/test/unit/**/*.test.js\"",
-    "test:corpus": "npm run compile && node scripts/corpus-check.cjs"
+    "test:corpus": "npm run compile && node scripts/corpus-check.cjs",
+    "publish:ovsx": "npx --yes ovsx publish"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

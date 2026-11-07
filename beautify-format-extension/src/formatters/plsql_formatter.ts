@@ -20,6 +20,8 @@ REPLACE RETURN RETURNING REVERSE ROLLBACK ROW SAVEPOINT SELECT SET THEN TRIGGER 
 WHEN WHERE WHILE`.split(/\s+/).filter(Boolean));
 
 const DML = new Set(['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE', 'MERGE']);
+// Operators written with spaces around them: x := 1, a >= b, name => value
+const SPACED_OPS = new Set([':=', '=', '<>', '!=', '^=', '~=', '>=', '<=', '<', '>', '=>', '||']);
 // After IS/AS these words mean "not a block" (e.g. CREATE TYPE t AS OBJECT (...))
 const NOT_A_BODY = new Set(['LANGUAGE', 'EXTERNAL', 'OBJECT', 'TABLE', 'VARRAY', 'RECORD', 'REF', 'VARYING']);
 const TRIGGER_CLAUSES = new Set(['BEFORE', 'AFTER', 'INSTEAD', 'FOR', 'REFERENCING', 'WHEN', 'FOLLOWS', 'PRECEDES', 'COMPOUND']);
@@ -114,9 +116,19 @@ class PlsqlPrinter {
     }
 
     /**
-     * Print tokens [from, to] as lines. Tokens stay on one line, keeping "space or no space"
-     * from the source; a line comment forces a line break. Long lines with parentheses
-     * get one argument per line.
+     * Space between two tokens on a line: around assignment and comparison operators,
+     * after commas, none before "," and ";". Elsewhere the source decides (a(i), x*2, -1).
+     */
+    private sep(prev: SqlToken, cur: SqlToken): string {
+        if (cur.text === ',' || cur.text === ';') return '';
+        if (prev.text === ',') return ' ';
+        if ((cur.type === 'op' && SPACED_OPS.has(cur.text)) || (prev.type === 'op' && SPACED_OPS.has(prev.text))) return ' ';
+        return cur.spaceBefore ? ' ' : '';
+    }
+
+    /**
+     * Print tokens [from, to] as lines. Tokens stay on one line; a line comment forces a
+     * line break. Long lines with parentheses get one argument per line.
      */
     private emitTokens(from: number, to: number, indent: number, breakBefore?: (i: number) => boolean) {
         const out: [number, string][] = [[indent, '']];
@@ -129,7 +141,7 @@ class PlsqlPrinter {
                 out.push([indent + 1, this.word(t)]);
                 continue;
             }
-            line[1] += (i > from && t.spaceBefore ? ' ' : '') + this.word(t);
+            line[1] += (i > from ? this.sep(prev, t) : '') + this.word(t);
         }
         for (const [ind, text] of out) {
             if (ind === indent && text.length + ind * this.indentUnit.length > this.width && !breakBefore) {
@@ -164,7 +176,7 @@ class PlsqlPrinter {
         }
         const join = (a: number, b: number) => {
             let s = '';
-            for (let i = a; i <= b; i++) s += (i > a && this.toks[i].spaceBefore ? ' ' : '') + this.word(this.toks[i]);
+            for (let i = a; i <= b; i++) s += (i > a ? this.sep(this.toks[i - 1], this.toks[i]) : '') + this.word(this.toks[i]);
             return s;
         };
         this.emit(indent, join(from, open));
